@@ -1,0 +1,32 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    match /novels/{novelId} {
+      allow read, write: if isAuthenticated();
+    }
+    match /users/{userId} {
+      allow read, write: if isAuthenticated() && request.auth.uid == userId;
+    }
+    match /customTerms/{termId} {
+      allow read, write: if isAuthenticated();
+    }
+    match /characters/{characterId} {
+      allow read, write: if isAuthenticated();
+    }
+    match /relationships/{relationshipId} {
+      allow read, write: if isAuthenticated();
+    }
+    match /chapters/{chapterId} {
+      allow read, write: if isAuthenticated();
+    }
+    match /shortcuts/{shortcutId} {
+      allow read, write: if isAuthenticated();
+    }
+  }
+}
+
+

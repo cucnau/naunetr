@@ -1,0 +1,90 @@
+{
+  "project_name": "Translation App",
+  "collections": [
+    {
+      "name": "users",
+      "purpose": "Stores user profiles",
+      "access_pattern": "Users can only read and write their own documents.",
+      "document_schema": {
+        "email": "string"
+      }
+    },
+    {
+      "name": "customTerms",
+      "purpose": "Stores custom vocabulary terms for translation mapping",
+      "access_pattern": "Users can read and write only their own terms.",
+      "document_schema": {
+        "userId": "string",
+        "term": "string",
+        "meaning": "string",
+        "createdAt": "timestamp"
+      }
+    },
+    {
+      "name": "characters",
+      "purpose": "Stores character information for novels",
+      "access_pattern": "Users can read and write only their own characters.",
+      "document_schema": {
+        "userId": "string",
+        "chineseName": "string",
+        "vietName": "string",
+        "pronouns": "string",
+        "description": "string",
+        "createdAt": "timestamp"
+      }
+    },
+    {
+      "name": "relationships",
+      "purpose": "Stores relationships between characters",
+      "access_pattern": "Users can read and write only their own relationships.",
+      "document_schema": {
+        "userId": "string",
+        "charA": "string",
+        "charB": "string",
+        "callAtoB": "string",
+        "callBtoA": "string",
+        "note": "string",
+        "createdAt": "timestamp"
+      }
+    },
+    {
+      "name": "novels",
+      "purpose": "Stores novels created by users",
+      "access_pattern": "Users can read and write only their own novels.",
+      "document_schema": {
+        "userId": "string",
+        "name": "string",
+        "createdAt": "timestamp"
+      }
+    },
+    {
+      "name": "chapters",
+      "purpose": "Stores chapter archives and translated content for novels",
+      "access_pattern": "Users can read and write only their own chapters.",
+      "document_schema": {
+        "userId": "string",
+        "novelId": "string",
+        "name": "string",
+        "timestamp": "number",
+        "inputText": "string",
+        "deeplText": "string",
+        "preEditedText": "string",
+        "createdAt": "timestamp"
+      }
+    },
+    {
+      "name": "shortcuts",
+      "purpose": "Stores text shortcuts for typing expansions per novel",
+      "access_pattern": "Users can read and write only their own shortcuts.",
+      "document_schema": {
+        "userId": "string",
+        "novelId": "string",
+        "shortcut": "string",
+        "expansion": "string",
+        "enabled": "boolean",
+        "createdAt": "timestamp"
+      }
+    }
+  ],
+  "auth_required": true
+}

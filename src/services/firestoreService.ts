@@ -1,0 +1,441 @@
+import { db, auth } from './firebase';
+import { collection, doc, setDoc, getDocs, deleteDoc, writeBatch, query, where, Timestamp } from 'firebase/firestore';
+import { CustomTerm, Character, Relationship, Novel, Chapter, TextShortcut } from '../types';
+
+export enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+export interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
+  }
+}
+
+export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null): never {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData?.map(provider => ({
+        providerId: provider.providerId,
+        email: provider.email,
+      })) || []
+    },
+    operationType,
+    path
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
+
+const sanitizeData = (obj: any): any => {
+  if (obj === null || obj === undefined) return null;
+  if (typeof obj !== 'object') return obj;
+  if (obj instanceof Timestamp) return obj;
+  if (Array.isArray(obj)) {
+    return obj.map(sanitizeData).filter(v => v !== undefined);
+  }
+  const result: Record<string, any> = {};
+  for (const key of Object.keys(obj)) {
+    const val = obj[key];
+    if (val !== undefined && val !== null) {
+      const sanitizedVal = sanitizeData(val);
+      if (sanitizedVal !== undefined && sanitizedVal !== null) {
+        result[key] = sanitizedVal;
+      }
+    }
+  }
+  return result;
+};
+
+const dbCache = new Map<string, Map<string, any>>(); // Global cache to prevent repeated getDocs on POST
+
+export const getNovels = async (): Promise<Novel[]> => {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Bạn cần đăng nhập!');
+  const path = 'novels';
+  try {
+    const q = query(collection(db, path), where('userId', '==', user.uid));
+    const snap = await getDocs(q);
+    const novels: Novel[] = [];
+    snap.forEach(d => {
+      novels.push({ id: d.id, name: d.data().name });
+    });
+    return novels;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
+  }
+};
+
+export const createNovel = async (id: string, name: string): Promise<Novel> => {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Bạn cần đăng nhập!');
+  const path = `novels/${id}`;
+  try {
+    const novelRef = doc(collection(db, 'novels'), id);
+    await setDoc(novelRef, { userId: user.uid, name, createdAt: Timestamp.now() });
+    return { id, name };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+  }
+};
+
+export const deleteNovel = async (id: string): Promise<void> => {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Bạn cần đăng nhập!');
+  const path = `novels/${id}`;
+  try {
+    await deleteDoc(doc(db, 'novels', id));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+};
+
+export const deleteFirestoreDoc = async (type: 'vocab' | 'char' | 'rel' | 'chapter' | 'shortcut', id: string): Promise<void> => {
+  const user = auth.currentUser;
+  if (!user || !id) return;
+  const collectionName = type === 'vocab' ? 'customTerms' : type === 'char' ? 'characters' : type === 'rel' ? 'relationships' : type === 'shortcut' ? 'shortcuts' : 'chapters';
+  try {
+    await deleteDoc(doc(db, collectionName, id));
+  } catch (error) {
+    console.warn(`Lỗi xóa ${collectionName}/${id}:`, error);
+  }
+};
+
+export const overwriteFirestoreData = async <T extends { id: string, novelId?: string }>(
+  type: 'vocab' | 'char' | 'rel' | 'chapter' | 'shortcut',
+  novelId: string,
+  newItems: T[]
+): Promise<void> => {
+  const user = auth.currentUser;
+  if (!user || !novelId) return;
+
+  const collectionName = type === 'vocab' ? 'customTerms' : type === 'char' ? 'characters' : type === 'rel' ? 'relationships' : type === 'shortcut' ? 'shortcuts' : 'chapters';
+  const collRef = collection(db, collectionName);
+
+  // 1. Fetch all existing documents belonging to this user and novelId
+  const q = query(collRef, where('userId', '==', user.uid), where('novelId', '==', novelId));
+  const snapshot = await getDocs(q);
+
+  const operations: { type: 'set' | 'delete', ref: any, data?: any }[] = [];
+
+  // Delete all existing items
+  snapshot.forEach(docSnap => {
+    operations.push({ type: 'delete', ref: docSnap.ref });
+  });
+
+  // Prepare new items to insert
+  newItems.forEach(item => {
+    const rawData = {
+      ...item,
+      novelId,
+      userId: user.uid,
+      createdAt: Timestamp.now()
+    };
+    const dataToSave = sanitizeData(rawData);
+    Object.keys(dataToSave).forEach(k => {
+      if (dataToSave[k] === undefined) delete dataToSave[k];
+    });
+    operations.push({
+      type: 'set',
+      ref: doc(collRef, item.id),
+      data: dataToSave
+    });
+  });
+
+  // Execute in small batches to stay well within Firestore 10MB payload & 500 write limit
+  const CHUNK_SIZE = 80;
+  for (let i = 0; i < operations.length; i += CHUNK_SIZE) {
+    const chunk = operations.slice(i, i + CHUNK_SIZE);
+    const batch = writeBatch(db);
+    chunk.forEach(op => {
+      if (op.type === 'delete') {
+        batch.delete(op.ref);
+      } else {
+        batch.set(op.ref, op.data, { merge: true });
+      }
+    });
+    await batch.commit();
+  }
+
+  // Clear cache
+  dbCache.delete(`${collectionName}_${novelId}`);
+};
+
+export const syncFirestoreData = async <T extends { id: string, novelId?: string }>(
+  type: 'vocab' | 'char' | 'rel' | 'chapter' | 'shortcut',
+  novelId: string,
+  action: 'GET' | 'POST',
+  payload?: T[]
+): Promise<T[]> => {
+  const user = auth.currentUser;
+  if (!user) {
+    throw new Error('Bạn cần đăng nhập để đồng bộ dữ liệu!');
+  }
+  if (!novelId) {
+    throw new Error('Chưa chọn truyện!');
+  }
+
+  const collectionName = type === 'vocab' ? 'customTerms' : type === 'char' ? 'characters' : type === 'rel' ? 'relationships' : type === 'shortcut' ? 'shortcuts' : 'chapters';
+  const collRef = collection(db, collectionName);
+
+  if (action === 'GET') {
+    const q = query(collRef, where('userId', '==', user.uid));
+    const querySnapshot = await getDocs(q);
+    const result: any[] = [];
+    const localMap = new Map<string, any>();
+    querySnapshot.forEach((doc) => {
+      const data = doc.data();
+      // Match if belongs to this novelId OR is a global/legacy item without novelId
+      if (!data.novelId || data.novelId === novelId) {
+        localMap.set(doc.id, data);
+        const { userId, createdAt, ...rest } = data;
+        result.push({ id: doc.id, ...rest, novelId: data.novelId || novelId });
+      }
+    });
+
+    dbCache.set(`${collectionName}_${novelId}`, localMap);
+    return result as T[];
+  } else if (action === 'POST' && payload) {
+    const cacheKey = `${collectionName}_${novelId}`;
+    let dbDocsMap = dbCache.get(cacheKey);
+    if (!dbDocsMap) {
+      const q = query(collRef, where('userId', '==', user.uid), where('novelId', '==', novelId));
+      const querySnapshot = await getDocs(q);
+      dbDocsMap = new Map<string, any>();
+      querySnapshot.forEach(doc => {
+        dbDocsMap!.set(doc.id, doc.data());
+      });
+      dbCache.set(cacheKey, dbDocsMap);
+    }
+    
+    const payloadIds = new Set(payload.map(item => item.id));
+
+    // Group all operations to chunk them into batches of max 500
+    const operations: { type: 'set' | 'delete', ref: any, data?: any }[] = [];
+
+    // Generic field comparison to check if write can be skipped
+    const areFieldsEqual = (localItem: any, dbItem: any) => {
+      const allKeys = new Set([
+        ...Object.keys(localItem),
+        ...Object.keys(dbItem)
+      ]);
+      for (const key of allKeys) {
+        if (key === 'createdAt' || key === 'userId') continue;
+        const localVal = localItem[key];
+        const dbVal = dbItem[key];
+        if (localVal !== dbVal) {
+          // If both values are falsy, treat them as equal (e.g. empty string vs undefined)
+          if (!localVal && !dbVal) continue;
+          return false;
+        }
+      }
+      return true;
+    };
+
+    // Filter payload to strictly only items of this novelId
+    const targetPayload = payload.filter(item => !item.novelId || item.novelId === novelId);
+
+    // Add/Update items only if they are new or modified
+    targetPayload.forEach(item => {
+      const dbItem = dbDocsMap!.get(item.id);
+      
+      if (!dbItem || !areFieldsEqual(item, dbItem)) {
+        const rawData = {
+            ...item,
+            novelId,
+            userId: user.uid,
+            createdAt: dbItem?.createdAt || Timestamp.now()
+        };
+        const dataToSave = sanitizeData(rawData);
+        
+        // Final defensive check: strictly delete any undefined properties from the sanitized object
+        Object.keys(dataToSave).forEach(k => {
+          if (dataToSave[k] === undefined) {
+            delete dataToSave[k];
+          }
+        });
+
+        operations.push({
+          type: 'set',
+          ref: doc(collRef, item.id),
+          data: dataToSave
+        });
+        dbDocsMap!.set(item.id, dataToSave);
+      }
+    });
+
+    if (operations.length === 0) {
+      console.log(`Sync skipped for ${collectionName}: No changes detected.`);
+      return payload;
+    }
+
+    console.log(`Syncing ${collectionName}: Performing ${operations.length} writes (${operations.filter(op => op.type === 'set').length} updates/creates, ${operations.filter(op => op.type === 'delete').length} deletions)`);
+
+    // Commit operations in safe chunks of 80 to adhere strictly to Firestore 10MB payload and 500 write limits
+    const CHUNK_SIZE = 80;
+    for (let i = 0; i < operations.length; i += CHUNK_SIZE) {
+      const chunk = operations.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      chunk.forEach(op => {
+        if (op.type === 'delete') {
+          batch.delete(op.ref);
+        } else {
+          batch.set(op.ref, op.data, { merge: true });
+        }
+      });
+      await batch.commit();
+    }
+
+    return payload;
+  }
+  return [];
+};
+
+export const getChaptersFromCloud = async (novelId: string, retryCount = 1): Promise<Chapter[]> => {
+  const user = auth.currentUser;
+  if (!user || !novelId) return [];
+  const path = 'chapters';
+  try {
+    const q = query(collection(db, path), where('userId', '==', user.uid), where('novelId', '==', novelId));
+    const snap = await getDocs(q);
+    const chapters: Chapter[] = [];
+    snap.forEach(d => {
+      const data = d.data();
+      const { userId, ...rest } = data;
+      chapters.push({ id: d.id, ...rest } as Chapter);
+    });
+    chapters.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+    return chapters;
+  } catch (error) {
+    if (retryCount > 0) {
+      await new Promise(res => setTimeout(res, 1200));
+      return getChaptersFromCloud(novelId, retryCount - 1);
+    }
+    console.warn("Không thể tải chương từ đám mây (đang dùng cache cục bộ):", error);
+    return [];
+  }
+};
+
+export const saveChapterToCloud = async (chapter: Chapter): Promise<void> => {
+  const user = auth.currentUser;
+  if (!user) return; // Silent return if not logged in
+  if (!chapter.novelId) return;
+  const path = `chapters/${chapter.id}`;
+  try {
+    const rawData = {
+      ...chapter,
+      userId: user.uid,
+      createdAt: Timestamp.now()
+    };
+    const dataToSave = sanitizeData(rawData);
+    Object.keys(dataToSave).forEach(k => {
+      if (dataToSave[k] === undefined) delete dataToSave[k];
+    });
+    await setDoc(doc(db, 'chapters', chapter.id), dataToSave, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+};
+
+export const bulkSaveChaptersToCloud = async (chapters: Chapter[]): Promise<void> => {
+  const user = auth.currentUser;
+  if (!user || chapters.length === 0) return;
+  
+  // Batch writes in small chunks of 10 chapters because chapter texts are large
+  const chunkSize = 10;
+  for (let i = 0; i < chapters.length; i += chunkSize) {
+    const chunk = chapters.slice(i, i + chunkSize);
+    const batch = writeBatch(db);
+    chunk.forEach(ch => {
+      if (!ch.id) return;
+      const rawData = {
+        ...ch,
+        userId: user.uid,
+        createdAt: Timestamp.now()
+      };
+      const dataToSave = sanitizeData(rawData);
+      Object.keys(dataToSave).forEach(k => {
+        if (dataToSave[k] === undefined) delete dataToSave[k];
+      });
+      batch.set(doc(db, 'chapters', ch.id), dataToSave, { merge: true });
+    });
+    await batch.commit();
+  }
+};
+
+export const deleteChapterFromCloud = async (chapterId: string): Promise<void> => {
+  const user = auth.currentUser;
+  if (!user) return;
+  const path = `chapters/${chapterId}`;
+  try {
+    await deleteDoc(doc(db, 'chapters', chapterId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+};
+
+export const clearNovelChaptersFromCloud = async (novelId: string): Promise<void> => {
+  const user = auth.currentUser;
+  if (!user || !novelId) return;
+  const path = 'chapters';
+  try {
+    const q = query(collection(db, 'chapters'), where('userId', '==', user.uid), where('novelId', '==', novelId));
+    const snap = await getDocs(q);
+    const batch = writeBatch(db);
+    snap.forEach(d => {
+      batch.delete(d.ref);
+    });
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+};
+
+export const getShortcutsFromCloud = async (novelId: string): Promise<TextShortcut[]> => {
+  const user = auth.currentUser;
+  if (!user || !novelId) return [];
+  const path = 'shortcuts';
+  try {
+    const q = query(collection(db, path), where('userId', '==', user.uid), where('novelId', '==', novelId));
+    const snap = await getDocs(q);
+    const shortcuts: TextShortcut[] = [];
+    snap.forEach(d => {
+      const data = d.data();
+      const { userId, createdAt, ...rest } = data;
+      shortcuts.push({ id: d.id, ...rest, novelId: data.novelId || novelId } as TextShortcut);
+    });
+    return shortcuts;
+  } catch (error) {
+    console.warn("Không thể tải phím tắt từ đám mây (đang dùng cache cục bộ):", error);
+    return [];
+  }
+};
+
+export const saveShortcutsToCloud = async (novelId: string, shortcuts: TextShortcut[]): Promise<void> => {
+  const user = auth.currentUser;
+  if (!user || !novelId) return;
+  await overwriteFirestoreData('shortcut', novelId, shortcuts);
+};
+
