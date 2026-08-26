@@ -15,7 +15,7 @@ import { ChapterArchiveModal } from './components/ChapterArchiveModal';
 import { ShortcutModal } from './components/ShortcutModal';
 import { AuthPanel } from './components/AuthPanel';
 import { NovelSelector } from './components/NovelSelector';
-import { BookOpen, Loader2, Eraser, Quote, Layout, History, AlertTriangle, Layers, PenLine, FolderOpen, Keyboard } from 'lucide-react';
+import { BookOpen, Loader2, Eraser, Quote, Layout, History, AlertTriangle, Layers, PenLine, FolderOpen, Keyboard, BookA, Users, X } from 'lucide-react';
 import { checkAndApplyShortcut, getStoredShortcuts, isShortcutsEnabled, syncShortcutsFromCloud } from './services/shortcutService';
 
 const EXAMPLE_TEXT = "路遥知马力，日久见人心。";
@@ -249,6 +249,8 @@ function AppContent() {
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [showChapters, setShowChapters] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [showMobileSidebar, setShowMobileSidebar] = useState(false);
+  const [showMobileWorldInfo, setShowMobileWorldInfo] = useState(false);
   const [shortcuts, setShortcuts] = useState(() => getStoredShortcuts(session.currentNovelId));
   const [shortcutsEnabled, setShortcutsEnabled] = useState(() => isShortcutsEnabled());
   const [vpLoaded, setVpLoaded] = useState(false);
@@ -1000,34 +1002,56 @@ useEffect(() => {
     <div className="h-screen flex flex-col bg-[#F5E6D3] text-[#3E2723] font-sans overflow-hidden">
       
       {/* HEADER */}
-      <header className="bg-[#4E342E] text-[#F5E6D3] border-b border-[#3E2723] h-14 flex items-center justify-between px-4 shrink-0 z-20 shadow-md">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
+      <header className="bg-[#4E342E] text-[#F5E6D3] border-b border-[#3E2723] h-14 flex items-center justify-between px-3 sm:px-4 shrink-0 z-20 shadow-md overflow-x-auto no-scrollbar">
+        <div className="flex items-center gap-1.5 sm:gap-4 shrink-0">
+          <div className="flex items-center gap-2" title="Edit">
             <div className="text-[#FFECB3]">
-              <PenLine size={24} />
+              <PenLine size={22} />
             </div>
-            <h1 style={{ fontFamily: '"Nunito", sans-serif' }} className="text-2xl font-extrabold tracking-wide text-[#FFECB3] pt-1">Edit</h1>
+            <h1 style={{ fontFamily: '"Nunito", sans-serif' }} className="hidden sm:block text-2xl font-extrabold tracking-wide text-[#FFECB3] pt-1">Edit</h1>
           </div>
 
           {/* Segmented Mode Control */}
-          <div className="flex bg-[#3E2723] p-0.5 rounded-lg border border-[#5D4037] ml-2">
+          <div className="flex bg-[#3E2723] p-0.5 rounded-lg border border-[#5D4037] ml-1 sm:ml-2">
             <button
               onClick={() => setMode('edit')}
-              className={`px-3 py-1 rounded-md text-[11px] font-bold transition-all ${mode === 'edit' ? 'bg-[#FFECB3] text-[#3E2723] shadow-sm' : 'text-[#D7CCC8] hover:text-[#FFECB3]'}`}
+              className={`px-2 sm:px-3 py-1 rounded-md text-[11px] font-bold transition-all ${mode === 'edit' ? 'bg-[#FFECB3] text-[#3E2723] shadow-sm' : 'text-[#D7CCC8] hover:text-[#FFECB3]'}`}
+              title="Chế độ Edit"
             >
-              Edit
+              <span className="sm:hidden">E</span>
+              <span className="hidden sm:inline">Edit</span>
             </button>
             <button
               onClick={() => setMode('beta')}
-              className={`px-3 py-1 rounded-md text-[11px] font-bold transition-all flex items-center gap-1 ${mode === 'beta' ? 'bg-[#FFECB3] text-[#3E2723] shadow-sm' : 'text-[#D7CCC8] hover:text-[#FFECB3]'}`}
+              className={`px-2 sm:px-3 py-1 rounded-md text-[11px] font-bold transition-all flex items-center gap-1 ${mode === 'beta' ? 'bg-[#FFECB3] text-[#3E2723] shadow-sm' : 'text-[#D7CCC8] hover:text-[#FFECB3]'}`}
+              title="Chế độ Beta"
             >
-              Beta
+              <span className="sm:hidden">B</span>
+              <span className="hidden sm:inline">Beta</span>
             </button>
           </div>
         </div>
         
         {/* RIGHT CONTROLS */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            {/* Nút mở Từ vựng cho màn hình nhỏ / Tablet (Chỉ icon) */}
+            <button
+              onClick={() => setShowMobileSidebar(true)}
+              className="lg:hidden flex items-center justify-center text-[#FFECB3] hover:text-white bg-[#5D4037]/60 p-2 sm:px-2.5 sm:py-1 rounded-full border border-[#FFECB3]/20 transition-colors"
+              title="Kho Từ vựng"
+            >
+               <BookA size={14} />
+            </button>
+
+            {/* Nút mở Nhân vật & Quan hệ cho màn hình nhỏ / Tablet (Chỉ icon) */}
+            <button
+              onClick={() => setShowMobileWorldInfo(true)}
+              className="xl:hidden flex items-center justify-center text-[#FFECB3] hover:text-white bg-[#5D4037]/60 p-2 sm:px-2.5 sm:py-1 rounded-full border border-[#FFECB3]/20 transition-colors"
+              title="Bảng Nhân vật & Thiết lập"
+            >
+               <Users size={14} />
+            </button>
+
             <NovelSelector 
               currentNovelId={session.currentNovelId || ''} 
               onSelectNovel={(id) => updateSession({ currentNovelId: id })} 
@@ -1042,29 +1066,30 @@ useEffect(() => {
               title="Bảng gõ tắt (Auto-replace)"
             >
                <Keyboard size={12} />
-               <span>Gõ tắt</span>
+               <span className="hidden sm:inline">Gõ tắt</span>
                {shortcuts.length > 0 && (
                  <span className={`text-[9px] px-1.5 py-0.2 rounded-full font-mono font-bold ${shortcutsEnabled ? 'bg-[#FFECB3]/20 text-[#FFECB3]' : 'bg-gray-600/40 text-gray-300'}`}>
                    {shortcuts.filter(s => s.enabled).length}
                  </span>
                )}
             </button>
-            <button onClick={() => setShowChapters(true)} className="flex items-center gap-1.5 text-[10px] font-medium text-[#FFECB3] hover:text-white hover:bg-[#5D4037] bg-[#5D4037]/30 px-2.5 py-1 rounded-full border border-[#FFECB3]/20 transition-colors">
+            <button onClick={() => setShowChapters(true)} className="flex items-center gap-1.5 text-[10px] font-medium text-[#FFECB3] hover:text-white hover:bg-[#5D4037] bg-[#5D4037]/30 px-2 sm:px-2.5 py-1 rounded-full border border-[#FFECB3]/20 transition-colors">
                <FolderOpen size={12} />
-               <span>Kho chương ({currentNovelChapters.length})</span>
+               <span className="hidden sm:inline">Kho chương</span>
+               <span>({currentNovelChapters.length})</span>
             </button>
             <button onClick={() => setShowHistory(true)} className="flex items-center gap-1.5 text-[10px] font-medium text-[#D7CCC8] hover:text-white hover:bg-[#5D4037] px-2 py-1 rounded-full border border-[#5D4037] transition-colors">
                <History size={12} />
-               <span>Lịch sử</span>
+               <span className="hidden sm:inline">Lịch sử</span>
             </button>
             <AuthPanel />
         </div>
       </header>
 
       {/* MAIN WORKSPACE */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* LEFT SIDEBAR */}
-        <div className={`w-80 border-r border-[#D7CCC8] bg-[#EFE5D9] shrink-0 ${isFocusMode ? 'hidden' : 'block'}`}>
+      <div className="flex-1 flex overflow-hidden relative">
+        {/* LEFT SIDEBAR (Desktop / Laptop) */}
+        <div className={`w-80 border-r border-[#D7CCC8] bg-[#EFE5D9] shrink-0 ${isFocusMode ? 'hidden' : 'hidden lg:block'}`}>
             <DictionarySidebar 
                 currentNovelId={session.currentNovelId || ''}
                 terms={session.customTerms} onExportExcel={handleExportExcel} 
@@ -1084,12 +1109,56 @@ useEffect(() => {
                 sheetUrl={session.sheetUrl} 
                 onUpdateSheetUrl={(url) => updateSession({ sheetUrl: url })} 
                 refreshTrigger={vpLoaded}
-                
             />
         </div>
 
+        {/* MOBILE / TABLET SLIDE-OVER DRAWER FOR DICTIONARY */}
+        {showMobileSidebar && (
+          <div className="fixed inset-0 z-50 flex lg:hidden animate-in fade-in duration-150">
+            <div 
+              className="fixed inset-0 bg-black/40 backdrop-blur-xs transition-opacity" 
+              onClick={() => setShowMobileSidebar(false)} 
+            />
+            <div className="relative w-80 max-w-[85vw] bg-[#EFE5D9] h-full shadow-2xl z-10 flex flex-col animate-in slide-in-from-left duration-200">
+              <div className="flex items-center justify-between p-2.5 bg-[#4E342E] text-white border-b border-[#3E2723]">
+                <span className="text-xs font-bold text-[#FFECB3] flex items-center gap-1.5">
+                  <BookA size={14} /> Kho từ vựng & Nhân vật
+                </span>
+                <button 
+                  onClick={() => setShowMobileSidebar(false)}
+                  className="p-1 rounded-md text-[#D7CCC8] hover:text-white hover:bg-[#5D4037]"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              <div className="flex-1 overflow-hidden">
+                <DictionarySidebar 
+                    currentNovelId={session.currentNovelId || ''}
+                    terms={session.customTerms} onExportExcel={handleExportExcel} 
+                    onUpdateTerms={(novelTerms) => {
+                        try {
+                            const currentId = session.currentNovelId;
+                            const otherTerms = (session.customTerms || []).filter(t => t.novelId && t.novelId !== currentId);
+                            const merged = [...novelTerms, ...otherTerms];
+                            updateSession({ customTerms: merged });
+                            db.bulkSaveCustomTerms(merged).catch(err => {
+                                console.error("App Sidebar: db.bulkSaveCustomTerms failed", err);
+                            });
+                        } catch (err) {
+                            console.error("App Sidebar: onUpdateTerms caught error:", err);
+                        }
+                    }} 
+                    sheetUrl={session.sheetUrl} 
+                    onUpdateSheetUrl={(url) => updateSession({ sheetUrl: url })} 
+                    refreshTrigger={vpLoaded}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* CENTER MAIN CONTENT */}
-        <main className="flex-1 flex flex-col h-full overflow-hidden bg-[#F5E6D3] min-w-[320px]">
+        <main className="flex-1 flex flex-col h-full overflow-hidden bg-[#F5E6D3] min-w-0">
           <div className="flex-1 overflow-y-auto overflow-x-hidden scroll-smooth scrollbar-thin scrollbar-thumb-[#D7CCC8] scrollbar-track-transparent">
              <div className="flex flex-col px-2 pb-2">
                 
@@ -1127,7 +1196,7 @@ useEffect(() => {
                           </div>
                       </div>
 
-                      <div className={`grid ${mode === 'beta' ? 'grid-cols-3' : 'grid-cols-2'} flex-1 min-h-[140px] divide-x divide-[#EFEBE9]`}>
+                      <div className={`grid ${mode === 'beta' ? 'grid-cols-1 sm:grid-cols-3' : 'grid-cols-1 sm:grid-cols-2'} flex-1 min-h-[140px] divide-y sm:divide-y-0 sm:divide-x divide-[#EFEBE9]`}>
                           <div className="flex flex-col flex-1">
                               <div className="text-[9px] font-bold text-[#8D6E63] uppercase tracking-wider px-3 pt-1.5 bg-[#FAFAFA]/40">1. Văn bản gốc (Trung)</div>
                               <textarea
@@ -1268,8 +1337,8 @@ useEffect(() => {
           </div>
         </main>
 
-        {/* RIGHT SIDEBAR */}
-        <div className={`w-[360px] border-l border-[#D7CCC8] bg-[#EFE5D9] shrink-0 ${isFocusMode ? 'hidden' : 'block'}`}>
+        {/* RIGHT SIDEBAR (Desktop / Laptop) */}
+        <div className={`w-[340px] border-l border-[#D7CCC8] bg-[#EFE5D9] shrink-0 ${isFocusMode ? 'hidden' : 'hidden xl:block'}`}>
             <WorldInfoPanel 
                 currentNovelId={session.currentNovelId || ''}
                 characters={session.characters} 
@@ -1280,9 +1349,44 @@ useEffect(() => {
                 onUpdateNotes={(val) => updateSession({ notes: val })} 
                 sheetUrl={session.sheetUrl} 
                 onUpdateSheetUrl={(url) => updateSession({ sheetUrl: url })} 
-                
             />
         </div>
+
+        {/* MOBILE / TABLET SLIDE-OVER DRAWER FOR WORLD INFO & CHARACTERS */}
+        {showMobileWorldInfo && (
+          <div className="fixed inset-0 z-50 flex justify-end xl:hidden animate-in fade-in duration-150">
+            <div 
+              className="fixed inset-0 bg-black/40 backdrop-blur-xs transition-opacity" 
+              onClick={() => setShowMobileWorldInfo(false)} 
+            />
+            <div className="relative w-84 max-w-[88vw] bg-[#EFE5D9] h-full shadow-2xl z-10 flex flex-col animate-in slide-in-from-right duration-200">
+              <div className="flex items-center justify-between p-2.5 bg-[#4E342E] text-white border-b border-[#3E2723]">
+                <span className="text-xs font-bold text-[#FFECB3] flex items-center gap-1.5">
+                  <Users size={14} /> Nhân vật & Thiết lập
+                </span>
+                <button 
+                  onClick={() => setShowMobileWorldInfo(false)}
+                  className="p-1 rounded-md text-[#D7CCC8] hover:text-white hover:bg-[#5D4037]"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              <div className="flex-1 overflow-hidden">
+                <WorldInfoPanel 
+                    currentNovelId={session.currentNovelId || ''}
+                    characters={session.characters} 
+                    onUpdateCharacters={(chars) => updateSession({ characters: chars })} 
+                    relationships={session.relationships} 
+                    onUpdateRelationships={(rels) => updateSession({ relationships: rels })} 
+                    notes={session.notes} 
+                    onUpdateNotes={(val) => updateSession({ notes: val })} 
+                    sheetUrl={session.sheetUrl} 
+                    onUpdateSheetUrl={(url) => updateSession({ sheetUrl: url })} 
+                />
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <HistoryModal isOpen={showHistory} onClose={() => setShowHistory(false)} history={history} onSelect={handleRestoreHistory} onDelete={deleteHistoryItem} onClearAll={() => setHistory([])} />

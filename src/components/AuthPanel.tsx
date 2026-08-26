@@ -32,20 +32,23 @@ export const AuthPanel: React.FC = () => {
 
   if (user) {
     return (
-      <div className="flex items-center gap-2">
-        <span className="text-[10px] text-[#D7CCC8]">{user.displayName || user.email}</span>
-        <button onClick={handleSignOut} className="flex items-center gap-1.5 text-[10px] font-medium text-[#D7CCC8] hover:text-white hover:bg-[#5D4037] px-2 py-1 rounded-full border border-[#5D4037] transition-colors" title="Đăng xuất">
-          <LogOut size={12} />
-          <span>Đăng xuất</span>
-        </button>
-      </div>
+      <button 
+        onClick={handleSignOut} 
+        className="flex items-center justify-center text-[#D7CCC8] hover:text-white hover:bg-[#5D4037] p-2 rounded-full border border-[#5D4037] transition-colors" 
+        title={`Đăng xuất (${user.displayName || user.email})`}
+      >
+        <LogOut size={13} />
+      </button>
     );
   }
 
   return (
-    <button onClick={handleSignIn} className="flex items-center gap-1.5 text-[10px] font-medium text-[#D7CCC8] hover:text-white hover:bg-[#5D4037] px-2 py-1 rounded-full border border-[#5D4037] transition-colors">
-      <LogIn size={12} />
-      <span>Đăng nhập</span>
+    <button 
+      onClick={handleSignIn} 
+      className="flex items-center justify-center text-[#D7CCC8] hover:text-white hover:bg-[#5D4037] p-2 rounded-full border border-[#5D4037] transition-colors" 
+      title="Đăng nhập Google"
+    >
+      <LogIn size={13} />
     </button>
   );
 };
