@@ -71,13 +71,28 @@ const sanitizeData = (obj: any): any => {
 
 const dbCache = new Map<string, Map<string, any>>(); // Global cache to prevent repeated getDocs on POST
 
+const withTimeout = <T>(promise: Promise<T>, ms: number = 8000, errorMsg: string = 'Thao tác Firestore quá thời gian'): Promise<T> => {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(errorMsg)), ms);
+    promise
+      .then(res => {
+        clearTimeout(timer);
+        resolve(res);
+      })
+      .catch(err => {
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
+};
+
 export const getNovels = async (): Promise<Novel[]> => {
   const user = auth.currentUser;
   if (!user) throw new Error('Bạn cần đăng nhập!');
   const path = 'novels';
   try {
     const q = query(collection(db, path), where('userId', '==', user.uid));
-    const snap = await getDocs(q);
+    const snap = await withTimeout(getDocs(q), 7000, 'Tải danh sách truyện quá thời gian');
     const novels: Novel[] = [];
     snap.forEach(d => {
       novels.push({ id: d.id, name: d.data().name });
@@ -93,8 +108,12 @@ export const createNovel = async (id: string, name: string): Promise<Novel> => {
   if (!user) throw new Error('Bạn cần đăng nhập!');
   const path = `novels/${id}`;
   try {
-    const novelRef = doc(collection(db, 'novels'), id);
-    await setDoc(novelRef, { userId: user.uid, name, createdAt: Timestamp.now() });
+    const novelRef = doc(db, 'novels', id);
+    await withTimeout(
+      setDoc(novelRef, { userId: user.uid, name, createdAt: Timestamp.now() }),
+      7000,
+      'Tạo truyện trên đám mây quá thời gian'
+    );
     return { id, name };
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, path);
@@ -106,7 +125,7 @@ export const deleteNovel = async (id: string): Promise<void> => {
   if (!user) throw new Error('Bạn cần đăng nhập!');
   const path = `novels/${id}`;
   try {
-    await deleteDoc(doc(db, 'novels', id));
+    await withTimeout(deleteDoc(doc(db, 'novels', id)), 7000);
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
   }
