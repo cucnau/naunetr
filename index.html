@@ -5,7 +5,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Edit</title>
-    <link rel="manifest" href="/manifest.json">
+    <link rel="manifest" href="./manifest.json">
     
     <!-- Android / Chrome -->
     <meta name="theme-color" content="#4E342E">
@@ -71,8 +71,11 @@
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
-          const swPath = window.location.pathname.startsWith('/edit/') ? '/edit/sw.js' : '/sw.js';
-          navigator.serviceWorker.register(swPath).catch(err => {
+          const basePath = window.location.pathname.endsWith('/') 
+            ? window.location.pathname 
+            : window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/') + 1);
+          const swPath = basePath + 'sw.js';
+          navigator.serviceWorker.register(swPath, { scope: basePath }).catch(err => {
             console.log('ServiceWorker registration failed: ', err);
           });
         });
