@@ -1,17 +1,22 @@
 
-const CACHE_NAME = 'edit-translation-v3';
+const CACHE_NAME = 'edit-translation-v4';
 const ASSETS = [
-  '/',
-  '/index.html',
-  '/manifest.json',
+  './',
+  './index.html',
+  './manifest.json',
   'https://cdn-icons-png.flaticon.com/512/1828/1828911.png'
 ];
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS);
+    caches.open(CACHE_NAME).then(async (cache) => {
+      // Dùng map để cache từng asset an toàn, không bị crash nếu có link bị lỗi
+      await Promise.allSettled(
+        ASSETS.map((asset) => cache.add(asset).catch((err) => {
+          console.warn('Không thể cache asset:', asset, err);
+        }))
+      );
     })
   );
 });
@@ -32,8 +37,11 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // Bỏ qua các yêu cầu API của Google (không thể cache offline)
-  if (event.request.url.includes('generativelanguage.googleapis.com')) {
+  if (
+    event.request.url.includes('firestore.googleapis.com') ||
+    event.request.url.includes('identitytoolkit.googleapis.com') ||
+    event.request.url.includes('securetoken.googleapis.com')
+  ) {
     return;
   }
 
@@ -43,3 +51,4 @@ self.addEventListener('fetch', (event) => {
     })
   );
 });
+
