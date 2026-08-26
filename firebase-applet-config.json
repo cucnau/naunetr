@@ -3,7 +3,7 @@
   "appId": "1:653677194547:web:427ca8f0bbce8e6a852246",
   "apiKey": "AIzaSyACPEjQZLNKvdNc_hEgLOyEIv6xqQKY3e8",
   "authDomain": "naunetr.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-edit-cf782654-e17f-422a-b713-fb101b2ebc43",
+  "firestoreDatabaseId": "(default)",
   "storageBucket": "naunetr.firebasestorage.app",
   "messagingSenderId": "653677194547",
   "measurementId": "G-WCDPQFYNRL"
