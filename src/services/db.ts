@@ -1,5 +1,5 @@
 
-import { CustomTerm, Chapter } from '../types';
+import { CustomTerm, Chapter, VietphraseFileItem } from '../types';
 
 // IndexedDB Service
 const DB_NAME = 'ChiVietDB';
@@ -9,6 +9,7 @@ const STORE_CUSTOM_TERMS = 'custom_terms';
 const STORE_CHAPTERS = 'chapters';
 
 export const KEY_VIETPHRASE = 'vietphrase_data';
+export const KEY_VIETPHRASE_FILES = 'vietphrase_files';
 
 const dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
     if (typeof window === 'undefined' || !window.indexedDB) {
@@ -39,6 +40,37 @@ const dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
 });
 
 export const db = {
+    async getVietphraseFiles(): Promise<VietphraseFileItem[]> {
+        try {
+            const db = await dbPromise;
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(STORE_SETTINGS, 'readonly');
+                const store = tx.objectStore(STORE_SETTINGS);
+                const req = store.get(KEY_VIETPHRASE_FILES);
+                req.onsuccess = () => resolve(Array.isArray(req.result) ? req.result : []);
+                req.onerror = () => reject(req.error);
+            });
+        } catch (e) {
+            console.error("DB Get Vietphrase Files Error", e);
+            return [];
+        }
+    },
+
+    async saveVietphraseFiles(files: VietphraseFileItem[]): Promise<void> {
+        try {
+            const db = await dbPromise;
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(STORE_SETTINGS, 'readwrite');
+                const store = tx.objectStore(STORE_SETTINGS);
+                const req = store.put(files, KEY_VIETPHRASE_FILES);
+                req.onsuccess = () => resolve();
+                req.onerror = () => reject(req.error);
+            });
+        } catch (e) {
+            console.error("DB Save Vietphrase Files Error", e);
+        }
+    },
+
     async getVietphrase(): Promise<string | null> {
         try {
             const db = await dbPromise;

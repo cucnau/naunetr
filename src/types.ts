@@ -64,6 +64,16 @@ export interface TextShortcut {
   category?: string;     // Phân loại tùy chọn
 }
 
+export interface VietphraseFileItem {
+  id: string;
+  name: string;        // Tên file (VD: Vietphrase.txt, Names.txt, TienHiep.txt)
+  size: number;        // Dung lượng byte
+  wordCount: number;   // Số lượng từ/cụm từ trong file
+  content: string;     // Nội dung text gốc
+  enabled: boolean;    // Đang bật hay tắt file này
+  uploadedAt: number;  // Thời điểm nạp file
+}
+
 export interface HistoryItem {
   id: string;
   timestamp: number;

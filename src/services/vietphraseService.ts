@@ -1,5 +1,5 @@
 
-import { CustomTerm } from "../types";
+import { CustomTerm, VietphraseFileItem } from "../types";
 import { db } from "./db";
 
 export interface TrieNode {
@@ -8,6 +8,7 @@ export interface TrieNode {
 }
 
 class VietphraseEngine {
+  private files: VietphraseFileItem[] = [];
   private dictionary: Map<string, string>;
   private maxKeyLength: number;
   private isLoaded: boolean = false;
@@ -36,50 +37,177 @@ class VietphraseEngine {
     });
   }
 
-  // Khởi tạo: Load từ DB nếu có
+  // Khởi tạo: Load danh sách file từ DB
   async init() {
-      if (this.isLoaded) return;
-      const savedContent = await db.getVietphrase();
-      if (savedContent && typeof savedContent === 'string') {
-          this.loadDictionary(savedContent, false); // false = không lưu lại vào DB nữa
-          console.log("Đã khôi phục Vietphrase từ DB");
+    if (this.isLoaded) return;
+    try {
+      let savedFiles = await db.getVietphraseFiles();
+      
+      // Khôi phục từ dữ liệu đơn lẻ cũ nếu chưa có danh sách files mới
+      if (!savedFiles || savedFiles.length === 0) {
+        const legacyContent = await db.getVietphrase();
+        if (legacyContent && typeof legacyContent === 'string' && legacyContent.trim()) {
+          const lines = legacyContent.split(/\r?\n/).filter(l => l.trim() && !l.startsWith('#') && l.includes('='));
+          savedFiles = [{
+            id: 'legacy_' + Date.now(),
+            name: 'Vietphrase.txt',
+            size: new Blob([legacyContent]).size,
+            wordCount: lines.length,
+            content: legacyContent,
+            enabled: true,
+            uploadedAt: Date.now()
+          }];
+          await db.saveVietphraseFiles(savedFiles);
+          console.log("Đã di chuyển dữ liệu Vietphrase cũ sang danh sách file đa năng");
+        }
       }
+
+      this.files = savedFiles || [];
+      this.rebuildDictionary();
+    } catch (e) {
+      console.error("Vietphrase init error", e);
+    } finally {
       this.isLoaded = true;
       this.notify();
+    }
   }
 
-  // Lấy số lượng từ hiện tại
+  // Lấy danh sách toàn bộ các file Vietphrase hiện có
+  getFiles(): VietphraseFileItem[] {
+    return [...this.files];
+  }
+
+  // Lấy số lượng từ hiện tại trong từ điển đang hoạt động
   getSize(): number {
     return this.dictionary.size;
   }
 
-  // Nạp dữ liệu từ nội dung file text (Format: Trung=Việt)
-  loadDictionary(content: string, save: boolean = true) {
-    this.dictionary.clear();
-    this.maxKeyLength = 0;
-    
+  // Lấy số file đang kích hoạt
+  getActiveFilesCount(): number {
+    return this.files.filter(f => f.enabled).length;
+  }
+
+  // Phân tích số từ trong một nội dung file
+  private countWordsInContent(content: string): number {
+    let count = 0;
     const lines = content.split(/\r?\n/);
     for (const line of lines) {
       if (!line.trim() || line.startsWith('#')) continue;
-      
-      const parts = line.split('=');
-      if (parts.length >= 2) {
-        const key = parts[0].trim();
-        const value = parts[1].trim();
-        if (key && value) {
+      if (line.includes('=')) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  // Tái tạo lại từ điển gộp từ tất cả các file đang kích hoạt (enabled: true)
+  private rebuildDictionary() {
+    this.dictionary.clear();
+    this.maxKeyLength = 0;
+
+    for (const file of this.files) {
+      if (!file.enabled) continue;
+
+      const lines = file.content.split(/\r?\n/);
+      for (const line of lines) {
+        if (!line.trim() || line.startsWith('#')) continue;
+
+        const parts = line.split('=');
+        if (parts.length >= 2) {
+          const key = parts[0].trim();
+          const value = parts[1].trim();
+          if (key && value) {
             this.dictionary.set(key, value);
             if (key.length > this.maxKeyLength) {
-                this.maxKeyLength = key.length;
+              this.maxKeyLength = key.length;
             }
+          }
         }
       }
     }
-    console.log(`Đã nạp ${this.dictionary.size} từ Vietphrase. Max length: ${this.maxKeyLength}`);
-    
-    if (save) {
-        db.saveVietphrase(content).then(() => console.log("Đã lưu Vietphrase vào DB"));
+
+    console.log(`Đã nạp ${this.dictionary.size} từ từ ${this.getActiveFilesCount()}/${this.files.length} file Vietphrase.`);
+  }
+
+  // Nạp thêm nhiều file cùng lúc
+  async addFiles(newFiles: { name: string; content: string; size?: number }[]): Promise<{ addedCount: number; totalWords: number }> {
+    const createdItems: VietphraseFileItem[] = [];
+
+    for (const item of newFiles) {
+      const wordCount = this.countWordsInContent(item.content);
+      const fileItem: VietphraseFileItem = {
+        id: 'vp_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+        name: item.name || 'Vietphrase.txt',
+        size: item.size || new Blob([item.content]).size,
+        wordCount: wordCount,
+        content: item.content,
+        enabled: true,
+        uploadedAt: Date.now()
+      };
+      createdItems.push(fileItem);
     }
+
+    this.files = [...this.files, ...createdItems];
+    this.rebuildDictionary();
+    await db.saveVietphraseFiles(this.files);
+    this.notify();
+
+    return {
+      addedCount: createdItems.length,
+      totalWords: this.dictionary.size
+    };
+  }
+
+  // Bật/Tắt một file
+  async toggleFile(id: string, enabled?: boolean): Promise<void> {
+    this.files = this.files.map(f => {
+      if (f.id === id) {
+        return { ...f, enabled: enabled !== undefined ? enabled : !f.enabled };
+      }
+      return f;
+    });
+
+    this.rebuildDictionary();
+    await db.saveVietphraseFiles(this.files);
+    this.notify();
+  }
+
+  // Xóa một file
+  async removeFile(id: string): Promise<void> {
+    this.files = this.files.filter(f => f.id !== id);
+    this.rebuildDictionary();
+    await db.saveVietphraseFiles(this.files);
+    this.notify();
+  }
+
+  // Xóa toàn bộ file
+  async clearAllFiles(): Promise<void> {
+    this.files = [];
+    this.dictionary.clear();
+    this.maxKeyLength = 0;
+    await db.saveVietphraseFiles([]);
+    this.notify();
+  }
+
+  // Tương thích ngược: load dữ liệu 1 file duy nhất
+  async loadDictionary(content: string, save: boolean = true): Promise<number> {
+    const wordCount = this.countWordsInContent(content);
+    const newFile: VietphraseFileItem = {
+      id: 'vp_' + Date.now(),
+      name: 'Vietphrase.txt',
+      size: new Blob([content]).size,
+      wordCount,
+      content,
+      enabled: true,
+      uploadedAt: Date.now()
+    };
     
+    // Ghi đè hoặc thêm vào danh sách
+    this.files = [newFile];
+    this.rebuildDictionary();
+    if (save) {
+      await db.saveVietphraseFiles(this.files);
+    }
     this.notify();
     return this.dictionary.size;
   }

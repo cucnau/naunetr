@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { CustomTerm } from '../types';
-import { Plus, Trash2, BookUser, Settings, Download, Upload, Loader2, Save, Code, Copy, Search, X, RefreshCw, FileText, CheckCircle, FileUp, AlertCircle, FileSpreadsheet } from 'lucide-react';
+import { CustomTerm, VietphraseFileItem } from '../types';
+import { Plus, Trash2, BookUser, Settings, Download, Upload, Loader2, Save, Code, Copy, Search, X, RefreshCw, FileText, CheckCircle, FileUp, AlertCircle, FileSpreadsheet, Layers } from 'lucide-react';
 import { syncFirestoreData, deleteFirestoreDoc, overwriteFirestoreData } from '../services/firestoreService';
 import { auth } from '../services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -99,6 +99,8 @@ export const DictionarySidebar: React.FC<DictionarySidebarProps> = ({
   const [showCode, setShowCode] = useState(false);
   const [bulkText, setBulkText] = useState('');
   const [vpCount, setVpCount] = useState(0);
+  const [vpFiles, setVpFiles] = useState<VietphraseFileItem[]>(() => vietphraseEngine.getFiles());
+  const [isLoadingVp, setIsLoadingVp] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   // Sync States
@@ -144,8 +146,10 @@ export const DictionarySidebar: React.FC<DictionarySidebarProps> = ({
   // Load VP size on mount/render
   useEffect(() => {
      setVpCount(vietphraseEngine.getSize());
+     setVpFiles(vietphraseEngine.getFiles());
      return vietphraseEngine.subscribe(() => {
          setVpCount(vietphraseEngine.getSize());
+         setVpFiles(vietphraseEngine.getFiles());
      });
   }, [refreshTrigger]);
 
@@ -328,23 +332,45 @@ export const DictionarySidebar: React.FC<DictionarySidebarProps> = ({
     }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handleMultipleFilesUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
 
-    setSyncMessage({ type: 'success', text: 'Đang đọc file...' });
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-        const content = evt.target?.result as string;
-        if (content) {
-            const count = vietphraseEngine.loadDictionary(content);
-            setVpCount(count);
-            setSyncMessage({ type: 'success', text: `Đã nạp ${count} từ Vietphrase` });
-            setTimeout(() => setSyncMessage(null), 3000);
-        }
-    };
-    reader.readAsText(file);
-    e.target.value = ''; // Reset to allow re-selection
+    setIsLoadingVp(true);
+    setSyncMessage({ type: 'success', text: `Đang đọc ${files.length} file...` });
+
+    try {
+      const fileReadPromises = Array.from(files).map((file) => {
+        return new Promise<{ name: string; content: string; size: number }>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (evt) => {
+            const content = (evt.target?.result as string) || '';
+            resolve({
+              name: file.name,
+              content: content,
+              size: file.size
+            });
+          };
+          reader.onerror = () => reject(new Error(`Không thể đọc file ${file.name}`));
+          reader.readAsText(file);
+        });
+      });
+
+      const loadedFiles = await Promise.all(fileReadPromises);
+      const res = await vietphraseEngine.addFiles(loadedFiles);
+
+      setVpCount(res.totalWords);
+      setVpFiles(vietphraseEngine.getFiles());
+      setSyncMessage({ type: 'success', text: `Đã nạp thành công ${loadedFiles.length} file (${res.totalWords.toLocaleString()} từ)!` });
+      setTimeout(() => setSyncMessage(null), 4000);
+    } catch (err: any) {
+      console.error("Upload Vietphrase files error", err);
+      setSyncMessage({ type: 'error', text: err.message || 'Lỗi khi đọc file Vietphrase!' });
+      setTimeout(() => setSyncMessage(null), 4000);
+    } finally {
+      setIsLoadingVp(false);
+      e.target.value = ''; // Reset input to allow re-upload
+    }
   };
 
   return (
@@ -360,10 +386,10 @@ export const DictionarySidebar: React.FC<DictionarySidebarProps> = ({
             <button
                 onClick={() => setShowSettings(true)}
                 className={`p-1 rounded-full transition-colors flex items-center gap-1 ${vpCount > 0 ? 'text-[#3E2723] bg-[#EFE5D9] border border-[#D7CCC8]' : 'text-red-500 hover:bg-red-50 animate-pulse'}`}
-                title={vpCount > 0 ? `Đã nạp ${vpCount} từ` : "Chưa có Vietphrase! Bấm để nạp"}
+                title={vpCount > 0 ? `Đã nạp ${vpFiles.length} file (${vpCount.toLocaleString()} từ)` : "Chưa có Vietphrase! Bấm để nạp"}
             >
                 {vpCount > 0 ? <CheckCircle size={14} className="text-green-600" /> : <FileText size={14} />}
-                {vpCount > 0 && <span className="text-[9px] font-mono">{Math.floor(vpCount/1000)}k</span>}
+                {vpCount > 0 && <span className="text-[9px] font-mono">{vpFiles.length}f·{Math.floor(vpCount/1000)}k</span>}
             </button>
             {onExportExcel && (
               <button
@@ -386,32 +412,109 @@ export const DictionarySidebar: React.FC<DictionarySidebarProps> = ({
 
       {/* Settings Panel */}
       {showSettings && (
-          <div className="bg-[#EFEBE9] border-b border-[#D7CCC8] p-3 text-sm animate-in slide-in-from-top-2 overflow-y-auto max-h-[60vh]">
+          <div className="bg-[#EFEBE9] border-b border-[#D7CCC8] p-3 text-sm animate-in slide-in-from-top-2 overflow-y-auto max-h-[65vh]">
              
-             {/* VIETPHRASE SECTION */}
+             {/* VIETPHRASE MULTI-FILES SECTION */}
              <div className="mb-4 bg-white border border-[#D7CCC8] rounded-lg p-3">
                 <div className="flex justify-between items-center mb-2">
-                    <label className="text-[10px] font-bold text-[#5D4037] uppercase flex items-center gap-1"><FileText size={12}/> Vietphrase (Offline)</label>
+                    <label className="text-[10px] font-bold text-[#5D4037] uppercase flex items-center gap-1">
+                        <FileText size={12}/> Vietphrase ({vpFiles.length} file)
+                    </label>
                     <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${vpCount > 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                        {vpCount > 0 ? `${vpCount.toLocaleString()} từ` : 'Chưa có dữ liệu'}
+                        {vpCount > 0 ? `${vpCount.toLocaleString()} từ` : 'Chưa có file'}
                     </span>
                 </div>
-                <button 
-                    onClick={() => fileInputRef.current?.click()}
-                    className="w-full flex items-center justify-center gap-2 bg-[#F5E6D3] hover:bg-[#D7CCC8] text-[#3E2723] py-2 rounded border border-dashed border-[#8D6E63] transition-colors text-xs font-bold"
-                >
-                    <FileUp size={14} />
-                    {vpCount > 0 ? "Nạp lại file khác" : "Chọn file Vietphrase.txt"}
-                </button>
+
+                {/* Danh sách các file Vietphrase đã nạp */}
+                {vpFiles.length > 0 && (
+                  <div className="space-y-1.5 mb-2.5 max-h-44 overflow-y-auto pr-0.5">
+                    {vpFiles.map((file) => (
+                      <div 
+                        key={file.id} 
+                        className={`flex items-center justify-between p-1.5 rounded border transition-all text-xs ${
+                          file.enabled 
+                            ? 'bg-[#FAF8F5] border-[#D7CCC8] text-[#3E2723]' 
+                            : 'bg-gray-50 border-gray-200 text-gray-400 opacity-60'
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5 overflow-hidden flex-1 mr-2 min-w-0">
+                          <button
+                            type="button"
+                            onClick={() => vietphraseEngine.toggleFile(file.id)}
+                            className={`w-3.5 h-3.5 rounded flex items-center justify-center text-[9px] border transition-colors shrink-0 ${
+                              file.enabled 
+                                ? 'bg-green-600 border-green-600 text-white' 
+                                : 'bg-white border-gray-300 text-transparent'
+                            }`}
+                            title={file.enabled ? "Bấm để tắt file này" : "Bấm để bật file này"}
+                          >
+                            ✓
+                          </button>
+                          <span className="font-mono text-[11px] truncate font-medium" title={file.name}>
+                            {file.name}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <span className="text-[9px] bg-[#EFE5D9] text-[#5D4037] px-1.5 py-0.5 rounded font-mono font-medium">
+                            {file.wordCount.toLocaleString()} từ
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (window.confirm(`Bạn có chắc muốn xóa file "${file.name}" khỏi từ điển?`)) {
+                                vietphraseEngine.removeFile(file.id);
+                              }
+                            }}
+                            className="text-[#A1887F] hover:text-red-600 p-0.5 rounded transition-colors"
+                            title="Xóa file này"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Các nút nạp / xóa */}
+                <div className="flex gap-1.5">
+                  <button 
+                      type="button"
+                      disabled={isLoadingVp}
+                      onClick={() => fileInputRef.current?.click()}
+                      className="flex-1 flex items-center justify-center gap-1.5 bg-[#F5E6D3] hover:bg-[#D7CCC8] text-[#3E2723] py-2 rounded border border-dashed border-[#8D6E63] transition-colors text-xs font-bold disabled:opacity-50"
+                  >
+                      {isLoadingVp ? <Loader2 size={13} className="animate-spin" /> : <FileUp size={13} />}
+                      {vpFiles.length > 0 ? "+ Thêm file Vietphrase (.txt)" : "Chọn các file Vietphrase (.txt)"}
+                  </button>
+
+                  {vpFiles.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (window.confirm("⚠️ Bạn có chắc muốn XÓA TẤT CẢ các file Vietphrase đã nạp?")) {
+                          vietphraseEngine.clearAllFiles();
+                        }
+                      }}
+                      className="px-2.5 py-2 bg-red-50 hover:bg-red-100 text-red-700 rounded border border-red-200 transition-colors text-xs font-medium"
+                      title="Xóa tất cả file Vietphrase"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  )}
+                </div>
+
                 <p className="text-[9px] text-[#8D6E63] mt-1.5 italic leading-tight">
-                    * Dữ liệu Vietphrase được dùng để tự động điền vào dòng "Quick Trans" giúp đối chiếu bản dịch AI.
+                    * Bạn có thể chọn <strong>nhiều file cùng lúc</strong> (Vietphrase.txt, Names.txt, PhuTu.txt, LuatNhan.txt...). Dữ liệu tự động lưu ngoại tuyến và gộp vào từ điển dịch.
                 </p>
                 <input 
                     type="file" 
                     ref={fileInputRef} 
                     className="hidden" 
-                    accept=".txt" 
-                    onChange={handleFileUpload} 
+                    accept=".txt,.dic" 
+                    multiple
+                    onChange={handleMultipleFilesUpload} 
                 />
              </div>
 
