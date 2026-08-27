@@ -459,16 +459,18 @@ export const saveShortcutsToCloud = async (novelId: string, shortcuts: TextShort
 };
 
 // ==========================================
-// REAL-TIME SYNCHRONIZATION (ĐỒNG BỘ THỜI GIAN THỰC)
-// Laptop ⇄ Điện thoại thông minh (Phone)
+// REAL-TIME SYNCHRONIZATION (ĐỒNG BỘ THỜI GIAN THỰC TOÀN DIỆN)
+// Laptop ⇄ Điện thoại thông minh (Phone) ⇄ Máy tính bảng
 // ==========================================
 
 export interface LiveSessionData {
-  novelId: string;
+  novelId?: string;
   chapterId?: string;
   chapterName?: string;
+  status?: string;
   completedSegments?: number[];
   segments?: TranslationSegment[];
+  result?: TranslationResponse | null;
   inputText?: string;
   deeplText?: string;
   preEditedText?: string;
@@ -531,19 +533,19 @@ export const subscribeToChapters = (
 };
 
 /**
- * Lắng nghe thay đổi thời gian thực của Active Live Session (Đoạn đang edit & Tiến độ hoàn thành)
+ * Lắng nghe thay đổi thời gian thực của Toàn bộ Không gian làm việc (Active Workspace)
+ * Bao gồm: Bộ truyện đang chọn, Chương đang mở, Bảng Edit đang hiển thị, Các đoạn đã xong (kể cả chưa lưu kho)
  */
-export const subscribeToLiveSession = (
-  novelId: string,
+export const subscribeToUserLiveWorkspace = (
   onUpdate: (data: LiveSessionData) => void,
   onError?: (error: any) => void
 ): (() => void) => {
   const user = auth.currentUser;
-  if (!user || !novelId) {
+  if (!user) {
     return () => {};
   }
 
-  const docRef = doc(db, 'activeSessions', `${user.uid}_${novelId}`);
+  const docRef = doc(db, 'activeSessions', `ws_${user.uid}`);
 
   return onSnapshot(
     docRef,
@@ -554,34 +556,35 @@ export const subscribeToLiveSession = (
       }
     },
     (error) => {
-      console.warn("Lỗi lắng nghe thời gian thực Live Session:", error);
+      console.warn("Lỗi lắng nghe thời gian thực Live Workspace:", error);
       onError?.(error);
     }
   );
 };
 
-let liveSessionDebounceTimer: any = null;
+let liveWorkspaceDebounceTimer: any = null;
 
 /**
- * Đồng bộ thời gian thực trạng thái edit & các đoạn đã hoàn thành lên Firestore
+ * Đẩy toàn bộ trạng thái không gian làm việc hiện tại lên Cloud để các thiết bị khác đồng bộ tức thì
  */
-export const saveLiveSessionToCloud = async (
-  novelId: string,
+export const saveUserLiveWorkspaceToCloud = async (
   data: Partial<LiveSessionData>,
   immediate: boolean = false
 ): Promise<void> => {
   const user = auth.currentUser;
-  if (!user || !novelId) return;
+  if (!user) return;
 
   const performSave = async () => {
     try {
-      const docRef = doc(db, 'activeSessions', `${user.uid}_${novelId}`);
+      const docRef = doc(db, 'activeSessions', `ws_${user.uid}`);
       const payload: LiveSessionData = {
-        novelId,
+        novelId: data.novelId || '',
         chapterId: data.chapterId || '',
         chapterName: data.chapterName || '',
+        status: data.status || '',
         completedSegments: data.completedSegments || [],
-        segments: data.segments || [],
+        segments: data.segments || (data.result?.segments || []),
+        result: data.result || null,
         inputText: data.inputText || '',
         deeplText: data.deeplText || '',
         preEditedText: data.preEditedText || '',
@@ -593,19 +596,20 @@ export const saveLiveSessionToCloud = async (
       const sanitized = sanitizeData(payload);
       await setDoc(docRef, sanitized, { merge: true });
     } catch (e) {
-      console.warn("Lỗi lưu Live Session lên Cloud:", e);
+      console.warn("Lỗi lưu Live Workspace lên Cloud:", e);
     }
   };
 
   if (immediate) {
-    if (liveSessionDebounceTimer) clearTimeout(liveSessionDebounceTimer);
+    if (liveWorkspaceDebounceTimer) clearTimeout(liveWorkspaceDebounceTimer);
     await performSave();
   } else {
-    if (liveSessionDebounceTimer) clearTimeout(liveSessionDebounceTimer);
-    liveSessionDebounceTimer = setTimeout(() => {
+    if (liveWorkspaceDebounceTimer) clearTimeout(liveWorkspaceDebounceTimer);
+    liveWorkspaceDebounceTimer = setTimeout(() => {
       performSave();
-    }, 400);
+    }, 350);
   }
 };
+
 
 
