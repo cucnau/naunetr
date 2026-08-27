@@ -1,6 +1,6 @@
 import { db, auth } from './firebase';
-import { collection, doc, setDoc, getDocs, deleteDoc, writeBatch, query, where, Timestamp } from 'firebase/firestore';
-import { CustomTerm, Character, Relationship, Novel, Chapter, TextShortcut } from '../types';
+import { collection, doc, setDoc, getDocs, deleteDoc, writeBatch, query, where, Timestamp, onSnapshot } from 'firebase/firestore';
+import { CustomTerm, Character, Relationship, Novel, Chapter, TextShortcut, TranslationSegment } from '../types';
 
 export enum OperationType {
   CREATE = 'create',
@@ -457,4 +457,155 @@ export const saveShortcutsToCloud = async (novelId: string, shortcuts: TextShort
   if (!user || !novelId) return;
   await overwriteFirestoreData('shortcut', novelId, shortcuts);
 };
+
+// ==========================================
+// REAL-TIME SYNCHRONIZATION (ĐỒNG BỘ THỜI GIAN THỰC)
+// Laptop ⇄ Điện thoại thông minh (Phone)
+// ==========================================
+
+export interface LiveSessionData {
+  novelId: string;
+  chapterId?: string;
+  chapterName?: string;
+  completedSegments?: number[];
+  segments?: TranslationSegment[];
+  inputText?: string;
+  deeplText?: string;
+  preEditedText?: string;
+  updatedAt: number;
+  deviceId: string;
+  lastEditedIndex?: number;
+}
+
+export const getDeviceId = (): string => {
+  if (typeof window === 'undefined') return 'server';
+  try {
+    let id = localStorage.getItem('chiVietDeviceId');
+    if (!id) {
+      id = 'dev_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now();
+      localStorage.setItem('chiVietDeviceId', id);
+    }
+    return id;
+  } catch (e) {
+    return 'dev_' + Math.random().toString(36).substring(2, 9);
+  }
+};
+
+/**
+ * Lắng nghe thay đổi thời gian thực của toàn bộ danh sách chương thuộc truyện
+ */
+export const subscribeToChapters = (
+  novelId: string,
+  onUpdate: (chapters: Chapter[]) => void,
+  onError?: (error: any) => void
+): (() => void) => {
+  const user = auth.currentUser;
+  if (!user || !novelId) {
+    return () => {};
+  }
+
+  const path = 'chapters';
+  const q = query(
+    collection(db, path),
+    where('userId', '==', user.uid),
+    where('novelId', '==', novelId)
+  );
+
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const chapters: Chapter[] = [];
+      snapshot.forEach((d) => {
+        const data = d.data();
+        const { userId, ...rest } = data;
+        chapters.push({ id: d.id, ...rest } as Chapter);
+      });
+      chapters.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+      onUpdate(chapters);
+    },
+    (error) => {
+      console.warn("Lỗi lắng nghe thời gian thực chương Firestore:", error);
+      onError?.(error);
+    }
+  );
+};
+
+/**
+ * Lắng nghe thay đổi thời gian thực của Active Live Session (Đoạn đang edit & Tiến độ hoàn thành)
+ */
+export const subscribeToLiveSession = (
+  novelId: string,
+  onUpdate: (data: LiveSessionData) => void,
+  onError?: (error: any) => void
+): (() => void) => {
+  const user = auth.currentUser;
+  if (!user || !novelId) {
+    return () => {};
+  }
+
+  const docRef = doc(db, 'activeSessions', `${user.uid}_${novelId}`);
+
+  return onSnapshot(
+    docRef,
+    (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data() as LiveSessionData;
+        onUpdate(data);
+      }
+    },
+    (error) => {
+      console.warn("Lỗi lắng nghe thời gian thực Live Session:", error);
+      onError?.(error);
+    }
+  );
+};
+
+let liveSessionDebounceTimer: any = null;
+
+/**
+ * Đồng bộ thời gian thực trạng thái edit & các đoạn đã hoàn thành lên Firestore
+ */
+export const saveLiveSessionToCloud = async (
+  novelId: string,
+  data: Partial<LiveSessionData>,
+  immediate: boolean = false
+): Promise<void> => {
+  const user = auth.currentUser;
+  if (!user || !novelId) return;
+
+  const performSave = async () => {
+    try {
+      const docRef = doc(db, 'activeSessions', `${user.uid}_${novelId}`);
+      const payload: LiveSessionData = {
+        novelId,
+        chapterId: data.chapterId || '',
+        chapterName: data.chapterName || '',
+        completedSegments: data.completedSegments || [],
+        segments: data.segments || [],
+        inputText: data.inputText || '',
+        deeplText: data.deeplText || '',
+        preEditedText: data.preEditedText || '',
+        updatedAt: Date.now(),
+        deviceId: getDeviceId(),
+        lastEditedIndex: data.lastEditedIndex
+      };
+
+      const sanitized = sanitizeData(payload);
+      await setDoc(docRef, sanitized, { merge: true });
+    } catch (e) {
+      console.warn("Lỗi lưu Live Session lên Cloud:", e);
+    }
+  };
+
+  if (immediate) {
+    if (liveSessionDebounceTimer) clearTimeout(liveSessionDebounceTimer);
+    await performSave();
+  } else {
+    if (liveSessionDebounceTimer) clearTimeout(liveSessionDebounceTimer);
+    liveSessionDebounceTimer = setTimeout(() => {
+      performSave();
+    }, 400);
+  }
+};
+
 

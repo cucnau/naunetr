@@ -84,6 +84,20 @@
         "enabled": "boolean",
         "createdAt": "timestamp"
       }
+    },
+    {
+      "name": "activeSessions",
+      "purpose": "Real-time active workspace sync between mobile and laptop devices",
+      "access_pattern": "Users can read and write only their own active sessions.",
+      "document_schema": {
+        "userId": "string",
+        "novelId": "string",
+        "chapterId": "string",
+        "chapterName": "string",
+        "completedSegments": "array",
+        "updatedAt": "number",
+        "deviceId": "string"
+      }
     }
   ],
   "auth_required": true
