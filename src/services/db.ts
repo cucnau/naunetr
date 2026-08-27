@@ -10,6 +10,7 @@ const STORE_CHAPTERS = 'chapters';
 
 export const KEY_VIETPHRASE = 'vietphrase_data';
 export const KEY_VIETPHRASE_FILES = 'vietphrase_files';
+export const KEY_CURRENT_NOVEL = 'current_novel_id';
 
 const dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
     if (typeof window === 'undefined' || !window.indexedDB) {
@@ -99,6 +100,37 @@ export const db = {
             });
         } catch (e) {
             console.error("DB Save Vietphrase Error", e);
+        }
+    },
+
+    async getCurrentNovelId(): Promise<string | null> {
+        try {
+            const db = await dbPromise;
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(STORE_SETTINGS, 'readonly');
+                const store = tx.objectStore(STORE_SETTINGS);
+                const req = store.get(KEY_CURRENT_NOVEL);
+                req.onsuccess = () => resolve(req.result || null);
+                req.onerror = () => reject(req.error);
+            });
+        } catch (e) {
+            console.error("DB Get Current Novel ID Error", e);
+            return null;
+        }
+    },
+
+    async saveCurrentNovelId(novelId: string): Promise<void> {
+        try {
+            const db = await dbPromise;
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(STORE_SETTINGS, 'readwrite');
+                const store = tx.objectStore(STORE_SETTINGS);
+                const req = store.put(novelId, KEY_CURRENT_NOVEL);
+                req.onsuccess = () => resolve();
+                req.onerror = () => reject(req.error);
+            });
+        } catch (e) {
+            console.error("DB Save Current Novel ID Error", e);
         }
     },
 

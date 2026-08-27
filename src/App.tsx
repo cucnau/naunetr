@@ -314,6 +314,12 @@ useEffect(() => {
              setChapters(savedChapters);
          }
      });
+
+     db.getCurrentNovelId().then(savedNovelId => {
+         if (savedNovelId) {
+             setSession(prev => prev.currentNovelId ? prev : ({ ...prev, currentNovelId: savedNovelId }));
+         }
+     });
 }, []);
 
   // Tự động tải và ĐỒNG BỘ THỜI GIAN THỰC (Real-time) Toàn bộ Không gian làm việc (Truyện đang chọn, Bảng edit chương kể cả chưa lưu kho)
