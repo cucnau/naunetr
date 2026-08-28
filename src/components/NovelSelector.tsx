@@ -52,25 +52,19 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, on
     setError(null);
     try {
       const data = await getNovels();
-      setNovels(data);
-      const currentUid = uid || auth.currentUser?.uid;
-      if (currentUid) {
-        localStorage.setItem(`cached_novels_${currentUid}`, JSON.stringify(data));
-      }
-      localStorage.setItem('cached_novels_list', JSON.stringify(data));
-      if (data.length > 0 && !currentNovelId) {
-        onSelectNovel(data[0].id);
+      if (data && data.length > 0) {
+        setNovels(data);
+        const currentUid = uid || auth.currentUser?.uid;
+        if (currentUid) {
+          localStorage.setItem(`cached_novels_${currentUid}`, JSON.stringify(data));
+        }
+        localStorage.setItem('cached_novels_list', JSON.stringify(data));
+        if (!currentNovelId) {
+          onSelectNovel(data[0].id);
+        }
       }
     } catch (e: any) {
-      console.warn("Lỗi tải truyện từ cloud, sử dụng bộ nhớ cục bộ:", e);
-      let errMsg = 'Lỗi kết nối đám mây';
-      try {
-        const parsed = JSON.parse(e.message);
-        if (parsed.error) errMsg = parsed.error;
-      } catch (_) {
-        errMsg = e.message || 'Lỗi tải truyện';
-      }
-      setError(errMsg);
+      console.warn("Đang tải danh sách truyện từ bộ nhớ máy:", e);
     } finally {
       setLoading(false);
     }

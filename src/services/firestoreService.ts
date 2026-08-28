@@ -86,20 +86,33 @@ const withTimeout = <T>(promise: Promise<T>, ms: number = 8000, errorMsg: string
   });
 };
 
-export const getNovels = async (): Promise<Novel[]> => {
+export const getNovels = async (retryCount = 1): Promise<Novel[]> => {
   const user = auth.currentUser;
-  if (!user) throw new Error('Bạn cần đăng nhập!');
+  if (!user) return [];
   const path = 'novels';
   try {
     const q = query(collection(db, path), where('userId', '==', user.uid));
-    const snap = await withTimeout(getDocs(q), 7000, 'Tải danh sách truyện quá thời gian');
+    const snap = await withTimeout(getDocs(q), 8000, 'Tải danh sách truyện quá thời gian');
     const novels: Novel[] = [];
     snap.forEach(d => {
       novels.push({ id: d.id, name: d.data().name });
     });
     return novels;
   } catch (error) {
-    handleFirestoreError(error, OperationType.LIST, path);
+    if (retryCount > 0) {
+      await new Promise(res => setTimeout(res, 1000));
+      return getNovels(retryCount - 1);
+    }
+    console.warn("Không thể tải danh sách truyện từ đám mây (đang dùng cache cục bộ):", error);
+    // Trả về danh sách từ cache cục bộ nếu có
+    try {
+      const cached = localStorage.getItem(`cached_novels_${user.uid}`) || localStorage.getItem('cached_novels_list');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (_) {}
+    return [];
   }
 };
 
