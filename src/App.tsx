@@ -602,7 +602,7 @@ useEffect(() => {
           timestamp: Date.now()
         };
         db.saveChapter(updated).catch(err => console.error("Auto-save chapter failed", err));
-        saveChapterToCloud(updated).catch(err => console.error("Auto-save cloud chapter failed", err));
+        saveChapterToCloud(updated, false).catch(err => console.error("Auto-save cloud chapter failed", err));
         return updated;
       }
       return c;

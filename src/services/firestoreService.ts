@@ -357,24 +357,46 @@ export const getChaptersFromCloud = async (novelId: string, retryCount = 1): Pro
   }
 };
 
-export const saveChapterToCloud = async (chapter: Chapter): Promise<void> => {
+const chapterDebounceTimers = new Map<string, any>();
+
+export const saveChapterToCloud = async (chapter: Chapter, immediate: boolean = true): Promise<void> => {
   const user = auth.currentUser;
   if (!user) return; // Silent return if not logged in
-  if (!chapter.novelId) return;
+  if (!chapter.novelId || !chapter.id) return;
   const path = `chapters/${chapter.id}`;
-  try {
-    const rawData = {
-      ...chapter,
-      userId: user.uid,
-      createdAt: Timestamp.now()
-    };
-    const dataToSave = sanitizeData(rawData);
-    Object.keys(dataToSave).forEach(k => {
-      if (dataToSave[k] === undefined) delete dataToSave[k];
-    });
-    await setDoc(doc(db, 'chapters', chapter.id), dataToSave, { merge: true });
-  } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
+
+  const performSave = async () => {
+    try {
+      const rawData = {
+        ...chapter,
+        userId: user.uid,
+        createdAt: Timestamp.now()
+      };
+      const dataToSave = sanitizeData(rawData);
+      Object.keys(dataToSave).forEach(k => {
+        if (dataToSave[k] === undefined) delete dataToSave[k];
+      });
+      await setDoc(doc(db, 'chapters', chapter.id), dataToSave, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, path);
+    }
+  };
+
+  if (immediate) {
+    if (chapterDebounceTimers.has(chapter.id)) {
+      clearTimeout(chapterDebounceTimers.get(chapter.id));
+      chapterDebounceTimers.delete(chapter.id);
+    }
+    await performSave();
+  } else {
+    if (chapterDebounceTimers.has(chapter.id)) {
+      clearTimeout(chapterDebounceTimers.get(chapter.id));
+    }
+    const timer = setTimeout(() => {
+      chapterDebounceTimers.delete(chapter.id);
+      performSave();
+    }, 1200);
+    chapterDebounceTimers.set(chapter.id, timer);
   }
 };
 
@@ -583,8 +605,7 @@ export const saveUserLiveWorkspaceToCloud = async (
         chapterName: data.chapterName || '',
         status: data.status || '',
         completedSegments: data.completedSegments || [],
-        segments: data.segments || (data.result?.segments || []),
-        result: data.result || null,
+        result: data.result || (data.segments ? { segments: data.segments, naturalTranslation: data.segments.map(s => s.natural).join('\n') } as any : null),
         inputText: data.inputText || '',
         deeplText: data.deeplText || '',
         preEditedText: data.preEditedText || '',
@@ -607,7 +628,7 @@ export const saveUserLiveWorkspaceToCloud = async (
     if (liveWorkspaceDebounceTimer) clearTimeout(liveWorkspaceDebounceTimer);
     liveWorkspaceDebounceTimer = setTimeout(() => {
       performSave();
-    }, 350);
+    }, 1000);
   }
 };
 
