@@ -66,38 +66,47 @@ class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasErr
 const alignTranslation = (rawLines: string[], translation: string): string[] => {
     if (!translation.trim()) return new Array(rawLines.length).fill("");
     
-    const tLines = translation.split('\n').map(l => l.trim()).filter(l => l);
+    const tLines = translation.split('\n').map(l => l.trim()).filter(Boolean);
     const rLinesWithIndices = rawLines.map((l, i) => ({ text: l.trim(), index: i }));
     const validRLines = rLinesWithIndices.filter(l => l.text);
     
     const result = new Array(rawLines.length).fill("");
     if (validRLines.length === 0 || tLines.length === 0) return result;
     
-    // TRƯỜNG HỢP 1: Bản dịch dán vào đã có cấu trúc phân dòng tốt (số dòng dịch dán vào nhiều hoặc gần bằng số dòng raw)
-    // Ta ưu tiên map 1-1 theo dòng gốc để giữ nguyên vẹn cấu trúc xuống dòng cực chuẩn của người dùng dán vào
-    if (tLines.length === validRLines.length || Math.abs(tLines.length - validRLines.length) <= 1 && tLines.length >= validRLines.length * 0.9) {
-        let tIdx = 0;
+    // TRƯỜNG HỢP 1: Bản dịch dán vào đã có đúng số dòng tương ứng với các dòng gốc
+    // Ưu tiên tuyệt đối map 1-1 theo dòng để giữ nguyên vẹn cấu trúc và dấu ngoặc kép của từng dòng
+    if (tLines.length === validRLines.length) {
         validRLines.forEach((rLine, i) => {
-            if (tIdx < tLines.length) {
-                // Nếu đây là dòng cuối cùng, gom hết các dòng dịch dán vào còn thừa (nếu có)
-                if (i === validRLines.length - 1) {
-                    result[rLine.index] = tLines.slice(tIdx).join(" ");
-                } else {
-                    result[rLine.index] = tLines[tIdx++];
-                }
-            }
+            result[rLine.index] = tLines[i];
         });
         return result;
     }
     
-    // TRƯỜNG HỢP 2: Bản dịch thực sự bị dính cục (ví dụ chỉ có 1 hoặc 2 dòng dính liền, trong khi raw có nhiều dòng)
-    // Lúc này mới áp dụng thuật toán tách câu thông minh dựa trên tỷ lệ độ dài ký tự của dòng gốc
-    const translationText = tLines.join(" ");
-    // Tách thành các câu bằng regex mạnh mẽ hỗ trợ cả dấu câu dịch tiếng Trung lẫn tiếng Việt
-    const sentences = translationText.match(/[^.!?。！？]+(?:[.!?。！？]+(?:['"”\] \t])*?|(?=\s*$))/g) || [translationText];
-    const cleanSentences = sentences.map(s => s.trim()).filter(s => s);
+    // TRƯỜNG HỢP 2: Bản dịch bị gộp đoạn (hoặc số dòng lệch nhau)
+    // Tách câu an toàn theo từng dòng, BẢO TOÀN TUYỆT ĐỐI dấu ngoặc kép mở/đóng (“ ” " ' 』 」 ）、dấu câu
+    const cleanSentences: string[] = [];
+    for (const tLine of tLines) {
+        // Regex tham lam bắt trọn câu kèm toàn bộ dấu đóng ngoặc kép/đơn đi liền sau dấu ngắt câu
+        const matches = tLine.match(/[^.!?。！？…;；\n]+(?:[.!?。！？…;；]+["'”’』」）\)\>\]]*|(?=\n|$))/g);
+        if (matches && matches.length > 0) {
+            matches.forEach(m => {
+                const s = m.trim();
+                if (s) cleanSentences.push(s);
+            });
+        } else {
+            cleanSentences.push(tLine);
+        }
+    }
     
     if (cleanSentences.length === 0) return result;
+    
+    // Nếu số câu sau khi tách bằng đúng số dòng gốc
+    if (cleanSentences.length === validRLines.length) {
+        validRLines.forEach((rLine, i) => {
+            result[rLine.index] = cleanSentences[i];
+        });
+        return result;
+    }
     
     // Tính toán trọng số dựa trên độ dài ký tự thô của dòng gốc (bỏ dấu cách và dấu câu Trung)
     const rawCleanLengths = validRLines.map(r => {
@@ -121,6 +130,16 @@ const alignTranslation = (rawLines: string[], translation: string): string[] => 
             return;
         }
         
+        // Nếu số câu còn lại nhỏ hơn hoặc bằng số dòng còn lại, mỗi dòng nhận 1 câu
+        const remainingSentences = cleanSentences.length - sentenceIdx;
+        const remainingLines = validRLines.length - i;
+        if (remainingSentences <= remainingLines) {
+            if (sentenceIdx < cleanSentences.length) {
+                result[rLine.index] = cleanSentences[sentenceIdx++];
+            }
+            return;
+        }
+        
         const lineTarget = totalTransLength * targetProportions[i];
         const lineSentences: string[] = [];
         let currentLineLength = 0;
@@ -128,7 +147,7 @@ const alignTranslation = (rawLines: string[], translation: string): string[] => 
         while (sentenceIdx < cleanSentences.length) {
             const sentence = cleanSentences[sentenceIdx];
             
-            // Bắt buộc lấy ít nhất 1 câu đầu tiên cho dòng này để tránh bị trống dòng vô lý
+            // Bắt buộc lấy ít nhất 1 câu đầu tiên cho dòng này
             if (lineSentences.length === 0) {
                 lineSentences.push(sentence);
                 currentLineLength += sentence.length;
@@ -148,7 +167,6 @@ const alignTranslation = (rawLines: string[], translation: string): string[] => 
             const distWith = Math.abs(lineTarget - (currentLineLength + sentence.length));
             
             if (distWith > distWithout) {
-                // cân bằng tối ưu hơn nếu dừng trước khi lấy câu này
                 break;
             }
             
