@@ -371,6 +371,8 @@ export const getChaptersFromCloud = async (novelId: string, retryCount = 1): Pro
 };
 
 const chapterDebounceTimers = new Map<string, any>();
+const chaptersInFlight = new Set<string>();
+const pendingChapterSaves = new Map<string, Chapter>();
 
 export const saveChapterToCloud = async (chapter: Chapter, immediate: boolean = true): Promise<void> => {
   const user = auth.currentUser;
@@ -378,10 +380,11 @@ export const saveChapterToCloud = async (chapter: Chapter, immediate: boolean = 
   if (!chapter.novelId || !chapter.id) return;
   const path = `chapters/${chapter.id}`;
 
-  const performSave = async () => {
+  const executeWrite = async (chap: Chapter) => {
+    chaptersInFlight.add(chap.id);
     try {
       const rawData = {
-        ...chapter,
+        ...chap,
         userId: user.uid,
         createdAt: Timestamp.now()
       };
@@ -389,10 +392,27 @@ export const saveChapterToCloud = async (chapter: Chapter, immediate: boolean = 
       Object.keys(dataToSave).forEach(k => {
         if (dataToSave[k] === undefined) delete dataToSave[k];
       });
-      await setDoc(doc(db, 'chapters', chapter.id), dataToSave, { merge: true });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, path);
+      await setDoc(doc(db, 'chapters', chap.id), dataToSave, { merge: true });
+    } catch (error: any) {
+      console.warn("Lỗi lưu chương lên Cloud:", error?.message || error);
+    } finally {
+      chaptersInFlight.delete(chap.id);
+      // Nếu trong lúc đang lưu mà có dữ liệu mới hơn được gõ vào, lưu tiếp lượt cuối cùng
+      if (pendingChapterSaves.has(chap.id)) {
+        const nextData = pendingChapterSaves.get(chap.id)!;
+        pendingChapterSaves.delete(chap.id);
+        executeWrite(nextData);
+      }
     }
+  };
+
+  const scheduleSave = (chap: Chapter) => {
+    if (chaptersInFlight.has(chap.id)) {
+      // Đang có lượt ghi trên đường truyền, lưu lại snapshot mới nhất để ghi sau khi xong
+      pendingChapterSaves.set(chap.id, chap);
+      return;
+    }
+    executeWrite(chap);
   };
 
   if (immediate) {
@@ -400,15 +420,18 @@ export const saveChapterToCloud = async (chapter: Chapter, immediate: boolean = 
       clearTimeout(chapterDebounceTimers.get(chapter.id));
       chapterDebounceTimers.delete(chapter.id);
     }
-    await performSave();
+    scheduleSave(chapter);
   } else {
+    pendingChapterSaves.set(chapter.id, chapter);
     if (chapterDebounceTimers.has(chapter.id)) {
       clearTimeout(chapterDebounceTimers.get(chapter.id));
     }
     const timer = setTimeout(() => {
       chapterDebounceTimers.delete(chapter.id);
-      performSave();
-    }, 1200);
+      const latest = pendingChapterSaves.get(chapter.id) || chapter;
+      pendingChapterSaves.delete(chapter.id);
+      scheduleSave(latest);
+    }, 2500);
     chapterDebounceTimers.set(chapter.id, timer);
   }
 };
@@ -417,8 +440,8 @@ export const bulkSaveChaptersToCloud = async (chapters: Chapter[]): Promise<void
   const user = auth.currentUser;
   if (!user || chapters.length === 0) return;
   
-  // Batch writes in small chunks of 10 chapters because chapter texts are large
-  const chunkSize = 10;
+  // Batch writes in small chunks of 5 chapters with pause to prevent stream exhaust
+  const chunkSize = 5;
   for (let i = 0; i < chapters.length; i += chunkSize) {
     const chunk = chapters.slice(i, i + chunkSize);
     const batch = writeBatch(db);
@@ -435,7 +458,14 @@ export const bulkSaveChaptersToCloud = async (chapters: Chapter[]): Promise<void
       });
       batch.set(doc(db, 'chapters', ch.id), dataToSave, { merge: true });
     });
-    await batch.commit();
+    try {
+      await batch.commit();
+      if (i + chunkSize < chapters.length) {
+        await new Promise(res => setTimeout(res, 500)); // Nghỉ ngắn giữa các batch
+      }
+    } catch (e) {
+      console.warn("Lỗi lưu batch chương lên Cloud:", e);
+    }
   }
 };
 
@@ -598,6 +628,8 @@ export const subscribeToUserLiveWorkspace = (
 };
 
 let liveWorkspaceDebounceTimer: any = null;
+let isLiveWorkspaceInFlight = false;
+let pendingLiveWorkspaceData: Partial<LiveSessionData> | null = null;
 
 /**
  * Đẩy toàn bộ trạng thái không gian làm việc hiện tại lên Cloud để các thiết bị khác đồng bộ tức thì
@@ -609,39 +641,60 @@ export const saveUserLiveWorkspaceToCloud = async (
   const user = auth.currentUser;
   if (!user) return;
 
-  const performSave = async () => {
+  const executeSave = async (payloadData: Partial<LiveSessionData>) => {
+    isLiveWorkspaceInFlight = true;
     try {
       const docRef = doc(db, 'activeSessions', `ws_${user.uid}`);
       const payload: LiveSessionData = {
-        novelId: data.novelId || '',
-        chapterId: data.chapterId || '',
-        chapterName: data.chapterName || '',
-        status: data.status || '',
-        completedSegments: data.completedSegments || [],
-        result: data.result || (data.segments ? { segments: data.segments, naturalTranslation: data.segments.map(s => s.natural).join('\n') } as any : null),
-        inputText: data.inputText || '',
-        deeplText: data.deeplText || '',
-        preEditedText: data.preEditedText || '',
+        novelId: payloadData.novelId || '',
+        chapterId: payloadData.chapterId || '',
+        chapterName: payloadData.chapterName || '',
+        status: payloadData.status || '',
+        completedSegments: payloadData.completedSegments || [],
+        result: payloadData.result || (payloadData.segments ? { segments: payloadData.segments, naturalTranslation: payloadData.segments.map(s => s.natural).join('\n') } as any : null),
+        inputText: payloadData.inputText || '',
+        deeplText: payloadData.deeplText || '',
+        preEditedText: payloadData.preEditedText || '',
         updatedAt: Date.now(),
         deviceId: getDeviceId(),
-        lastEditedIndex: data.lastEditedIndex
+        lastEditedIndex: payloadData.lastEditedIndex
       };
 
       const sanitized = sanitizeData(payload);
       await setDoc(docRef, sanitized, { merge: true });
-    } catch (e) {
-      console.warn("Lỗi lưu Live Workspace lên Cloud:", e);
+    } catch (e: any) {
+      console.warn("Lỗi lưu Live Workspace lên Cloud:", e?.message || e);
+    } finally {
+      isLiveWorkspaceInFlight = false;
+      if (pendingLiveWorkspaceData) {
+        const next = pendingLiveWorkspaceData;
+        pendingLiveWorkspaceData = null;
+        executeSave(next);
+      }
     }
+  };
+
+  const scheduleSave = (targetData: Partial<LiveSessionData>) => {
+    if (isLiveWorkspaceInFlight) {
+      pendingLiveWorkspaceData = targetData;
+      return;
+    }
+    executeSave(targetData);
   };
 
   if (immediate) {
     if (liveWorkspaceDebounceTimer) clearTimeout(liveWorkspaceDebounceTimer);
-    await performSave();
+    scheduleSave(data);
   } else {
+    pendingLiveWorkspaceData = data;
     if (liveWorkspaceDebounceTimer) clearTimeout(liveWorkspaceDebounceTimer);
     liveWorkspaceDebounceTimer = setTimeout(() => {
-      performSave();
-    }, 1000);
+      if (pendingLiveWorkspaceData) {
+        const latest = pendingLiveWorkspaceData;
+        pendingLiveWorkspaceData = null;
+        scheduleSave(latest);
+      }
+    }, 2000);
   }
 };
 
