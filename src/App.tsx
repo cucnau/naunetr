@@ -62,122 +62,68 @@ class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasErr
   }
 }
 
-// Hàm căn lề bản dịch (nhất là GG Translate thường xuyên gộp đoạn)
+// Hàm căn lề bản dịch (giữ nguyên 100% từng dòng/đoạn người dùng đã nhập)
 const alignTranslation = (rawLines: string[], translation: string): string[] => {
-    if (!translation.trim()) return new Array(rawLines.length).fill("");
+    if (!translation || !translation.trim()) return new Array(rawLines.length).fill("");
     
-    const tLines = translation.split('\n').map(l => l.trim()).filter(Boolean);
-    const rLinesWithIndices = rawLines.map((l, i) => ({ text: l.trim(), index: i }));
-    const validRLines = rLinesWithIndices.filter(l => l.text);
-    
+    // Tách các dòng của bản dịch theo dấu xuống hàng chuẩn
+    const tRawLines = translation.split(/\r?\n/).map(l => l.replace(/\r$/, ''));
     const result = new Array(rawLines.length).fill("");
-    if (validRLines.length === 0 || tLines.length === 0) return result;
     
-    // TRƯỜNG HỢP 1: Bản dịch dán vào đã có đúng số dòng tương ứng với các dòng gốc
-    // Ưu tiên tuyệt đối map 1-1 theo dòng để giữ nguyên vẹn cấu trúc và dấu ngoặc kép của từng dòng
-    if (tLines.length === validRLines.length) {
-        validRLines.forEach((rLine, i) => {
-            result[rLine.index] = tLines[i];
-        });
+    // NẾU BẢN DỊCH ĐÃ CÓ PHÂN DÒNG (người dùng đã xuống dòng / có sẵn cấu trúc đoạn):
+    // Giữ nguyên 100% dòng nào vào đúng dòng đó theo đúng vị trí người dùng đã nhập, KHÔNG CẮT/XÉ CÂU
+    if (tRawLines.length > 1 || rawLines.length <= 1) {
+        for (let i = 0; i < rawLines.length; i++) {
+            if (i < tRawLines.length) {
+                result[i] = tRawLines[i];
+            }
+        }
+        // Nếu số dòng dịch nhiều hơn số dòng raw, gom các dòng thừa vào dòng cuối cùng
+        if (tRawLines.length > rawLines.length && rawLines.length > 0) {
+            const extra = tRawLines.slice(rawLines.length - 1).filter(l => l.trim() !== "");
+            result[rawLines.length - 1] = extra.join("\n");
+        }
         return result;
     }
     
-    // TRƯỜNG HỢP 2: Bản dịch bị gộp đoạn (hoặc số dòng lệch nhau)
-    // Tách câu an toàn theo từng dòng, BẢO TOÀN TUYỆT ĐỐI dấu ngoặc kép mở/đóng (“ ” " ' 』 」 ）、dấu câu
-    const cleanSentences: string[] = [];
-    for (const tLine of tLines) {
-        // Regex tham lam bắt trọn câu kèm toàn bộ dấu đóng ngoặc kép/đơn đi liền sau dấu ngắt câu
-        const matches = tLine.match(/[^.!?。！？…;；\n]+(?:[.!?。！？…;；]+["'”’』」）\)\>\]]*|(?=\n|$))/g);
-        if (matches && matches.length > 0) {
-            matches.forEach(m => {
-                const s = m.trim();
-                if (s) cleanSentences.push(s);
-            });
+    // TRƯỜNG HỢP DUY NHẤT CẦN TÁCH CÂU: Bản dịch chỉ là 1 khối duy nhất (1 dòng) trong khi raw có nhiều dòng
+    const singleBlock = tRawLines[0] || translation;
+    const validRLines = rawLines.map((l, i) => ({ text: l.trim(), index: i })).filter(l => l.text);
+    if (validRLines.length === 0) return result;
+    
+    // Tách câu an toàn không xé dấu ngoặc kép
+    const regex = /[^.!?。！？…;；\n]+(?:[.!?。！？…;；]+["'”’』」）\)\>\]]*|(?=\n|$))/g;
+    const matches = singleBlock.match(regex) || [singleBlock];
+    const cleanUnits: string[] = [];
+    let buffer = "";
+    for (const part of matches) {
+        const p = part.trim();
+        if (!p) continue;
+        if (!buffer) {
+            buffer = p;
         } else {
-            cleanSentences.push(tLine);
+            const openQuotes = (buffer.match(/["“「『]/g) || []).length;
+            const closeQuotes = (buffer.match(/["”」』]/g) || []).length;
+            if (openQuotes > closeQuotes) {
+                buffer += " " + p;
+            } else {
+                cleanUnits.push(buffer);
+                buffer = p;
+            }
         }
     }
+    if (buffer) cleanUnits.push(buffer);
     
-    if (cleanSentences.length === 0) return result;
-    
-    // Nếu số câu sau khi tách bằng đúng số dòng gốc
-    if (cleanSentences.length === validRLines.length) {
-        validRLines.forEach((rLine, i) => {
-            result[rLine.index] = cleanSentences[i];
-        });
-        return result;
-    }
-    
-    // Tính toán trọng số dựa trên độ dài ký tự thô của dòng gốc (bỏ dấu cách và dấu câu Trung)
-    const rawCleanLengths = validRLines.map(r => {
-        const cleanText = r.text.replace(/[\s\p{P}]/gu, '');
-        return cleanText.length || 1;
-    });
-    
-    const totalRawLength = rawCleanLengths.reduce((sum, l) => sum + l, 0) || 1;
-    const targetProportions = rawCleanLengths.map(l => l / totalRawLength);
-    
-    // Tổng chiều dài ký tự tiếng Việt đã dịch
-    const totalTransLength = cleanSentences.reduce((sum, s) => sum + s.length, 0) || 1;
-    
-    let sentenceIdx = 0;
-    
+    // Phân bổ 1-1 cho các dòng
     validRLines.forEach((rLine, i) => {
-        // Dòng cuối cùng nhận toàn bộ những câu còn lại
-        if (i === validRLines.length - 1) {
-            const assigned = cleanSentences.slice(sentenceIdx);
-            result[rLine.index] = assigned.join(" ");
-            return;
+        if (i < cleanUnits.length) {
+            result[rLine.index] = cleanUnits[i];
         }
-        
-        // Nếu số câu còn lại nhỏ hơn hoặc bằng số dòng còn lại, mỗi dòng nhận 1 câu
-        const remainingSentences = cleanSentences.length - sentenceIdx;
-        const remainingLines = validRLines.length - i;
-        if (remainingSentences <= remainingLines) {
-            if (sentenceIdx < cleanSentences.length) {
-                result[rLine.index] = cleanSentences[sentenceIdx++];
-            }
-            return;
-        }
-        
-        const lineTarget = totalTransLength * targetProportions[i];
-        const lineSentences: string[] = [];
-        let currentLineLength = 0;
-        
-        while (sentenceIdx < cleanSentences.length) {
-            const sentence = cleanSentences[sentenceIdx];
-            
-            // Bắt buộc lấy ít nhất 1 câu đầu tiên cho dòng này
-            if (lineSentences.length === 0) {
-                lineSentences.push(sentence);
-                currentLineLength += sentence.length;
-                sentenceIdx++;
-                continue;
-            }
-            
-            // RÀO CHẮN BẢO VỆ: Đảm bảo chừa đủ số câu tối thiểu cho các dòng còn lại tiếp theo
-            const remainingSentencesAfterThis = cleanSentences.length - sentenceIdx - 1;
-            const remainingLinesAfterThis = validRLines.length - 1 - i;
-            if (remainingSentencesAfterThis < remainingLinesAfterThis) {
-                break;
-            }
-            
-            // Tính khoảng cách tới độ dài mục tiêu để quyết định xem có nên lấy câu này không
-            const distWithout = Math.abs(lineTarget - currentLineLength);
-            const distWith = Math.abs(lineTarget - (currentLineLength + sentence.length));
-            
-            if (distWith > distWithout) {
-                break;
-            }
-            
-            lineSentences.push(sentence);
-            currentLineLength += sentence.length;
-            sentenceIdx++;
-        }
-        
-        result[rLine.index] = lineSentences.join(" ");
     });
-    
+    if (cleanUnits.length > validRLines.length && validRLines.length > 0) {
+        const lastValid = validRLines[validRLines.length - 1];
+        result[lastValid.index] = cleanUnits.slice(validRLines.length - 1).join(" ");
+    }
     return result;
 };
 
@@ -967,7 +913,7 @@ useEffect(() => {
     }
 
     // --- BƯỚC 1: TÍNH TOÁN VIETPHRASE NỘI BỘ ---
-    const inputLines = session.inputText.split('\n');
+    const inputLines = session.inputText.split(/\r?\n/).map(l => l.replace(/\r$/, ''));
     
     const customMap = new Map<string, string>();
     (session.characters || []).forEach(c => {
