@@ -1049,13 +1049,16 @@ useEffect(() => {
     setHistory(prev => prev.filter(item => item.id !== id));
   };
 
-  const handleSaveChapter = async (name: string) => {
+  const handleSaveChapter = async (name: string, saveMode: 'new' | 'update' = 'new') => {
     if (!session.result) return;
     lastLocalEditTimeRef.current = Date.now();
 
-    // Reuse existing chapter ID if we are editing an active chapter, or overwrite by name
-    const existingChapter = chapters.find(c => c.id === session.currentChapterId || c.name.trim().toLowerCase() === name.trim().toLowerCase());
-    const chapterId = existingChapter?.id || `chap_${Date.now()}`;
+    let chapterId: string;
+    if (saveMode === 'update' && session.currentChapterId) {
+      chapterId = session.currentChapterId;
+    } else {
+      chapterId = `chap_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    }
 
     const newChapter: Chapter = {
       id: chapterId,
@@ -1071,7 +1074,14 @@ useEffect(() => {
 
     await db.saveChapter(newChapter);
     await saveChapterToCloud(newChapter);
-    setChapters(prev => [newChapter, ...prev.filter(c => c.id !== chapterId && c.name.trim().toLowerCase() !== name.trim().toLowerCase())]);
+    setChapters(prev => {
+      const exists = prev.some(c => c.id === chapterId);
+      if (exists) {
+        return prev.map(c => c.id === chapterId ? newChapter : c);
+      } else {
+        return [newChapter, ...prev];
+      }
+    });
     updateSession({ currentChapterId: chapterId });
 
     saveUserLiveWorkspaceToCloud({
@@ -1519,6 +1529,10 @@ useEffect(() => {
                                 canRedo={redoStack.length > 0}
                                 isFocusMode={isFocusMode}
                                 onToggleFocusMode={() => setIsFocusMode(!isFocusMode)}
+                                currentNovelId={session.currentNovelId}
+                                currentChapterId={session.currentChapterId}
+                                currentChapterName={chapters.find(c => c.id === session.currentChapterId)?.name}
+                                chaptersCount={currentNovelChapters.length}
                                 onUpdateTerms={(novelTerms) => {
                                     try {
                                         const currentId = session.currentNovelId;

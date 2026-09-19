@@ -15,7 +15,7 @@ interface TranslationOutputProps {
   onUpdateSegment?: (index: number, newNatural: string) => void;
   onUpdateAllSegments?: (newNaturals: string[]) => void;
   onToggleComplete?: (index: number) => void;
-  onSaveChapter?: (name: string) => void;
+  onSaveChapter?: (name: string, saveMode?: 'new' | 'update') => void;
   onUndo?: () => void;
   onRedo?: () => void;
   canUndo?: boolean;
@@ -25,6 +25,9 @@ interface TranslationOutputProps {
   onUpdateTerms?: (terms: CustomTerm[]) => void;
   onUpdateCharacters?: (characters: Character[]) => void;
   currentNovelId?: string;
+  currentChapterId?: string;
+  currentChapterName?: string;
+  chaptersCount?: number;
 }
 
 const escapeRegExp = (string: string) => {
@@ -291,12 +294,16 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
     onToggleFocusMode,
     onUpdateTerms,
     onUpdateCharacters,
-    currentNovelId
+    currentNovelId,
+    currentChapterId,
+    currentChapterName,
+    chaptersCount = 0
 }) => {
   const [showNamingModal, setShowNamingModal] = useState(false);
   const [exportFileName, setExportFileName] = useState('');
   const [showSaveArchiveModal, setShowSaveArchiveModal] = useState(false);
   const [archiveChapterName, setArchiveChapterName] = useState('');
+  const [saveMode, setSaveMode] = useState<'new' | 'update'>('new');
   const [vpVersion, setVpVersion] = useState(0);
   const [activeVocab, setActiveVocab] = useState<{ 
     item: VocabItem; 
@@ -782,19 +789,45 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
     setShowNamingModal(true);
   };
 
-  const handleConfirmSaveArchive = () => {
+  const handleConfirmSaveArchive = (overrideMode?: 'new' | 'update') => {
     let name = archiveChapterName.trim();
     if (!name) {
-      name = `Chương_${new Date().toISOString().slice(0, 10)}`;
+      name = `Chương ${(chaptersCount || 0) + 1}`;
     }
-    onSaveChapter?.(name);
+    const finalMode = overrideMode || saveMode;
+    onSaveChapter?.(name, finalMode);
     setShowSaveArchiveModal(false);
   };
 
   const saveToArchive = () => {
     if (!data.segments || data.segments.length === 0) return;
-    const defaultName = `Chương_${new Date().toISOString().slice(0, 10)}`;
-    setArchiveChapterName(defaultName);
+
+    let detectedName = "";
+    for (const seg of data.segments.slice(0, 6)) {
+      const src = (seg.source || "").trim();
+      const nat = (seg.natural || "").trim();
+      const qk = (seg.quick || "").trim();
+      if (src.match(/(Chương\s+\d+|第[一二三四五六七八九十百千万\d]+章)/i)) {
+        detectedName = nat || qk || src;
+        break;
+      }
+    }
+    if (!detectedName && data.segments.length > 0) {
+      const firstLine = (data.segments[0].natural || data.segments[0].quick || data.segments[0].source || "").trim();
+      if (firstLine) {
+        detectedName = firstLine.slice(0, 45);
+      }
+    }
+
+    if (currentChapterId && currentChapterName) {
+      setArchiveChapterName(currentChapterName);
+      setSaveMode('update');
+    } else {
+      const defaultName = detectedName || `Chương ${(chaptersCount || 0) + 1}`;
+      setArchiveChapterName(defaultName);
+      setSaveMode('new');
+    }
+
     setShowSaveArchiveModal(true);
   };
 
@@ -1587,38 +1620,79 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
               </button>
             </div>
             
-            <div className="p-5">
-              <label className="block text-xs font-bold text-[#5D4037] mb-2 uppercase tracking-wide">Tên chương để lưu trữ</label>
-              <input
-                type="text"
-                value={archiveChapterName}
-                onChange={(e) => setArchiveChapterName(e.target.value)}
-                placeholder="VD: Chương 123: Tiêu đề chương"
-                className="w-full bg-white border border-[#D7CCC8] rounded px-3 py-2 text-[#3E2723] text-sm outline-none focus:border-[#8D6E63] focus:ring-1 focus:ring-[#8D6E63] transition-all font-medium"
-                autoFocus
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    handleConfirmSaveArchive();
-                  }
-                }}
-              />
-              <p className="text-[10px] text-[#A1887F] mt-2 italic">
-                Chương sẽ được lưu trữ cục bộ để tích lũy. Khi cần có thể tải ZIP toàn bộ hoặc khôi phục để sửa tiếp.
-              </p>
+            <div className="p-5 space-y-4">
+              {currentChapterId && currentChapterName && (
+                <div className="bg-[#EFEBE9]/60 border border-[#D7CCC8] rounded-lg p-2.5">
+                  <div className="text-[11px] text-[#8D6E63] font-medium mb-1.5">
+                    Đang chỉnh sửa: <span className="font-bold text-[#5D4037]">{currentChapterName}</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5 bg-[#D7CCC8]/40 p-1 rounded-md">
+                    <button
+                      type="button"
+                      onClick={() => setSaveMode('new')}
+                      className={`py-1.5 px-2 rounded text-xs font-bold transition-all flex items-center justify-center gap-1 ${
+                        saveMode === 'new' 
+                          ? 'bg-[#5D4037] text-white shadow-sm' 
+                          : 'text-[#5D4037] hover:bg-white/60'
+                      }`}
+                    >
+                      <Plus size={13} />
+                      <span>Lưu chương mới</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSaveMode('update')}
+                      className={`py-1.5 px-2 rounded text-xs font-bold transition-all flex items-center justify-center gap-1 ${
+                        saveMode === 'update' 
+                          ? 'bg-[#8D6E63] text-white shadow-sm' 
+                          : 'text-[#5D4037] hover:bg-white/60'
+                      }`}
+                    >
+                      <Check size={13} />
+                      <span>Cập nhật chương này</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-bold text-[#5D4037] mb-1.5 uppercase tracking-wide">
+                  {saveMode === 'new' ? 'Tên chương mới' : 'Tên chương cập nhật'}
+                </label>
+                <input
+                  type="text"
+                  value={archiveChapterName}
+                  onChange={(e) => setArchiveChapterName(e.target.value)}
+                  placeholder="VD: Chương 123: Tiêu đề chương"
+                  className="w-full bg-white border border-[#D7CCC8] rounded-lg px-3 py-2 text-[#3E2723] text-sm outline-none focus:border-[#8D6E63] focus:ring-1 focus:ring-[#8D6E63] transition-all font-medium"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleConfirmSaveArchive();
+                    }
+                  }}
+                />
+                <p className="text-[10px] text-[#A1887F] mt-1.5 italic">
+                  {saveMode === 'new' 
+                    ? 'Tạo một bản lưu chương mới độc lập trong kho (không ghi đè chương cũ).'
+                    : 'Ghi đè nội dung mới nhất vào chương đang mở trong kho.'}
+                </p>
+              </div>
             </div>
             
             <div className="bg-[#F5F2F0] px-5 py-3 border-t border-[#D7CCC8] flex justify-end gap-2">
               <button
                 onClick={() => setShowSaveArchiveModal(false)}
-                className="px-3.5 py-1.5 rounded text-xs font-bold text-[#5D4037] hover:bg-[#D7CCC8]/30 transition-all border border-transparent"
+                className="px-3.5 py-1.5 rounded-lg text-xs font-bold text-[#5D4037] hover:bg-[#D7CCC8]/30 transition-all border border-transparent"
               >
                 Hủy
               </button>
               <button
-                onClick={handleConfirmSaveArchive}
-                className="px-4 py-1.5 rounded bg-[#5D4037] hover:bg-[#3E2723] text-white text-xs font-bold transition-all shadow-sm"
+                onClick={() => handleConfirmSaveArchive()}
+                className="px-4 py-1.5 rounded-lg bg-[#5D4037] hover:bg-[#3E2723] text-white text-xs font-bold transition-all shadow-sm flex items-center gap-1.5"
               >
-                Lưu Chương
+                {saveMode === 'new' ? <Plus size={14} /> : <Check size={14} />}
+                <span>{saveMode === 'new' ? 'Lưu Chương Mới' : 'Cập Nhật Chương'}</span>
               </button>
             </div>
           </div>
