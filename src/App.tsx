@@ -1541,8 +1541,6 @@ useEffect(() => {
                         console.error("App Sidebar: onUpdateTerms caught error:", err);
                     }
                 }} 
-                characters={session.characters}
-                onUpdateCharacters={handleUpdateCharacters}
                 sheetUrl={session.sheetUrl} 
                 onUpdateSheetUrl={(url) => updateSession({ sheetUrl: url })} 
                 refreshTrigger={vpLoaded}
@@ -1559,7 +1557,7 @@ useEffect(() => {
             <div className="relative w-80 max-w-[85vw] bg-[#EFE5D9] h-full shadow-2xl z-10 flex flex-col animate-in slide-in-from-left duration-200">
               <div className="flex items-center justify-between p-2.5 bg-[#4E342E] text-white border-b border-[#3E2723]">
                 <span className="text-xs font-bold text-[#FFECB3] flex items-center gap-1.5">
-                  <BookA size={14} /> Kho từ vựng & Nhân vật
+                  <BookA size={14} /> Kho từ vựng
                 </span>
                 <button 
                   onClick={() => setShowMobileSidebar(false)}
@@ -1585,8 +1583,6 @@ useEffect(() => {
                             console.error("App Sidebar: onUpdateTerms caught error:", err);
                         }
                     }} 
-                    characters={session.characters}
-                    onUpdateCharacters={handleUpdateCharacters}
                     sheetUrl={session.sheetUrl} 
                     onUpdateSheetUrl={(url) => updateSession({ sheetUrl: url })} 
                     refreshTrigger={vpLoaded}
