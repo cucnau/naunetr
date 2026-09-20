@@ -255,6 +255,7 @@ function AppContent() {
   const [autoCleanBlankLines, setAutoCleanBlankLines] = useState(true);
   const [lastRemoteSyncTime, setLastRemoteSyncTime] = useState<number>(0);
   const lastLocalEditTimeRef = useRef<number>(0);
+  const deletedChapterIdsRef = useRef<Set<string>>(new Set());
 
   // --- REFS ---
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -406,7 +407,14 @@ useEffect(() => {
             realtimeChapters.forEach(c => db.saveChapter(c));
             setChapters(prev => {
               const otherNovelsChapters = prev.filter(c => c.novelId && c.novelId !== currentNovelId);
-              return [...realtimeChapters, ...otherNovelsChapters];
+              const currentNovelExisting = prev.filter(c => !c.novelId || c.novelId === currentNovelId);
+              const map = new Map<string, Chapter>();
+              currentNovelExisting.forEach(c => map.set(c.id, c));
+              realtimeChapters.forEach(c => map.set(c.id, c));
+              const mergedCurrent = Array.from(map.values())
+                .filter(c => !deletedChapterIdsRef.current.has(c.id))
+                .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+              return [...mergedCurrent, ...otherNovelsChapters];
             });
           });
         }
@@ -1365,6 +1373,7 @@ useEffect(() => {
   };
 
   const handleDeleteChapter = async (id: string) => {
+    deletedChapterIdsRef.current.add(id);
     await db.deleteChapter(id);
     await deleteChapterFromCloud(id);
     setChapters(prev => prev.filter(c => c.id !== id));

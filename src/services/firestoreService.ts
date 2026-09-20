@@ -345,6 +345,62 @@ export const syncFirestoreData = async <T extends { id: string, novelId?: string
   return [];
 };
 
+export const restoreLeanChapter = (raw: any): Chapter => {
+  const chapter = { ...raw } as Chapter;
+  if (chapter.result?.segments && chapter.result.segments.length > 0) {
+    const segs = chapter.result.segments;
+    if (!chapter.inputText) {
+      chapter.inputText = segs.map(s => s.source || '').join('\n');
+    }
+    if (!chapter.deeplText) {
+      chapter.deeplText = segs.map(s => s.deepl || '').join('\n');
+    }
+    if (!chapter.result.naturalTranslation) {
+      chapter.result.naturalTranslation = segs.map(s => s.natural || '').join('\n');
+    }
+    if (!chapter.result.quickTrans) {
+      chapter.result.quickTrans = segs.map(s => s.quick || '').join('\n');
+    }
+    if (!chapter.result.deeplTranslation) {
+      chapter.result.deeplTranslation = segs.map(s => s.deepl || '').join('\n');
+    }
+  }
+  return chapter;
+};
+
+const prepareChapterForCloud = (chap: Chapter, userId: string): Record<string, any> => {
+  const rawData: any = {
+    ...chap,
+    userId,
+    createdAt: Timestamp.now()
+  };
+
+  // If chapter has segments, prune duplicate joined full-text strings if estimated size > 500KB
+  if (rawData.result?.segments && rawData.result.segments.length > 0) {
+    const jsonEstimate = JSON.stringify(rawData);
+    if (jsonEstimate.length > 500 * 1024) {
+      rawData.result = {
+        segments: rawData.result.segments,
+        naturalTranslation: "",
+        quickTrans: "",
+        deeplTranslation: "",
+        sinoVietnamese: "",
+        vocabulary: []
+      };
+      rawData.inputText = "";
+      rawData.deeplText = "";
+      rawData.preEditedText = "";
+      rawData._isLean = true;
+    }
+  }
+
+  const dataToSave = sanitizeData(rawData);
+  Object.keys(dataToSave).forEach(k => {
+    if (dataToSave[k] === undefined) delete dataToSave[k];
+  });
+  return dataToSave;
+};
+
 export const getChaptersFromCloud = async (novelId: string, retryCount = 1): Promise<Chapter[]> => {
   const user = auth.currentUser;
   if (!user || !novelId) return [];
@@ -356,7 +412,7 @@ export const getChaptersFromCloud = async (novelId: string, retryCount = 1): Pro
     snap.forEach(d => {
       const data = d.data();
       const { userId, ...rest } = data;
-      chapters.push({ id: d.id, ...rest } as Chapter);
+      chapters.push(restoreLeanChapter({ id: d.id, ...rest }));
     });
     chapters.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
     return chapters;
@@ -383,15 +439,7 @@ export const saveChapterToCloud = async (chapter: Chapter, immediate: boolean = 
   const executeWrite = async (chap: Chapter) => {
     chaptersInFlight.add(chap.id);
     try {
-      const rawData = {
-        ...chap,
-        userId: user.uid,
-        createdAt: Timestamp.now()
-      };
-      const dataToSave = sanitizeData(rawData);
-      Object.keys(dataToSave).forEach(k => {
-        if (dataToSave[k] === undefined) delete dataToSave[k];
-      });
+      const dataToSave = prepareChapterForCloud(chap, user.uid);
       await setDoc(doc(db, 'chapters', chap.id), dataToSave, { merge: true });
     } catch (error: any) {
       console.warn("Lỗi lưu chương lên Cloud:", error?.message || error);
@@ -447,15 +495,7 @@ export const bulkSaveChaptersToCloud = async (chapters: Chapter[]): Promise<void
     const batch = writeBatch(db);
     chunk.forEach(ch => {
       if (!ch.id) return;
-      const rawData = {
-        ...ch,
-        userId: user.uid,
-        createdAt: Timestamp.now()
-      };
-      const dataToSave = sanitizeData(rawData);
-      Object.keys(dataToSave).forEach(k => {
-        if (dataToSave[k] === undefined) delete dataToSave[k];
-      });
+      const dataToSave = prepareChapterForCloud(ch, user.uid);
       batch.set(doc(db, 'chapters', ch.id), dataToSave, { merge: true });
     });
     try {
@@ -585,7 +625,7 @@ export const subscribeToChapters = (
       snapshot.forEach((d) => {
         const data = d.data();
         const { userId, ...rest } = data;
-        chapters.push({ id: d.id, ...rest } as Chapter);
+        chapters.push(restoreLeanChapter({ id: d.id, ...rest }));
       });
       chapters.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
       onUpdate(chapters);
@@ -616,7 +656,16 @@ export const subscribeToUserLiveWorkspace = (
     docRef,
     (docSnap) => {
       if (docSnap.exists()) {
-        const data = docSnap.data() as LiveSessionData;
+        const raw = docSnap.data();
+        let data = raw as LiveSessionData;
+        if ((raw as any)._isLean && data.result?.segments && data.result.segments.length > 0) {
+          const segs = data.result.segments;
+          if (!data.inputText) data.inputText = segs.map(s => s.source || '').join('\n');
+          if (!data.deeplText) data.deeplText = segs.map(s => s.deepl || '').join('\n');
+          if (!data.result.naturalTranslation) data.result.naturalTranslation = segs.map(s => s.natural || '').join('\n');
+          if (!data.result.quickTrans) data.result.quickTrans = segs.map(s => s.quick || '').join('\n');
+          if (!data.result.deeplTranslation) data.result.deeplTranslation = segs.map(s => s.deepl || '').join('\n');
+        }
         onUpdate(data);
       }
     },
@@ -645,7 +694,7 @@ export const saveUserLiveWorkspaceToCloud = async (
     isLiveWorkspaceInFlight = true;
     try {
       const docRef = doc(db, 'activeSessions', `ws_${user.uid}`);
-      const payload: LiveSessionData = {
+      const payload: any = {
         novelId: payloadData.novelId || '',
         chapterId: payloadData.chapterId || '',
         chapterName: payloadData.chapterName || '',
@@ -659,6 +708,25 @@ export const saveUserLiveWorkspaceToCloud = async (
         deviceId: getDeviceId(),
         lastEditedIndex: payloadData.lastEditedIndex
       };
+
+      // If estimated size > 500KB and segments exist, omit duplicate full-text strings
+      if (payload.result?.segments && payload.result.segments.length > 0) {
+        const jsonEstimate = JSON.stringify(payload);
+        if (jsonEstimate.length > 500 * 1024) {
+          payload.result = {
+            segments: payload.result.segments,
+            naturalTranslation: "",
+            quickTrans: "",
+            deeplTranslation: "",
+            sinoVietnamese: "",
+            vocabulary: []
+          };
+          payload.inputText = "";
+          payload.deeplText = "";
+          payload.preEditedText = "";
+          payload._isLean = true;
+        }
+      }
 
       const sanitized = sanitizeData(payload);
       await setDoc(docRef, sanitized, { merge: true });
