@@ -164,12 +164,10 @@ const EditableSegment = ({
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
             e.preventDefault();
-            // Cập nhật giá trị ngay lập tức
             if (debounceTimeout.current) {
                 clearTimeout(debounceTimeout.current);
             }
             onUpdate(localText);
-            // Gọi callback chuyển dòng tiếp theo và đánh dấu xong
             onEnterPress?.();
             return;
         }
@@ -277,6 +275,288 @@ const EditableSegment = ({
     );
 };
 
+// Component sửa trực tiếp chữ Hán (Raw)
+const EditableSource = ({
+  text,
+  onUpdate,
+  isFocusMode,
+  renderHighlighted,
+  onToggleComplete,
+  idx,
+  isDone
+}: {
+  text: string;
+  onUpdate: (val: string) => void;
+  isFocusMode?: boolean;
+  renderHighlighted: () => React.ReactNode;
+  onToggleComplete?: () => void;
+  idx: number;
+  isDone: boolean;
+}) => {
+  const [localText, setLocalText] = useState(text);
+  const [isFocused, setIsFocused] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const debounceTimeout = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    setLocalText(text);
+  }, [text]);
+
+  const adjustHeight = () => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = '0px';
+      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+    }
+  };
+
+  useEffect(() => {
+    if (isFocused) {
+      adjustHeight();
+      const timer = setTimeout(adjustHeight, 10);
+      return () => clearTimeout(timer);
+    }
+  }, [isFocused, localText, isFocusMode]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setLocalText(val);
+    if (debounceTimeout.current) clearTimeout(debounceTimeout.current);
+    debounceTimeout.current = setTimeout(() => {
+      onUpdate(val);
+    }, 500);
+  };
+
+  const handleBlur = (e: React.FocusEvent<HTMLTextAreaElement>) => {
+    setIsFocused(false);
+    if (debounceTimeout.current) clearTimeout(debounceTimeout.current);
+    onUpdate(e.target.value);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      setIsFocused(false);
+    }
+  };
+
+  return (
+    <div className={`${isFocusMode ? 'text-[18.5px]' : 'text-[14.5px]'} font-serif-sc leading-[1.2] text-[#3E2723] m-0 whitespace-normal break-words flex items-start gap-1`}>
+      <span 
+        onClick={onToggleComplete}
+        className={`inline-flex items-center justify-center mr-0.5 select-none align-middle transform -translate-y-[1px] ${isFocusMode ? 'text-[11px] min-w-[18px]' : 'text-[9px] min-w-[14px]'} font-bold cursor-pointer hover:underline ${isDone ? 'text-green-800 font-black' : 'text-[#A1887F]/40 hover:text-[#3E2723]'}`}
+        title={isDone ? "Đã xong (Bấm để bỏ)" : "Bấm để đánh dấu xong"}
+      >
+        {idx + 1}.
+      </span>
+
+      <div className="flex-1 min-w-0">
+        {isFocused ? (
+          <textarea
+            ref={textareaRef}
+            autoFocus
+            value={localText}
+            onChange={handleChange}
+            onBlur={handleBlur}
+            onKeyDown={handleKeyDown}
+            placeholder="Nhập chữ Hán..."
+            className={`w-full bg-transparent border-none outline-none resize-none overflow-hidden p-0 text-[#3E2723] font-serif-sc leading-[1.2] ${isFocusMode ? 'text-[18.5px]' : 'text-[14.5px]'} focus:ring-0 m-0 block whitespace-normal min-h-[1.2em]`}
+            style={{ fontWeight: 400, display: 'block', margin: 0 }}
+            rows={1}
+            spellCheck={false}
+          />
+        ) : (
+          <div 
+            onClick={() => {
+              setIsFocused(true);
+              setTimeout(() => textareaRef.current?.focus(), 20);
+            }}
+            className="cursor-text min-h-[1.2em]"
+            title="Bấm vào để sửa chữ Hán trực tiếp"
+          >
+            {renderHighlighted() || <span className="opacity-30 italic text-[11px]">[Trống]</span>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// Component sửa trực tiếp Vietphrase
+const EditableQuick = ({
+  text,
+  onUpdate,
+  isFocusMode
+}: {
+  text: string;
+  onUpdate: (val: string) => void;
+  isFocusMode?: boolean;
+}) => {
+  const [localText, setLocalText] = useState(text);
+  const [isFocused, setIsFocused] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const debounceTimeout = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    setLocalText(text);
+  }, [text]);
+
+  const adjustHeight = () => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = '0px';
+      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+    }
+  };
+
+  useEffect(() => {
+    if (isFocused) {
+      adjustHeight();
+      const timer = setTimeout(adjustHeight, 10);
+      return () => clearTimeout(timer);
+    }
+  }, [isFocused, localText, isFocusMode]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setLocalText(val);
+    if (debounceTimeout.current) clearTimeout(debounceTimeout.current);
+    debounceTimeout.current = setTimeout(() => {
+      onUpdate(val);
+    }, 500);
+  };
+
+  const handleBlur = (e: React.FocusEvent<HTMLTextAreaElement>) => {
+    setIsFocused(false);
+    if (debounceTimeout.current) clearTimeout(debounceTimeout.current);
+    onUpdate(e.target.value);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      setIsFocused(false);
+    }
+  };
+
+  return (
+    <div className="pl-5 sm:pl-[18px] -mt-0.5 w-full">
+      {isFocused ? (
+        <textarea
+          ref={textareaRef}
+          autoFocus
+          value={localText}
+          onChange={handleChange}
+          onBlur={handleBlur}
+          onKeyDown={handleKeyDown}
+          placeholder="Nhập Vietphrase..."
+          className={`w-full bg-transparent border-none outline-none resize-none overflow-hidden p-0 text-[#8D6E63] italic leading-[1.1] ${isFocusMode ? 'text-[13px]' : 'text-[10px]'} focus:ring-0 m-0 block whitespace-normal min-h-[1.1em]`}
+          style={{ fontWeight: 400, display: 'block', margin: 0 }}
+          rows={1}
+          spellCheck={false}
+        />
+      ) : (
+        <div 
+          onClick={() => {
+            setIsFocused(true);
+            setTimeout(() => textareaRef.current?.focus(), 20);
+          }}
+          className={`${isFocusMode ? 'text-[13px]' : 'text-[10px]'} text-[#8D6E63] leading-[1.1] opacity-70 italic break-words cursor-text hover:opacity-100 transition-opacity min-h-[1.1em]`}
+          title="Bấm vào để sửa Vietphrase trực tiếp"
+        >
+          {localText || <span className="opacity-40 not-italic text-[9px]">[+ Thêm Vietphrase]</span>}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Component sửa trực tiếp GG / DeepL
+const EditableDeepl = ({
+  text,
+  onUpdate,
+  isFocusMode
+}: {
+  text: string;
+  onUpdate: (val: string) => void;
+  isFocusMode?: boolean;
+}) => {
+  const [localText, setLocalText] = useState(text);
+  const [isFocused, setIsFocused] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const debounceTimeout = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    setLocalText(text);
+  }, [text]);
+
+  const adjustHeight = () => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = '0px';
+      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+    }
+  };
+
+  useEffect(() => {
+    if (isFocused) {
+      adjustHeight();
+      const timer = setTimeout(adjustHeight, 10);
+      return () => clearTimeout(timer);
+    }
+  }, [isFocused, localText, isFocusMode]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setLocalText(val);
+    if (debounceTimeout.current) clearTimeout(debounceTimeout.current);
+    debounceTimeout.current = setTimeout(() => {
+      onUpdate(val);
+    }, 500);
+  };
+
+  const handleBlur = (e: React.FocusEvent<HTMLTextAreaElement>) => {
+    setIsFocused(false);
+    if (debounceTimeout.current) clearTimeout(debounceTimeout.current);
+    onUpdate(e.target.value);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      setIsFocused(false);
+    }
+  };
+
+  return (
+    <div className="-mt-0.5 w-full">
+      {isFocused ? (
+        <textarea
+          ref={textareaRef}
+          autoFocus
+          value={localText}
+          onChange={handleChange}
+          onBlur={handleBlur}
+          onKeyDown={handleKeyDown}
+          placeholder="Nhập GG/DeepL..."
+          className={`w-full bg-transparent border-none outline-none resize-none overflow-hidden p-0 text-[#A1887F] italic leading-[1.1] ${isFocusMode ? 'text-[11.5px]' : 'text-[8.5px]'} focus:ring-0 m-0 block whitespace-normal min-h-[1.1em]`}
+          style={{ fontWeight: 400, display: 'block', margin: 0 }}
+          rows={1}
+          spellCheck={false}
+        />
+      ) : (
+        <div 
+          onClick={() => {
+            setIsFocused(true);
+            setTimeout(() => textareaRef.current?.focus(), 20);
+          }}
+          className={`${isFocusMode ? 'text-[11.5px]' : 'text-[8.5px]'} text-[#A1887F] leading-[1.1] italic opacity-60 break-words cursor-text hover:opacity-90 transition-opacity min-h-[1.1em]`}
+          title="Bấm vào để sửa GG/DeepL trực tiếp"
+        >
+          {localText || <span className="opacity-40 not-italic text-[8px] hover:opacity-100">[+ Thêm GG/DeepL]</span>}
+        </div>
+      )}
+    </div>
+  );
+};
+
 
 
 export const TranslationOutput: React.FC<TranslationOutputProps> = ({ 
@@ -310,25 +590,6 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
   const [saveMode, setSaveMode] = useState<'new' | 'update'>('new');
   const [vpVersion, setVpVersion] = useState(0);
 
-  // State chỉnh sửa ô trong bảng (raw, vietphrase, deepl)
-  const [editingCell, setEditingCell] = useState<{ index: number; field: 'source' | 'quick' | 'deepl'; value: string } | null>(null);
-
-  const handleStartEditCell = (index: number, field: 'source' | 'quick' | 'deepl', currentValue: string) => {
-    setEditingCell({ index, field, value: currentValue });
-  };
-
-  const handleSaveEditCell = () => {
-    if (!editingCell) return;
-    const { index, field, value } = editingCell;
-    if (onUpdateSegmentField) {
-      onUpdateSegmentField(index, field, value);
-    }
-    setEditingCell(null);
-  };
-
-  const handleCancelEditCell = () => {
-    setEditingCell(null);
-  };
   const [activeVocab, setActiveVocab] = useState<{ 
     item: VocabItem; 
     position: { x: number; y: number }; 
@@ -1281,10 +1542,6 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
                       const cleanDeepl = (seg.deepl || '').trim();
                       const cleanQuick = (seg.quick !== undefined && seg.quick !== '' ? seg.quick : (vietphraseEngine.translate(cleanSource, customMap) || '')).trim();
 
-                      const isEditingSource = editingCell?.index === idx && editingCell?.field === 'source';
-                      const isEditingQuick = editingCell?.index === idx && editingCell?.field === 'quick';
-                      const isEditingDeepl = editingCell?.index === idx && editingCell?.field === 'deepl';
-
                       return (
                         <div 
                           id={`segment-row-${idx}`}
@@ -1304,133 +1561,23 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
                              isDone ? 'opacity-80' : 'bg-[#FFFDF7]/30'
                            } max-sm:bg-[#FFFDF7]/60 max-sm:border-b max-sm:border-dashed max-sm:border-[#D7CCC8]/50`}>
                               <div className="flex flex-col py-0.5">
-                                {isEditingSource ? (
-                                  <div className="w-full flex flex-col gap-1 my-0.5 p-1.5 bg-[#FFFDF7] border border-[#8D6E63] rounded shadow-inner">
-                                    <div className="flex items-center justify-between text-[10px] font-bold text-[#8D6E63] border-b border-[#D7CCC8]/60 pb-0.5">
-                                      <span>Sửa câu tiếng Trung (Raw #{idx + 1})</span>
-                                      <span className="text-[9px] font-normal text-[#A1887F]">Ctrl+Enter để Lưu</span>
-                                    </div>
-                                    <textarea
-                                      value={editingCell.value}
-                                      onChange={(e) => setEditingCell(prev => prev ? { ...prev, value: e.target.value } : null)}
-                                      onKeyDown={(e) => {
-                                        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-                                          e.preventDefault();
-                                          handleSaveEditCell();
-                                        } else if (e.key === 'Escape') {
-                                          e.preventDefault();
-                                          handleCancelEditCell();
-                                        }
-                                      }}
-                                      autoFocus
-                                      rows={2}
-                                      className={`w-full bg-white border border-[#D7CCC8] rounded p-1.5 font-serif-sc ${isFocusMode ? 'text-[17px]' : 'text-[14px]'} text-[#3E2723] outline-none focus:border-[#8D6E63] leading-relaxed resize-y`}
-                                      placeholder="Nhập nội dung chữ Hán..."
-                                    />
-                                    <div className="flex items-center justify-end gap-1.5 pt-0.5">
-                                      <button
-                                        onClick={handleCancelEditCell}
-                                        className="px-2 py-0.5 text-[10px] text-[#8D6E63] hover:text-[#3E2723] hover:bg-[#EFEBE9] rounded font-medium transition-colors"
-                                      >
-                                        Hủy
-                                      </button>
-                                      <button
-                                        onClick={handleSaveEditCell}
-                                        className="px-2.5 py-0.5 text-[10px] bg-[#5D4037] hover:bg-[#3E2723] text-white rounded font-bold transition-colors flex items-center gap-1 shadow-2xs"
-                                      >
-                                        <Check size={11} /> Lưu
-                                      </button>
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <div className={`${isFocusMode ? 'text-[18.5px]' : 'text-[14.5px]'} font-serif-sc leading-[1.2] text-[#3E2723] m-0 whitespace-normal break-words flex items-start gap-1 group/raw`}>
-                                     <span 
-                                       onClick={() => onToggleComplete?.(idx)}
-                                       className={`inline-flex items-center justify-center mr-0.5 select-none align-middle transform -translate-y-[1px] ${isFocusMode ? 'text-[11px] min-w-[18px]' : 'text-[9px] min-w-[14px]'} font-bold cursor-pointer hover:underline ${isDone ? 'text-green-800 font-black' : 'text-[#A1887F]/40 hover:text-[#3E2723]'}`}
-                                       title={isDone ? "Đã xong (Bấm để bỏ)" : "Bấm để đánh dấu xong"}
-                                     >
-                                         {idx + 1}.
-                                     </span>
-                                     <div 
-                                       onDoubleClick={() => handleStartEditCell(idx, 'source', cleanSource)}
-                                       className="flex-1 min-w-0 cursor-text"
-                                       title="Bấm đúp để sửa chữ Hán (Raw)"
-                                     >
-                                       {renderSourceWithHighlight(cleanSource) || <span className="opacity-30 italic text-[11px]">[Trống]</span>}
-                                     </div>
-                                     <button
-                                       onClick={(e) => {
-                                         e.stopPropagation();
-                                         handleStartEditCell(idx, 'source', cleanSource);
-                                       }}
-                                       title="Sửa câu tiếng Trung (Raw)"
-                                       className="hidden group-hover/raw:inline-flex text-[#A1887F] hover:text-[#5D4037] p-0.5 rounded hover:bg-[#D7CCC8]/50 transition-all shrink-0"
-                                     >
-                                       <Pencil size={10} />
-                                     </button>
-                                  </div>
-                                )}
+                                 {/* Chữ Hán (Raw) - Bấm chuột vào để sửa trực tiếp */}
+                                 <EditableSource
+                                   text={cleanSource}
+                                   onUpdate={(val) => onUpdateSegmentField?.(idx, 'source', val)}
+                                   isFocusMode={isFocusMode}
+                                   renderHighlighted={() => renderSourceWithHighlight(cleanSource)}
+                                   onToggleComplete={() => onToggleComplete?.(idx)}
+                                   idx={idx}
+                                   isDone={isDone}
+                                 />
 
-                                {/* Vietphrase */}
-                                {isEditingQuick ? (
-                                  <div className="w-full flex flex-col gap-1 my-0.5 p-1 pl-4 bg-[#FFFDF7] border border-[#8D6E63] rounded shadow-inner">
-                                    <div className="flex items-center justify-between text-[9px] font-bold text-[#8D6E63] border-b border-[#D7CCC8]/60 pb-0.5">
-                                      <span>Sửa Vietphrase #{idx + 1}</span>
-                                      <span className="text-[8px] font-normal text-[#A1887F]">Enter để Lưu</span>
-                                    </div>
-                                    <input
-                                      type="text"
-                                      value={editingCell.value}
-                                      onChange={(e) => setEditingCell(prev => prev ? { ...prev, value: e.target.value } : null)}
-                                      onKeyDown={(e) => {
-                                        if (e.key === 'Enter') {
-                                          e.preventDefault();
-                                          handleSaveEditCell();
-                                        } else if (e.key === 'Escape') {
-                                          e.preventDefault();
-                                          handleCancelEditCell();
-                                        }
-                                      }}
-                                      autoFocus
-                                      className={`w-full bg-white border border-[#D7CCC8] rounded px-1.5 py-0.5 ${isFocusMode ? 'text-[13px]' : 'text-[11px]'} text-[#8D6E63] italic outline-none focus:border-[#8D6E63]`}
-                                      placeholder="Nhập nội dung Vietphrase..."
-                                    />
-                                    <div className="flex items-center justify-end gap-1 pt-0.5">
-                                      <button
-                                        onClick={handleCancelEditCell}
-                                        className="px-1.5 py-0.5 text-[9px] text-[#8D6E63] hover:text-[#3E2723] rounded font-medium"
-                                      >
-                                        Hủy
-                                      </button>
-                                      <button
-                                        onClick={handleSaveEditCell}
-                                        className="px-2 py-0.5 text-[9px] bg-[#8D6E63] hover:bg-[#5D4037] text-white rounded font-bold flex items-center gap-1 shadow-2xs"
-                                      >
-                                        <Check size={10} /> Lưu
-                                      </button>
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <div className="flex items-center gap-1 group/vp pl-5 sm:pl-[18px] -mt-0.5">
-                                    <div 
-                                      onDoubleClick={() => handleStartEditCell(idx, 'quick', cleanQuick)}
-                                      className={`${isFocusMode ? 'text-[13px]' : 'text-[10px]'} text-[#8D6E63] leading-[1.1] opacity-70 italic break-words flex-1 cursor-pointer hover:opacity-100 transition-opacity`}
-                                      title="Bấm đúp để sửa Vietphrase"
-                                    >
-                                      {cleanQuick || <span className="opacity-40 not-italic text-[9px]">[+ Thêm Vietphrase]</span>}
-                                    </div>
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleStartEditCell(idx, 'quick', cleanQuick);
-                                      }}
-                                      title="Chỉnh sửa Vietphrase dòng này"
-                                      className="hidden group-hover/vp:inline-flex text-[#A1887F] hover:text-[#8D6E63] p-0.5 rounded hover:bg-[#D7CCC8]/40 transition-all shrink-0"
-                                    >
-                                      <Pencil size={9} />
-                                    </button>
-                                  </div>
-                                )}
+                                 {/* Vietphrase - Bấm chuột vào để sửa trực tiếp */}
+                                 <EditableQuick
+                                   text={cleanQuick}
+                                   onUpdate={(val) => onUpdateSegmentField?.(idx, 'quick', val)}
+                                   isFocusMode={isFocusMode}
+                                 />
                               </div>
                            </div>
 
@@ -1438,6 +1585,7 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
                            <div className="w-full sm:w-[55%] py-1 px-2 sm:py-0 relative border-none bg-transparent">
                               <div className="flex items-start py-0.5">
                                   <div className="flex-1 min-w-0 flex flex-col">
+                                      {/* Bản edit - Bấm chuột vào để sửa trực tiếp */}
                                       <EditableSegment 
                                         text={cleanNatural} 
                                         onUpdate={(val) => onUpdateSegment?.(idx, val)} 
@@ -1449,70 +1597,12 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
                                         onEnterPress={() => handleEnterNextSegment(idx)}
                                       />
                                       
-                                      {/* GG / DeepL */}
-                                      {isEditingDeepl ? (
-                                        <div className="w-full flex flex-col gap-1 my-0.5 p-1 bg-[#FFFDF7] border border-[#8D6E63] rounded shadow-inner">
-                                          <div className="flex items-center justify-between text-[9px] font-bold text-[#8D6E63] border-b border-[#D7CCC8]/60 pb-0.5">
-                                            <span>Sửa GG/DeepL #{idx + 1}</span>
-                                            <span className="text-[8px] font-normal text-[#A1887F]">Enter để Lưu</span>
-                                          </div>
-                                          <textarea
-                                            value={editingCell.value}
-                                            onChange={(e) => setEditingCell(prev => prev ? { ...prev, value: e.target.value } : null)}
-                                            onKeyDown={(e) => {
-                                              if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-                                                e.preventDefault();
-                                                handleSaveEditCell();
-                                              } else if (e.key === 'Escape') {
-                                                e.preventDefault();
-                                                handleCancelEditCell();
-                                              }
-                                            }}
-                                            autoFocus
-                                            rows={2}
-                                            className={`w-full bg-white border border-[#D7CCC8] rounded px-1.5 py-1 ${isFocusMode ? 'text-[13px]' : 'text-[11px]'} text-[#5D4037] outline-none focus:border-[#8D6E63] resize-y`}
-                                            placeholder="Nhập nội dung bản dịch GG/DeepL..."
-                                          />
-                                          <div className="flex items-center justify-end gap-1 pt-0.5">
-                                            <button
-                                              onClick={handleCancelEditCell}
-                                              className="px-1.5 py-0.5 text-[9px] text-[#8D6E63] hover:text-[#3E2723] rounded font-medium"
-                                            >
-                                              Hủy
-                                            </button>
-                                            <button
-                                              onClick={handleSaveEditCell}
-                                              className="px-2 py-0.5 text-[9px] bg-[#8D6E63] hover:bg-[#5D4037] text-white rounded font-bold flex items-center gap-1 shadow-2xs"
-                                            >
-                                              <Check size={10} /> Lưu
-                                            </button>
-                                          </div>
-                                        </div>
-                                      ) : (
-                                        <div className="flex items-center gap-1 group/deepl -mt-0.5">
-                                          <div 
-                                            onDoubleClick={() => handleStartEditCell(idx, 'deepl', cleanDeepl)}
-                                            className={`${isFocusMode ? 'text-[11.5px]' : 'text-[8.5px]'} text-[#A1887F] leading-[1.1] italic opacity-60 break-words flex-1 cursor-pointer hover:opacity-90 transition-opacity`}
-                                            title="Bấm đúp để sửa GG/DeepL"
-                                          >
-                                            {cleanDeepl ? (
-                                              <><span className="font-bold mr-1 opacity-80 not-italic text-[#5D4037]">GG/DL:</span>{cleanDeepl}</>
-                                            ) : (
-                                              <span className="opacity-40 not-italic text-[8px] hover:opacity-100">[+ Thêm GG/DeepL]</span>
-                                            )}
-                                          </div>
-                                          <button
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              handleStartEditCell(idx, 'deepl', cleanDeepl);
-                                            }}
-                                            title="Chỉnh sửa GG/DeepL dòng này"
-                                            className="hidden group-hover/deepl:inline-flex text-[#A1887F] hover:text-[#5D4037] p-0.5 rounded hover:bg-[#D7CCC8]/40 transition-all shrink-0"
-                                          >
-                                            <Pencil size={9} />
-                                          </button>
-                                        </div>
-                                      )}
+                                      {/* GG / DeepL - Bấm chuột vào để sửa trực tiếp */}
+                                      <EditableDeepl
+                                        text={cleanDeepl}
+                                        onUpdate={(val) => onUpdateSegmentField?.(idx, 'deepl', val)}
+                                        isFocusMode={isFocusMode}
+                                      />
                                   </div>
                               </div>
 
