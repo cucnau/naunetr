@@ -15,7 +15,7 @@ import { ChapterArchiveModal } from './components/ChapterArchiveModal';
 import { ShortcutModal } from './components/ShortcutModal';
 import { AuthPanel } from './components/AuthPanel';
 import { NovelSelector } from './components/NovelSelector';
-import { BookOpen, Loader2, Eraser, Quote, Layout, History, AlertTriangle, Layers, PenLine, FolderOpen, Keyboard, BookA, Users, X, Wifi } from 'lucide-react';
+import { BookOpen, Loader2, Eraser, Quote, Layout, History, AlertTriangle, Layers, PenLine, FolderOpen, Keyboard, BookA, Users, X, Wifi, Scissors, CheckSquare, Square } from 'lucide-react';
 import { checkAndApplyShortcut, getStoredShortcuts, isShortcutsEnabled, syncShortcutsFromCloud } from './services/shortcutService';
 
 const EXAMPLE_TEXT = "路遥知马力，日久见人心。";
@@ -242,9 +242,17 @@ function AppContent() {
   }, [session.currentNovelId]);
   
   // Undo/Redo/Focus states
-  const [undoStack, setUndoStack] = useState<string[][]>([]);
-  const [redoStack, setRedoStack] = useState<string[][]>([]);
+  interface HistorySnapshot {
+    segments: TranslationSegment[];
+    completedSegments?: number[];
+    inputText: string;
+    deeplText: string;
+  }
+
+  const [undoStack, setUndoStack] = useState<HistorySnapshot[]>([]);
+  const [redoStack, setRedoStack] = useState<HistorySnapshot[]>([]);
   const [isFocusMode, setIsFocusMode] = useState(false);
+  const [autoCleanBlankLines, setAutoCleanBlankLines] = useState(true);
   const [lastRemoteSyncTime, setLastRemoteSyncTime] = useState<number>(0);
   const lastLocalEditTimeRef = useRef<number>(0);
 
@@ -518,11 +526,11 @@ useEffect(() => {
     }
   }, [history]);
 
-  // Reset undo/redo stacks when loading a new chapter or starting a new translation
+  // Reset undo/redo stacks when loading a new chapter or novel
   useEffect(() => {
     setUndoStack([]);
     setRedoStack([]);
-  }, [session.currentHistoryId, session.inputText]);
+  }, [session.currentHistoryId, session.currentChapterId, session.currentNovelId]);
 
   // Keyboard shortcuts for Undo (Ctrl+Z) and Redo (Ctrl+Y / Ctrl+Shift+Z)
   useEffect(() => {
@@ -573,6 +581,20 @@ useEffect(() => {
     }));
   };
 
+  const createSnapshot = (): HistorySnapshot => ({
+    segments: session.result?.segments?.map(s => ({ ...s })) || [],
+    completedSegments: [...(session.completedSegments || [])],
+    inputText: session.inputText || '',
+    deeplText: session.deeplText || ''
+  });
+
+  const saveUndoSnapshot = () => {
+    if (!session.result) return;
+    const snapshot = createSnapshot();
+    setUndoStack(prev => [...prev, snapshot].slice(-100));
+    setRedoStack([]);
+  };
+
   const handleUpdateSegment = (index: number, newNatural: string) => {
     if (!session.result) return;
     lastLocalEditTimeRef.current = Date.now();
@@ -583,10 +605,7 @@ useEffect(() => {
       return; // No actual change, skip to avoid redundant undo states and clearing redo
     }
 
-    // Save undo state
-    const currentNaturals = currentSegments.map(s => s.natural);
-    setUndoStack(prev => [...prev, currentNaturals].slice(-100));
-    setRedoStack([]);
+    saveUndoSnapshot();
 
     const newSegments = [...currentSegments];
     newSegments[index] = { ...newSegments[index], natural: cleanNewNatural };
@@ -639,10 +658,7 @@ useEffect(() => {
     
     if (!hasChanged) return; // No actual change
 
-    // Save undo state
-    const currentNaturals = currentSegments.map(s => s.natural);
-    setUndoStack(prev => [...prev, currentNaturals].slice(-100));
-    setRedoStack([]);
+    saveUndoSnapshot();
 
     const newSegments = currentSegments.map((seg, idx) => ({
       ...seg,
@@ -680,33 +696,145 @@ useEffect(() => {
     }
   };
 
+  const handleUpdateSegmentField = (index: number, field: 'source' | 'natural' | 'quick' | 'deepl', value: string) => {
+    if (!session.result?.segments || !session.result.segments[index]) return;
+    lastLocalEditTimeRef.current = Date.now();
+
+    const currentSegments = session.result.segments;
+    const prevVal = currentSegments[index][field] || '';
+    if (prevVal === value) return;
+
+    saveUndoSnapshot();
+
+    const newSegments = [...currentSegments];
+    newSegments[index] = {
+      ...newSegments[index],
+      [field]: value
+    };
+
+    let newInputText = session.inputText;
+    let newDeeplText = session.deeplText;
+    if (field === 'source') {
+      newInputText = newSegments.map(s => (s.source || '').trim()).join('\n');
+    } else if (field === 'deepl') {
+      newDeeplText = newSegments.map(s => (s.deepl || '').trim()).join('\n');
+    }
+
+    const newResult: TranslationResponse = {
+      ...session.result,
+      segments: newSegments,
+      naturalTranslation: newSegments.map(s => s.natural).join('\n')
+    };
+
+    updateSession({
+      result: newResult,
+      inputText: newInputText,
+      deeplText: newDeeplText
+    });
+    autoSaveLinkedChapter(newResult);
+
+    saveUserLiveWorkspaceToCloud({
+      novelId: session.currentNovelId,
+      chapterId: session.currentChapterId,
+      status: session.status,
+      completedSegments: session.completedSegments,
+      segments: newSegments,
+      result: newResult,
+      inputText: newInputText,
+      deeplText: newDeeplText,
+      preEditedText: session.preEditedText,
+      lastEditedIndex: index,
+      updatedAt: Date.now()
+    }, false);
+
+    if (session.currentHistoryId) {
+      setHistory(prev => prev.map(item => 
+        item.id === session.currentHistoryId 
+          ? { ...item, result: newResult, completedSegments: session.completedSegments, timestamp: Date.now() } 
+          : item
+      ));
+    }
+  };
+
+  const handleDeleteSegment = (index: number) => {
+    if (!session.result?.segments || !session.result.segments[index]) return;
+    lastLocalEditTimeRef.current = Date.now();
+
+    const currentSegments = session.result.segments;
+    saveUndoSnapshot();
+
+    const newSegments = currentSegments.filter((_, i) => i !== index);
+    const newCompletedSegments = (session.completedSegments || [])
+      .filter(i => i !== index)
+      .map(i => i > index ? i - 1 : i);
+
+    const newInputText = newSegments.map(s => (s.source || '').trim()).join('\n');
+    const newDeeplText = newSegments.map(s => (s.deepl || '').trim()).join('\n');
+
+    const newResult: TranslationResponse = {
+      ...session.result,
+      segments: newSegments,
+      naturalTranslation: newSegments.map(s => s.natural).join('\n')
+    };
+
+    updateSession({
+      result: newResult,
+      completedSegments: newCompletedSegments,
+      inputText: newInputText,
+      deeplText: newDeeplText
+    });
+    autoSaveLinkedChapter(newResult, newCompletedSegments);
+
+    saveUserLiveWorkspaceToCloud({
+      novelId: session.currentNovelId,
+      chapterId: session.currentChapterId,
+      status: session.status,
+      completedSegments: newCompletedSegments,
+      segments: newSegments,
+      result: newResult,
+      inputText: newInputText,
+      deeplText: newDeeplText,
+      preEditedText: session.preEditedText,
+      updatedAt: Date.now()
+    }, false);
+
+    if (session.currentHistoryId) {
+      setHistory(prev => prev.map(item => 
+        item.id === session.currentHistoryId 
+          ? { ...item, result: newResult, completedSegments: newCompletedSegments, timestamp: Date.now() } 
+          : item
+      ));
+    }
+  };
+
   const handleUndo = () => {
     if (undoStack.length === 0 || !session.result) return;
     
-    const previousNaturals = undoStack[undoStack.length - 1];
-    const currentNaturals = session.result.segments.map(s => s.natural);
+    const previousState = undoStack[undoStack.length - 1];
+    const currentState = createSnapshot();
     
     setUndoStack(prev => prev.slice(0, prev.length - 1));
-    setRedoStack(prev => [...prev, currentNaturals]);
+    setRedoStack(prev => [...prev, currentState]);
     
-    const newSegments = session.result.segments.map((seg, idx) => ({
-      ...seg,
-      natural: previousNaturals[idx] || ""
-    }));
-    
+    const newSegments = previousState.segments.map(s => ({ ...s }));
     const newResult = {
       ...session.result,
       segments: newSegments,
       naturalTranslation: newSegments.map(s => s.natural).join('\n')
     };
     
-    updateSession({ result: newResult });
-    autoSaveLinkedChapter(newResult);
+    updateSession({
+      result: newResult,
+      completedSegments: previousState.completedSegments || [],
+      inputText: previousState.inputText,
+      deeplText: previousState.deeplText
+    });
+    autoSaveLinkedChapter(newResult, previousState.completedSegments);
 
     if (session.currentHistoryId) {
       setHistory(prev => prev.map(item => 
         item.id === session.currentHistoryId 
-          ? { ...item, result: newResult, timestamp: Date.now() } 
+          ? { ...item, result: newResult, completedSegments: previousState.completedSegments, timestamp: Date.now() } 
           : item
       ));
     }
@@ -715,30 +843,31 @@ useEffect(() => {
   const handleRedo = () => {
     if (redoStack.length === 0 || !session.result) return;
     
-    const nextNaturals = redoStack[redoStack.length - 1];
-    const currentNaturals = session.result.segments.map(s => s.natural);
+    const nextState = redoStack[redoStack.length - 1];
+    const currentState = createSnapshot();
     
     setRedoStack(prev => prev.slice(0, prev.length - 1));
-    setUndoStack(prev => [...prev, currentNaturals]);
+    setUndoStack(prev => [...prev, currentState]);
     
-    const newSegments = session.result.segments.map((seg, idx) => ({
-      ...seg,
-      natural: nextNaturals[idx] || ""
-    }));
-    
+    const newSegments = nextState.segments.map(s => ({ ...s }));
     const newResult = {
       ...session.result,
       segments: newSegments,
       naturalTranslation: newSegments.map(s => s.natural).join('\n')
     };
     
-    updateSession({ result: newResult });
-    autoSaveLinkedChapter(newResult);
+    updateSession({
+      result: newResult,
+      completedSegments: nextState.completedSegments || [],
+      inputText: nextState.inputText,
+      deeplText: nextState.deeplText
+    });
+    autoSaveLinkedChapter(newResult, nextState.completedSegments);
 
     if (session.currentHistoryId) {
       setHistory(prev => prev.map(item => 
         item.id === session.currentHistoryId 
-          ? { ...item, result: newResult, timestamp: Date.now() } 
+          ? { ...item, result: newResult, completedSegments: nextState.completedSegments, timestamp: Date.now() } 
           : item
       ));
     }
@@ -774,6 +903,52 @@ useEffect(() => {
           ? { ...item, completedSegments: newCompleted, timestamp: Date.now() } 
           : item
       ));
+    }
+  };
+
+  const removeBlankLines = (text: string): string => {
+    return text
+      .split(/\r?\n/)
+      .filter(line => line.trim().length > 0)
+      .join('\n');
+  };
+
+  const handleCleanAllBlankLines = () => {
+    const newInput = removeBlankLines(session.inputText);
+    const newDeepl = removeBlankLines(session.deeplText);
+    const newPreEdit = removeBlankLines(session.preEditedText || '');
+    handleInputChange({
+      inputText: newInput,
+      deeplText: newDeepl,
+      preEditedText: newPreEdit
+    });
+  };
+
+  const handleCleanFieldBlankLines = (fieldKey: 'inputText' | 'deeplText' | 'preEditedText') => {
+    const currentVal = session[fieldKey] || '';
+    const cleaned = removeBlankLines(currentVal);
+    handleInputChange({ [fieldKey]: cleaned });
+  };
+
+  const handlePasteWithClean = (e: React.ClipboardEvent<HTMLTextAreaElement>, fieldKey: 'inputText' | 'deeplText' | 'preEditedText') => {
+    if (!autoCleanBlankLines) return;
+    const clipboardText = e.clipboardData.getData('text');
+    if (!clipboardText) return;
+
+    const cleaned = removeBlankLines(clipboardText);
+    if (cleaned !== clipboardText) {
+      e.preventDefault();
+      const textarea = e.currentTarget;
+      const start = textarea.selectionStart || 0;
+      const end = textarea.selectionEnd || 0;
+      const originalValue = textarea.value;
+      const newValue = originalValue.substring(0, start) + cleaned + originalValue.substring(end);
+
+      handleInputChange({ [fieldKey]: newValue });
+
+      setTimeout(() => {
+        textarea.selectionStart = textarea.selectionEnd = start + cleaned.length;
+      }, 0);
     }
   };
 
@@ -1406,7 +1581,27 @@ useEffect(() => {
                                   <span>{segmentCount} đoạn văn</span>
                               </div>
                           </div>
-                          <div className="flex gap-2">
+                          <div className="flex items-center gap-2">
+                              <label 
+                                  title="Tự động lọc bỏ các dòng trống khi dán nội dung vào ô Raw, DeepL, Edit" 
+                                  className="text-[10px] text-[#5D4037] hover:text-[#3E2723] px-1.5 py-1 rounded hover:bg-[#D7CCC8]/60 flex items-center gap-1 cursor-pointer select-none"
+                              >
+                                  <input 
+                                      type="checkbox" 
+                                      checked={autoCleanBlankLines} 
+                                      onChange={(e) => setAutoCleanBlankLines(e.target.checked)} 
+                                      className="w-3 h-3 rounded text-[#5D4037] focus:ring-0 cursor-pointer"
+                                  />
+                                  <span>Tự xóa dòng trống khi dán</span>
+                              </label>
+                              <button 
+                                  onClick={handleCleanAllBlankLines} 
+                                  disabled={!session.inputText && !session.deeplText && !session.preEditedText} 
+                                  title="Lọc bỏ toàn bộ dòng trống trong tất cả các ô nhập" 
+                                  className="text-[10px] text-[#8D6E63] hover:text-[#3E2723] px-2 py-1 rounded hover:bg-[#D7CCC8] flex items-center gap-1 disabled:opacity-50"
+                              >
+                                  <Scissors size={10} /> Xóa dòng trống
+                              </button>
                               <button 
                                   onClick={() => handleInputChange({ 
                                       inputText: EXAMPLE_TEXT, 
@@ -1429,21 +1624,45 @@ useEffect(() => {
 
                       <div className={`grid ${mode === 'beta' ? 'grid-cols-1 sm:grid-cols-3' : 'grid-cols-1 sm:grid-cols-2'} flex-1 min-h-[140px] divide-y sm:divide-y-0 sm:divide-x divide-[#EFEBE9]`}>
                           <div className="flex flex-col flex-1">
-                              <div className="text-[9px] font-bold text-[#8D6E63] uppercase tracking-wider px-3 pt-1.5 bg-[#FAFAFA]/40">1. Văn bản gốc (Trung)</div>
+                              <div className="flex justify-between items-center px-3 pt-1.5 pb-1 bg-[#FAFAFA]/40">
+                                  <div className="text-[9px] font-bold text-[#8D6E63] uppercase tracking-wider">1. Văn bản gốc (Trung)</div>
+                                  <button
+                                      type="button"
+                                      onClick={() => handleCleanFieldBlankLines('inputText')}
+                                      disabled={!session.inputText}
+                                      title="Xóa các dòng trống trong ô Raw"
+                                      className="text-[9px] text-[#8D6E63] hover:text-[#3E2723] hover:bg-[#EFEBE9] px-1.5 py-0.5 rounded flex items-center gap-1 disabled:opacity-40"
+                                  >
+                                      <Scissors size={9} /> Dọn dòng trống
+                                  </button>
+                              </div>
                               <textarea
                                   ref={textareaRef}
                                   value={session.inputText}
                                   onChange={(e) => handleInputChange({ inputText: e.target.value })}
+                                  onPaste={(e) => handlePasteWithClean(e, 'inputText')}
                                   placeholder="Nhập văn bản nguồn (Trung)..."
                                   className="flex-1 p-3 text-lg font-serif-sc bg-transparent border-none outline-none resize-none placeholder:text-[#BCAAA4] leading-relaxed"
                                   spellCheck="false"
                               />
                           </div>
                           <div className="flex flex-col flex-1">
-                              <div className="text-[9px] font-bold text-[#8D6E63] uppercase tracking-wider px-3 pt-1.5 bg-[#FAFAFA]/40">2. Bản dịch GG / DeepL {mode === 'beta' && <span className="text-[8px] font-normal lowercase text-[#BCAAA4]">(không bắt buộc)</span>}</div>
+                              <div className="flex justify-between items-center px-3 pt-1.5 pb-1 bg-[#FAFAFA]/40">
+                                  <div className="text-[9px] font-bold text-[#8D6E63] uppercase tracking-wider">2. Bản dịch GG / DeepL {mode === 'beta' && <span className="text-[8px] font-normal lowercase text-[#BCAAA4]">(không bắt buộc)</span>}</div>
+                                  <button
+                                      type="button"
+                                      onClick={() => handleCleanFieldBlankLines('deeplText')}
+                                      disabled={!session.deeplText}
+                                      title="Xóa các dòng trống trong ô DeepL"
+                                      className="text-[9px] text-[#8D6E63] hover:text-[#3E2723] hover:bg-[#EFEBE9] px-1.5 py-0.5 rounded flex items-center gap-1 disabled:opacity-40"
+                                  >
+                                      <Scissors size={9} /> Dọn dòng trống
+                                  </button>
+                              </div>
                               <textarea
                                   value={session.deeplText}
                                   onChange={(e) => handleInputChange({ deeplText: e.target.value })}
+                                  onPaste={(e) => handlePasteWithClean(e, 'deeplText')}
                                   onKeyDown={(e) => {
                                       const triggerKeys = [' ', 'Enter', 'Tab', ',', '.', '?', '!', ';', ':'];
                                       if (triggerKeys.includes(e.key)) {
@@ -1462,10 +1681,22 @@ useEffect(() => {
                           </div>
                           {mode === 'beta' && (
                               <div className="flex flex-col flex-1">
-                                  <div className="text-[9px] font-bold text-[#E64A19] uppercase tracking-wider px-3 pt-1.5 bg-[#FAFAFA]/40 flex items-center gap-1">3. Bản edit sẵn <span className="bg-[#E64A19] text-white text-[7px] px-1 rounded-full uppercase">Beta</span></div>
+                                  <div className="flex justify-between items-center px-3 pt-1.5 pb-1 bg-[#FAFAFA]/40">
+                                      <div className="text-[9px] font-bold text-[#E64A19] uppercase tracking-wider flex items-center gap-1">3. Bản edit sẵn <span className="bg-[#E64A19] text-white text-[7px] px-1 rounded-full uppercase">Beta</span></div>
+                                      <button
+                                          type="button"
+                                          onClick={() => handleCleanFieldBlankLines('preEditedText')}
+                                          disabled={!session.preEditedText}
+                                          title="Xóa các dòng trống trong ô Edit sẵn"
+                                          className="text-[9px] text-[#E64A19] hover:text-[#BF360C] hover:bg-[#FBE9E7] px-1.5 py-0.5 rounded flex items-center gap-1 disabled:opacity-40"
+                                      >
+                                          <Scissors size={9} /> Dọn dòng trống
+                                      </button>
+                                  </div>
                                   <textarea
                                       value={session.preEditedText || ''}
                                       onChange={(e) => handleInputChange({ preEditedText: e.target.value })}
+                                      onPaste={(e) => handlePasteWithClean(e, 'preEditedText')}
                                       onKeyDown={(e) => {
                                           const triggerKeys = [' ', 'Enter', 'Tab', ',', '.', '?', '!', ';', ':'];
                                           if (triggerKeys.includes(e.key)) {
@@ -1521,6 +1752,8 @@ useEffect(() => {
                                 completedSegments={session.completedSegments || []}
                                 onUpdateSegment={handleUpdateSegment} 
                                 onUpdateAllSegments={handleUpdateAllSegments}
+                                onUpdateSegmentField={handleUpdateSegmentField}
+                                onDeleteSegment={handleDeleteSegment}
                                 onToggleComplete={handleToggleComplete}
                                 onSaveChapter={handleSaveChapter}
                                 onUndo={handleUndo}

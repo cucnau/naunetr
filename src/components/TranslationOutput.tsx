@@ -14,6 +14,8 @@ interface TranslationOutputProps {
   completedSegments?: number[];
   onUpdateSegment?: (index: number, newNatural: string) => void;
   onUpdateAllSegments?: (newNaturals: string[]) => void;
+  onUpdateSegmentField?: (index: number, field: 'source' | 'natural' | 'quick' | 'deepl', value: string) => void;
+  onDeleteSegment?: (index: number) => void;
   onToggleComplete?: (index: number) => void;
   onSaveChapter?: (name: string, saveMode?: 'new' | 'update') => void;
   onUndo?: () => void;
@@ -284,6 +286,8 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
     completedSegments = [],
     onUpdateSegment,
     onUpdateAllSegments,
+    onUpdateSegmentField,
+    onDeleteSegment,
     onToggleComplete,
     onSaveChapter,
     onUndo,
@@ -305,6 +309,26 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
   const [archiveChapterName, setArchiveChapterName] = useState('');
   const [saveMode, setSaveMode] = useState<'new' | 'update'>('new');
   const [vpVersion, setVpVersion] = useState(0);
+
+  // State chỉnh sửa ô trong bảng (raw, vietphrase, deepl)
+  const [editingCell, setEditingCell] = useState<{ index: number; field: 'source' | 'quick' | 'deepl'; value: string } | null>(null);
+
+  const handleStartEditCell = (index: number, field: 'source' | 'quick' | 'deepl', currentValue: string) => {
+    setEditingCell({ index, field, value: currentValue });
+  };
+
+  const handleSaveEditCell = () => {
+    if (!editingCell) return;
+    const { index, field, value } = editingCell;
+    if (onUpdateSegmentField) {
+      onUpdateSegmentField(index, field, value);
+    }
+    setEditingCell(null);
+  };
+
+  const handleCancelEditCell = () => {
+    setEditingCell(null);
+  };
   const [activeVocab, setActiveVocab] = useState<{ 
     item: VocabItem; 
     position: { x: number; y: number }; 
@@ -1255,9 +1279,11 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
                       const cleanSource = (seg.source || '').trim();
                       const cleanNatural = (seg.natural || '').trim();
                       const cleanDeepl = (seg.deepl || '').trim();
-                      const cleanQuick = (vietphraseEngine.translate(cleanSource, customMap) || '').trim();
+                      const cleanQuick = (seg.quick !== undefined && seg.quick !== '' ? seg.quick : (vietphraseEngine.translate(cleanSource, customMap) || '')).trim();
 
-                      if (!cleanSource && !cleanNatural) return null;
+                      const isEditingSource = editingCell?.index === idx && editingCell?.field === 'source';
+                      const isEditingQuick = editingCell?.index === idx && editingCell?.field === 'quick';
+                      const isEditingDeepl = editingCell?.index === idx && editingCell?.field === 'deepl';
 
                       return (
                         <div 
@@ -1271,44 +1297,159 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
                               : findText && matchingSegmentIndices.includes(idx) 
                                 ? 'bg-amber-50/50' 
                                 : ''
-                          } transition-all duration-300 group/row border-b border-[#EFEBE9] last:border-b-0`}
+                          } transition-all duration-300 group/row border-b border-[#EFEBE9] last:border-b-0 relative`}
                         >
                            {/* Cột 1: Nguồn (Trung + Vietphrase) */}
                            <div className={`w-full sm:w-[45%] py-1 px-2 sm:py-0 sm:border-r border-[#EFEBE9] relative ${
                              isDone ? 'opacity-80' : 'bg-[#FFFDF7]/30'
                            } max-sm:bg-[#FFFDF7]/60 max-sm:border-b max-sm:border-dashed max-sm:border-[#D7CCC8]/50`}>
                               <div className="flex flex-col py-0.5">
-                                <div className={`${isFocusMode ? 'text-[18.5px]' : 'text-[14.5px]'} font-serif-sc leading-[1.2] text-[#3E2723] m-0 whitespace-normal break-words flex items-start gap-1`}>
-                                   <span className={`inline-flex items-center justify-center mr-0.5 select-none align-middle transform -translate-y-[1px] ${isFocusMode ? 'text-[11px] min-w-[18px]' : 'text-[9px] min-w-[14px]'} font-bold ${isDone ? 'text-[#3E2723]/70 font-black' : 'text-[#A1887F]/40'}`}>
-                                       {idx + 1}.
-                                   </span>
-                                   <div className="flex-1 min-w-0">
-                                     {renderSourceWithHighlight(cleanSource)}
-                                   </div>
-                                </div>
-                                {cleanQuick && (
-                                  <div className={`${isFocusMode ? 'text-[13px]' : 'text-[10px]'} text-[#8D6E63] leading-[1.1] opacity-70 italic pl-5 sm:pl-[18px] -mt-0.5 break-words`}>
-                                    {cleanQuick}
+                                {isEditingSource ? (
+                                  <div className="w-full flex flex-col gap-1 my-0.5 p-1.5 bg-[#FFFDF7] border border-[#8D6E63] rounded shadow-inner">
+                                    <div className="flex items-center justify-between text-[10px] font-bold text-[#8D6E63] border-b border-[#D7CCC8]/60 pb-0.5">
+                                      <span>Sửa câu tiếng Trung (Raw #{idx + 1})</span>
+                                      <span className="text-[9px] font-normal text-[#A1887F]">Ctrl+Enter để Lưu</span>
+                                    </div>
+                                    <textarea
+                                      value={editingCell.value}
+                                      onChange={(e) => setEditingCell(prev => prev ? { ...prev, value: e.target.value } : null)}
+                                      onKeyDown={(e) => {
+                                        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                                          e.preventDefault();
+                                          handleSaveEditCell();
+                                        } else if (e.key === 'Escape') {
+                                          e.preventDefault();
+                                          handleCancelEditCell();
+                                        }
+                                      }}
+                                      autoFocus
+                                      rows={2}
+                                      className={`w-full bg-white border border-[#D7CCC8] rounded p-1.5 font-serif-sc ${isFocusMode ? 'text-[17px]' : 'text-[14px]'} text-[#3E2723] outline-none focus:border-[#8D6E63] leading-relaxed resize-y`}
+                                      placeholder="Nhập nội dung chữ Hán..."
+                                    />
+                                    <div className="flex items-center justify-end gap-1.5 pt-0.5">
+                                      <button
+                                        onClick={handleCancelEditCell}
+                                        className="px-2 py-0.5 text-[10px] text-[#8D6E63] hover:text-[#3E2723] hover:bg-[#EFEBE9] rounded font-medium transition-colors"
+                                      >
+                                        Hủy
+                                      </button>
+                                      <button
+                                        onClick={handleSaveEditCell}
+                                        className="px-2.5 py-0.5 text-[10px] bg-[#5D4037] hover:bg-[#3E2723] text-white rounded font-bold transition-colors flex items-center gap-1 shadow-2xs"
+                                      >
+                                        <Check size={11} /> Lưu
+                                      </button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className={`${isFocusMode ? 'text-[18.5px]' : 'text-[14.5px]'} font-serif-sc leading-[1.2] text-[#3E2723] m-0 whitespace-normal break-words flex items-start gap-1 group/raw`}>
+                                     <span className={`inline-flex items-center justify-center mr-0.5 select-none align-middle transform -translate-y-[1px] ${isFocusMode ? 'text-[11px] min-w-[18px]' : 'text-[9px] min-w-[14px]'} font-bold ${isDone ? 'text-[#3E2723]/70 font-black' : 'text-[#A1887F]/40'}`}>
+                                         {idx + 1}.
+                                     </span>
+                                     <div className="flex-1 min-w-0">
+                                       {renderSourceWithHighlight(cleanSource) || <span className="opacity-30 italic text-[11px]">[Trống]</span>}
+                                     </div>
+                                     <button
+                                       onClick={(e) => {
+                                         e.stopPropagation();
+                                         handleStartEditCell(idx, 'source', cleanSource);
+                                       }}
+                                       title="Sửa câu tiếng Trung (Raw)"
+                                       className="opacity-0 group-hover/raw:opacity-100 hover:opacity-100 text-[#A1887F] hover:text-[#5D4037] p-0.5 rounded hover:bg-[#D7CCC8]/50 transition-all shrink-0"
+                                     >
+                                       <Pencil size={10} />
+                                     </button>
+                                  </div>
+                                )}
+
+                                {/* Vietphrase */}
+                                {isEditingQuick ? (
+                                  <div className="w-full flex flex-col gap-1 my-0.5 p-1 pl-4 bg-[#FFFDF7] border border-[#8D6E63] rounded shadow-inner">
+                                    <div className="flex items-center justify-between text-[9px] font-bold text-[#8D6E63] border-b border-[#D7CCC8]/60 pb-0.5">
+                                      <span>Sửa Vietphrase #{idx + 1}</span>
+                                      <span className="text-[8px] font-normal text-[#A1887F]">Enter để Lưu</span>
+                                    </div>
+                                    <input
+                                      type="text"
+                                      value={editingCell.value}
+                                      onChange={(e) => setEditingCell(prev => prev ? { ...prev, value: e.target.value } : null)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                          e.preventDefault();
+                                          handleSaveEditCell();
+                                        } else if (e.key === 'Escape') {
+                                          e.preventDefault();
+                                          handleCancelEditCell();
+                                        }
+                                      }}
+                                      autoFocus
+                                      className={`w-full bg-white border border-[#D7CCC8] rounded px-1.5 py-0.5 ${isFocusMode ? 'text-[13px]' : 'text-[11px]'} text-[#8D6E63] italic outline-none focus:border-[#8D6E63]`}
+                                      placeholder="Nhập nội dung Vietphrase..."
+                                    />
+                                    <div className="flex items-center justify-end gap-1 pt-0.5">
+                                      <button
+                                        onClick={handleCancelEditCell}
+                                        className="px-1.5 py-0.5 text-[9px] text-[#8D6E63] hover:text-[#3E2723] rounded font-medium"
+                                      >
+                                        Hủy
+                                      </button>
+                                      <button
+                                        onClick={handleSaveEditCell}
+                                        className="px-2 py-0.5 text-[9px] bg-[#8D6E63] hover:bg-[#5D4037] text-white rounded font-bold flex items-center gap-1 shadow-2xs"
+                                      >
+                                        <Check size={10} /> Lưu
+                                      </button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center gap-1 group/vp pl-5 sm:pl-[18px] -mt-0.5">
+                                    <div 
+                                      onDoubleClick={() => handleStartEditCell(idx, 'quick', cleanQuick)}
+                                      className={`${isFocusMode ? 'text-[13px]' : 'text-[10px]'} text-[#8D6E63] leading-[1.1] opacity-70 italic break-words flex-1 cursor-pointer hover:opacity-100 transition-opacity`}
+                                      title="Bấm đúp để sửa Vietphrase"
+                                    >
+                                      {cleanQuick || <span className="opacity-40 not-italic text-[9px]">[+ Thêm Vietphrase]</span>}
+                                    </div>
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleStartEditCell(idx, 'quick', cleanQuick);
+                                      }}
+                                      title="Chỉnh sửa Vietphrase dòng này"
+                                      className="opacity-0 group-hover/vp:opacity-100 text-[#A1887F] hover:text-[#8D6E63] p-0.5 rounded hover:bg-[#D7CCC8]/40 transition-all shrink-0"
+                                    >
+                                      <Pencil size={9} />
+                                    </button>
                                   </div>
                                 )}
                               </div>
                            </div>
 
                            {/* Cột 2: Bản edit */}
-                           <div className="w-full sm:w-[55%] py-1 px-2 sm:py-0 relative sm:pr-7 border-none bg-transparent">
+                           <div className="w-full sm:w-[55%] py-1 px-2 sm:py-0 relative sm:pr-14 border-none bg-transparent">
                               <div className="flex items-start gap-1.5 py-0.5">
-                                  {/* Nút tích xong ở bên trái dành riêng cho điện thoại dọc (ở cột edit) */}
-                                  <button
-                                    onClick={() => onToggleComplete?.(idx)}
-                                    className={`sm:hidden p-0.5 rounded transition-all shrink-0 mt-0.5 ${
-                                      isDone
-                                        ? 'text-[#5D4037] bg-[#D7CCC8]/80'
-                                        : 'text-[#A1887F]/50 hover:text-[#3E2723]'
-                                    }`}
-                                    title={isDone ? "Đã xong (Bấm để bỏ)" : "Đánh dấu xong"}
-                                  >
-                                    <CheckCircle2 size={isFocusMode ? 14 : 12} />
-                                  </button>
+                                  {/* Thao tác ở bên trái dành riêng cho điện thoại dọc (ở cột edit) */}
+                                  <div className="sm:hidden flex items-center gap-0.5 shrink-0 mt-0.5">
+                                    <button
+                                      onClick={() => onDeleteSegment?.(idx)}
+                                      className="p-0.5 rounded transition-all text-[#A1887F]/50 hover:text-red-600 hover:bg-red-50"
+                                      title="Xóa hàng này"
+                                    >
+                                      <Trash2 size={isFocusMode ? 13 : 11} />
+                                    </button>
+                                    <button
+                                      onClick={() => onToggleComplete?.(idx)}
+                                      className={`p-0.5 rounded transition-all ${
+                                        isDone
+                                          ? 'text-[#5D4037] bg-[#D7CCC8]/80'
+                                          : 'text-[#A1887F]/50 hover:text-[#3E2723]'
+                                      }`}
+                                      title={isDone ? "Đã xong (Bấm để bỏ)" : "Đánh dấu xong"}
+                                    >
+                                      <CheckCircle2 size={isFocusMode ? 14 : 12} />
+                                    </button>
+                                  </div>
 
                                   <div className="flex-1 min-w-0 flex flex-col">
                                       <EditableSegment 
@@ -1321,23 +1462,95 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
                                         novelId={currentNovelId}
                                         onEnterPress={() => handleEnterNextSegment(idx)}
                                       />
-                                      {cleanDeepl && (
-                                        <div className={`${isFocusMode ? 'text-[11.5px]' : 'text-[8.5px]'} text-[#A1887F] leading-[1.1] italic opacity-60 -mt-0.5 break-words`}><span className="font-bold mr-1 opacity-80 not-italic text-[#5D4037]">GG/DL:</span>{cleanDeepl}</div>
+                                      
+                                      {/* GG / DeepL */}
+                                      {isEditingDeepl ? (
+                                        <div className="w-full flex flex-col gap-1 my-0.5 p-1 bg-[#FFFDF7] border border-[#8D6E63] rounded shadow-inner">
+                                          <div className="flex items-center justify-between text-[9px] font-bold text-[#8D6E63] border-b border-[#D7CCC8]/60 pb-0.5">
+                                            <span>Sửa GG/DeepL #{idx + 1}</span>
+                                            <span className="text-[8px] font-normal text-[#A1887F]">Enter để Lưu</span>
+                                          </div>
+                                          <textarea
+                                            value={editingCell.value}
+                                            onChange={(e) => setEditingCell(prev => prev ? { ...prev, value: e.target.value } : null)}
+                                            onKeyDown={(e) => {
+                                              if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                                                e.preventDefault();
+                                                handleSaveEditCell();
+                                              } else if (e.key === 'Escape') {
+                                                e.preventDefault();
+                                                handleCancelEditCell();
+                                              }
+                                            }}
+                                            autoFocus
+                                            rows={2}
+                                            className={`w-full bg-white border border-[#D7CCC8] rounded px-1.5 py-1 ${isFocusMode ? 'text-[13px]' : 'text-[11px]'} text-[#5D4037] outline-none focus:border-[#8D6E63] resize-y`}
+                                            placeholder="Nhập nội dung bản dịch GG/DeepL..."
+                                          />
+                                          <div className="flex items-center justify-end gap-1 pt-0.5">
+                                            <button
+                                              onClick={handleCancelEditCell}
+                                              className="px-1.5 py-0.5 text-[9px] text-[#8D6E63] hover:text-[#3E2723] rounded font-medium"
+                                            >
+                                              Hủy
+                                            </button>
+                                            <button
+                                              onClick={handleSaveEditCell}
+                                              className="px-2 py-0.5 text-[9px] bg-[#8D6E63] hover:bg-[#5D4037] text-white rounded font-bold flex items-center gap-1 shadow-2xs"
+                                            >
+                                              <Check size={10} /> Lưu
+                                            </button>
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <div className="flex items-center gap-1 group/deepl -mt-0.5">
+                                          <div 
+                                            onDoubleClick={() => handleStartEditCell(idx, 'deepl', cleanDeepl)}
+                                            className={`${isFocusMode ? 'text-[11.5px]' : 'text-[8.5px]'} text-[#A1887F] leading-[1.1] italic opacity-60 break-words flex-1 cursor-pointer hover:opacity-90 transition-opacity`}
+                                            title="Bấm đúp để sửa GG/DeepL"
+                                          >
+                                            {cleanDeepl ? (
+                                              <><span className="font-bold mr-1 opacity-80 not-italic text-[#5D4037]">GG/DL:</span>{cleanDeepl}</>
+                                            ) : (
+                                              <span className="opacity-40 not-italic text-[8px] hover:opacity-100">[+ Thêm GG/DeepL]</span>
+                                            )}
+                                          </div>
+                                          <button
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleStartEditCell(idx, 'deepl', cleanDeepl);
+                                            }}
+                                            title="Chỉnh sửa GG/DeepL dòng này"
+                                            className="opacity-0 group-hover/deepl:opacity-100 text-[#A1887F] hover:text-[#5D4037] p-0.5 rounded hover:bg-[#D7CCC8]/40 transition-all shrink-0"
+                                          >
+                                            <Pencil size={9} />
+                                          </button>
+                                        </div>
                                       )}
                                   </div>
                               </div>
-                              {/* Nút tích xong ở bên phải dành riêng cho Desktop / Laptop / Màn hình ngang */}
-                              <button
-                                  onClick={() => onToggleComplete?.(idx)}
-                                  className={`hidden sm:block absolute top-0 right-0 p-1 rounded-full transition-all shadow-sm border z-10 ${
-                                    isDone 
-                                      ? 'opacity-100 bg-[#EFEBE9] border-[#D7CCC8] text-[#5D4037] hover:bg-[#D7CCC8]' 
-                                      : 'opacity-0 group-hover/row:opacity-100 bg-white/70 hover:bg-white text-[#A1887F] hover:text-[#3E2723] border-[#D7CCC8]'
-                                  }`}
-                                  title={isDone ? "Đã đánh dấu hoàn thành (Click để bỏ)" : "Đánh dấu hoàn thành"}
-                               >
-                                  <CheckCircle2 size={isFocusMode ? 14 : 12} />
-                               </button>
+
+                              {/* Thao tác ở bên phải dành riêng cho Desktop / Laptop / Màn hình ngang */}
+                              <div className="hidden sm:flex items-center gap-1 absolute top-0.5 right-0.5 z-10">
+                                 <button
+                                    onClick={() => onDeleteSegment?.(idx)}
+                                    className="opacity-0 group-hover/row:opacity-100 p-1 rounded-full transition-all shadow-sm border bg-white/90 hover:bg-red-50 text-[#A1887F]/60 hover:text-red-600 border-[#D7CCC8] hover:border-red-200"
+                                    title="Xóa hàng này (Ctrl+Z để hoàn tác)"
+                                 >
+                                    <Trash2 size={isFocusMode ? 13 : 11} />
+                                 </button>
+                                 <button
+                                    onClick={() => onToggleComplete?.(idx)}
+                                    className={`p-1 rounded-full transition-all shadow-sm border ${
+                                      isDone 
+                                        ? 'opacity-100 bg-[#EFEBE9] border-[#D7CCC8] text-[#5D4037] hover:bg-[#D7CCC8]' 
+                                        : 'opacity-0 group-hover/row:opacity-100 bg-white/70 hover:bg-white text-[#A1887F] hover:text-[#3E2723] border-[#D7CCC8]'
+                                    }`}
+                                    title={isDone ? "Đã đánh dấu hoàn thành (Click để bỏ)" : "Đánh dấu hoàn thành"}
+                                 >
+                                    <CheckCircle2 size={isFocusMode ? 14 : 12} />
+                                 </button>
+                              </div>
                            </div>
                         </div>
                       );
