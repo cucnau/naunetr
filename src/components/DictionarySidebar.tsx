@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { CustomTerm, VietphraseFileItem } from '../types';
-import { Plus, Trash2, BookUser, Settings, Download, Upload, Loader2, Save, Code, Copy, Search, X, RefreshCw, FileText, CheckCircle, FileUp, AlertCircle, FileSpreadsheet, Layers } from 'lucide-react';
+import { CustomTerm, VietphraseFileItem, Character } from '../types';
+import { Plus, Trash2, BookUser, Settings, Download, Upload, Loader2, Save, Code, Copy, Search, X, RefreshCw, FileText, CheckCircle, FileUp, AlertCircle, FileSpreadsheet, Layers, Pencil, Check, BookA, Users } from 'lucide-react';
 import { syncFirestoreData, deleteFirestoreDoc, overwriteFirestoreData } from '../services/firestoreService';
 import { auth } from '../services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -12,6 +12,8 @@ interface DictionarySidebarProps {
   currentNovelId: string;
   terms: CustomTerm[];
   onUpdateTerms: (terms: CustomTerm[]) => void;
+  characters?: Character[];
+  onUpdateCharacters?: (chars: Character[]) => void;
   sheetUrl: string;
   onUpdateSheetUrl: (url: string) => void;
   refreshTrigger?: any;
@@ -84,11 +86,34 @@ export const DictionarySidebar: React.FC<DictionarySidebarProps> = ({
   currentNovelId,
   terms,
   onUpdateTerms,
+  characters = [],
+  onUpdateCharacters,
   sheetUrl,
   onUpdateSheetUrl,
   refreshTrigger,
   onExportExcel
 }) => {
+  const [activeTab, setActiveTab] = useState<'vocab' | 'characters'>('vocab');
+
+  // Term editing state
+  const [editingTermId, setEditingTermId] = useState<string | null>(null);
+  const [editTermText, setEditTermText] = useState('');
+  const [editMeaningText, setEditMeaningText] = useState('');
+  const [editCategoryVal, setEditCategoryVal] = useState('');
+
+  // Character editing state
+  const [editingCharId, setEditingCharId] = useState<string | null>(null);
+  const [editCharChinese, setEditCharChinese] = useState('');
+  const [editCharViet, setEditCharViet] = useState('');
+  const [editCharPronouns, setEditCharPronouns] = useState('');
+  const [editCharDesc, setEditCharDesc] = useState('');
+
+  // Character adding state
+  const [newCharChinese, setNewCharChinese] = useState('');
+  const [newCharViet, setNewCharViet] = useState('');
+  const [newCharPronouns, setNewCharPronouns] = useState('');
+  const [newCharDesc, setNewCharDesc] = useState('');
+
   const [newTerm, setNewTerm] = useState('');
   const [newMeaning, setNewMeaning] = useState('');
   const [categoryVal, setCategoryVal] = useState('');
@@ -199,6 +224,105 @@ export const DictionarySidebar: React.FC<DictionarySidebarProps> = ({
     t.meaning.toLowerCase().includes(searchTerm.toLowerCase()) ||
     (t.category && t.category.toLowerCase().includes(searchTerm.toLowerCase()))
   );
+
+  // Character filtering
+  const currentNovelChars = useMemo(() => {
+    return (characters || []).filter(c => !currentNovelId || !c.novelId || c.novelId === currentNovelId);
+  }, [characters, currentNovelId]);
+
+  const filteredChars = useMemo(() => {
+    if (!searchTerm) return currentNovelChars;
+    const lower = searchTerm.toLowerCase();
+    return currentNovelChars.filter(c => 
+      c.chineseName.toLowerCase().includes(lower) ||
+      c.vietName.toLowerCase().includes(lower) ||
+      (c.pronouns && c.pronouns.toLowerCase().includes(lower)) ||
+      (c.description && c.description.toLowerCase().includes(lower))
+    );
+  }, [currentNovelChars, searchTerm]);
+
+  // Term inline editing handlers
+  const handleStartEditTerm = (item: CustomTerm) => {
+    setEditingTermId(item.id);
+    setEditTermText(item.term);
+    setEditMeaningText(item.meaning);
+    setEditCategoryVal(item.category || '');
+  };
+
+  const handleSaveEditTerm = (id: string) => {
+    if (!editTermText.trim() || !editMeaningText.trim()) return;
+    const updated = currentNovelTerms.map(t => 
+      t.id === id ? { 
+        ...t, 
+        term: editTermText.trim(), 
+        meaning: editMeaningText.trim(), 
+        category: (editCategoryVal.trim() && editCategoryVal.trim() !== "Chưa phân loại") ? editCategoryVal.trim() : undefined 
+      } : t
+    );
+    onUpdateTerms(updated);
+    setEditingTermId(null);
+    setSyncMessage({ type: 'success', text: `Đã cập nhật từ "${editTermText.trim()}"!` });
+    setTimeout(() => setSyncMessage(null), 2500);
+  };
+
+  const handleCancelEditTerm = () => {
+    setEditingTermId(null);
+  };
+
+  // Character inline editing handlers
+  const handleStartEditChar = (char: Character) => {
+    setEditingCharId(char.id);
+    setEditCharChinese(char.chineseName);
+    setEditCharViet(char.vietName);
+    setEditCharPronouns(char.pronouns || '');
+    setEditCharDesc(char.description || '');
+  };
+
+  const handleSaveEditChar = (id: string) => {
+    if (!editCharChinese.trim() || !editCharViet.trim() || !onUpdateCharacters) return;
+    const updated = currentNovelChars.map(c => 
+      c.id === id ? { 
+        ...c, 
+        chineseName: editCharChinese.trim(), 
+        vietName: editCharViet.trim(), 
+        pronouns: editCharPronouns.trim(),
+        description: editCharDesc.trim()
+      } : c
+    );
+    onUpdateCharacters(updated);
+    setEditingCharId(null);
+    setSyncMessage({ type: 'success', text: `Đã cập nhật nhân vật "${editCharViet.trim()}"!` });
+    setTimeout(() => setSyncMessage(null), 2500);
+  };
+
+  const handleCancelEditChar = () => {
+    setEditingCharId(null);
+  };
+
+  const handleDeleteChar = (id: string) => {
+    if (!onUpdateCharacters) return;
+    deleteFirestoreDoc('char', id);
+    onUpdateCharacters(currentNovelChars.filter(c => c.id !== id));
+  };
+
+  const handleAddChar = () => {
+    if (!newCharChinese.trim() || !newCharViet.trim() || !onUpdateCharacters) return;
+    const newChar: Character = {
+      id: Date.now().toString() + Math.random().toString(36).substring(2, 6),
+      novelId: currentNovelId || '',
+      chineseName: newCharChinese.trim(),
+      vietName: newCharViet.trim(),
+      pronouns: newCharPronouns.trim(),
+      description: newCharDesc.trim()
+    };
+    onUpdateCharacters([...currentNovelChars, newChar]);
+    setNewCharChinese('');
+    setNewCharViet('');
+    setNewCharPronouns('');
+    setNewCharDesc('');
+    setSyncMessage({ type: 'success', text: `Đã thêm nhân vật "${newChar.vietName}"!` });
+    setTimeout(() => setSyncMessage(null), 2500);
+  };
 
   const handleAdd = () => {
     if (!newTerm.trim() || !newMeaning.trim()) return;
@@ -747,160 +871,437 @@ export const DictionarySidebar: React.FC<DictionarySidebarProps> = ({
         </div>
       </div>
 
+      {/* Tabs Switcher: Từ vựng & Nhân vật */}
+      <div className="flex border-b border-[#D7CCC8] bg-[#D7CCC8]/30 px-2 pt-1.5 gap-1">
+        <button
+          onClick={() => { setActiveTab('vocab'); setEditingTermId(null); setEditingCharId(null); }}
+          className={`flex-1 py-1 text-xs font-bold rounded-t-md transition-all flex items-center justify-center gap-1.5 border-t border-x ${
+            activeTab === 'vocab'
+              ? 'bg-[#F5E6D3] text-[#3E2723] border-[#D7CCC8] border-b-[#F5E6D3] -mb-px shadow-xs'
+              : 'bg-transparent text-[#795548] border-transparent hover:text-[#3E2723] hover:bg-[#EFE5D9]'
+          }`}
+        >
+          <BookA size={13} />
+          <span>Từ vựng</span>
+          <span className="text-[10px] opacity-75 font-normal">({currentNovelTerms.length})</span>
+        </button>
+        <button
+          onClick={() => { setActiveTab('characters'); setEditingTermId(null); setEditingCharId(null); }}
+          className={`flex-1 py-1 text-xs font-bold rounded-t-md transition-all flex items-center justify-center gap-1.5 border-t border-x ${
+            activeTab === 'characters'
+              ? 'bg-[#F5E6D3] text-[#3E2723] border-[#D7CCC8] border-b-[#F5E6D3] -mb-px shadow-xs'
+              : 'bg-transparent text-[#795548] border-transparent hover:text-[#3E2723] hover:bg-[#EFE5D9]'
+          }`}
+        >
+          <Users size={13} />
+          <span>Nhân vật</span>
+          <span className="text-[10px] opacity-75 font-normal">({currentNovelChars.length})</span>
+        </button>
+      </div>
+
       {/* Table Content */}
       <div className="flex-1 overflow-y-auto bg-[#F5E6D3]">
-        <table className="w-full text-left border-collapse">
-          <thead className="bg-[#EFEBE9] sticky top-0 z-10 shadow-sm">
-            <tr>
-              <th className="py-0.5 px-1 text-[10px] font-bold text-[#5D4037] uppercase tracking-wider w-1/2 border-r border-[#D7CCC8]">Trung</th>
-              <th className="py-0.5 px-1 text-[10px] font-bold text-[#5D4037] uppercase tracking-wider w-1/2">Việt</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-[#EFEBE9] bg-white">
-            {filteredTerms.length === 0 ? (
+        {activeTab === 'vocab' ? (
+          <table className="w-full text-left border-collapse">
+            <thead className="bg-[#EFEBE9] sticky top-0 z-10 shadow-sm">
               <tr>
-                <td colSpan={2} className="py-8 text-center text-xs text-[#BCAAA4] italic">
-                  {searchTerm ? 'Không tìm thấy kết quả' : 'Chưa có dữ liệu'}
-                </td>
+                <th className="py-0.5 px-1 text-[10px] font-bold text-[#5D4037] uppercase tracking-wider w-1/2 border-r border-[#D7CCC8]">Trung</th>
+                <th className="py-0.5 px-1 text-[10px] font-bold text-[#5D4037] uppercase tracking-wider w-1/2">Việt</th>
               </tr>
-            ) : (
-              filteredTerms.map((item) => (
-                <tr key={item.id} className="group hover:bg-[#FFF8E1] transition-colors">
-                  <td className="py-0.5 px-1 text-[11px] font-serif-sc font-medium text-[#3E2723] align-top relative border-r border-[#EFEBE9] leading-tight">
-                     {item.term}
-                  </td>
-                  <td className="py-0.5 px-1 text-[11px] text-[#4E342E] align-top relative leading-tight pb-2 pr-6">
-                     <span className="font-medium text-[#795548] block">{item.meaning}</span>
-                     
-                     {/* Category Dropdown (Google Sheets Style) */}
-                     <div className="mt-0.5">
-                       <select
-                        
-                         value={item.category || ''}
-                         onChange={(e) => {
-                           if (e.target.value === '__new__') {
-                             const custom = prompt("Nhập phân loại mới:");
-                             if (custom?.trim()) {
-                               handleUpdateCategory(item.id, custom.trim());
-                             }
-                           } else {
-                             handleUpdateCategory(item.id, e.target.value);
-                           }
-                         }}
-                         className="text-[9px] px-1 bg-[#F5E6D3] text-[#5D4037] border border-[#D7CCC8] rounded cursor-pointer max-w-[120px] truncate focus:outline-none focus:ring-1 focus:ring-[#8D6E63] py-0"
-                       >
-                         <option value="">Chưa phân loại</option>
-                         {allCategories.map(cat => (
-                           <option key={cat} value={cat}>{cat}</option>
-              ))}
-                         <option value="__new__" className="text-blue-600 font-bold">+ Thêm mới...</option>
-                       </select>
-                     </div>
-
-                     {/* Delete Button */}
-                     
-                       <button
-                          onClick={() => handleDelete(item.id)}
-                          className="absolute right-1 top-1/2 -translate-y-1/2 p-0.5 bg-white shadow-sm border border-[#D7CCC8] rounded text-[#BCAAA4] hover:text-[#D32F2F] opacity-0 group-hover:opacity-100 transition-all z-10"
-                          title="Xóa"
-                        >
-                          <Trash2 size={10} />
-                        </button>
-                     
+            </thead>
+            <tbody className="divide-y divide-[#EFEBE9] bg-white">
+              {filteredTerms.length === 0 ? (
+                <tr>
+                  <td colSpan={2} className="py-8 text-center text-xs text-[#BCAAA4] italic">
+                    {searchTerm ? 'Không tìm thấy kết quả' : 'Chưa có từ vựng'}
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              ) : (
+                filteredTerms.map((item) => (
+                  editingTermId === item.id ? (
+                    <tr key={item.id} className="bg-[#FFF9C4] border-y border-[#FBC02D] shadow-xs">
+                      <td className="p-1" colSpan={2}>
+                        <div className="space-y-1">
+                          <div className="flex gap-1">
+                            <input 
+                              type="text" 
+                              value={editTermText} 
+                              onChange={(e) => setEditTermText(e.target.value)} 
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleSaveEditTerm(item.id);
+                                if (e.key === 'Escape') handleCancelEditTerm();
+                              }}
+                              className="w-1/2 px-1.5 py-0.5 text-xs bg-white border border-[#8D6E63] rounded font-serif-sc font-medium text-[#3E2723] focus:ring-1 focus:ring-[#8D6E63] outline-none" 
+                              placeholder="Từ gốc"
+                              autoFocus
+                            />
+                            <input 
+                              type="text" 
+                              value={editMeaningText} 
+                              onChange={(e) => setEditMeaningText(e.target.value)} 
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleSaveEditTerm(item.id);
+                                if (e.key === 'Escape') handleCancelEditTerm();
+                              }}
+                              className="w-1/2 px-1.5 py-0.5 text-xs bg-white border border-[#8D6E63] rounded font-bold text-[#3E2723] focus:ring-1 focus:ring-[#8D6E63] outline-none" 
+                              placeholder="Nghĩa TV"
+                            />
+                          </div>
+                          <div className="flex items-center justify-between gap-1">
+                            <select
+                              value={editCategoryVal}
+                              onChange={(e) => setEditCategoryVal(e.target.value)}
+                              className="text-[10px] px-1 py-0.5 bg-white text-[#5D4037] border border-[#D7CCC8] rounded outline-none max-w-[130px]"
+                            >
+                              <option value="">Chưa phân loại</option>
+                              {allCategories.map(cat => (
+                                <option key={cat} value={cat}>{cat}</option>
+                              ))}
+                            </select>
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => handleSaveEditTerm(item.id)}
+                                className="px-2 py-0.5 bg-[#4E342E] text-white text-[10px] font-bold rounded flex items-center gap-1 hover:bg-[#3E2723] shadow-xs cursor-pointer"
+                                title="Lưu (Enter)"
+                              >
+                                <Check size={11} /> Lưu
+                              </button>
+                              <button
+                                onClick={handleCancelEditTerm}
+                                className="px-1.5 py-0.5 bg-white border border-[#D7CCC8] text-[#5D4037] text-[10px] rounded hover:bg-[#EFEBE9] cursor-pointer"
+                                title="Hủy (Esc)"
+                              >
+                                <X size={11} />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : (
+                    <tr 
+                      key={item.id} 
+                      onDoubleClick={() => handleStartEditTerm(item)}
+                      className="group hover:bg-[#FFF8E1] transition-colors cursor-pointer"
+                      title="Nhấp đúp để sửa từ này"
+                    >
+                      <td className="py-0.5 px-1 text-[11px] font-serif-sc font-medium text-[#3E2723] align-top relative border-r border-[#EFEBE9] leading-tight">
+                         {item.term}
+                      </td>
+                      <td className="py-0.5 px-1 text-[11px] text-[#4E342E] align-top relative leading-tight pb-2 pr-14">
+                         <span className="font-medium text-[#795548] block">{item.meaning}</span>
+                         
+                         {/* Category Dropdown (Google Sheets Style) */}
+                         <div className="mt-0.5">
+                           <select
+                             value={item.category || ''}
+                             onChange={(e) => {
+                               if (e.target.value === '__new__') {
+                                 const custom = prompt("Nhập phân loại mới:");
+                                 if (custom?.trim()) {
+                                   handleUpdateCategory(item.id, custom.trim());
+                                 }
+                               } else {
+                                 handleUpdateCategory(item.id, e.target.value);
+                               }
+                             }}
+                             className="text-[9px] px-1 bg-[#F5E6D3] text-[#5D4037] border border-[#D7CCC8] rounded cursor-pointer max-w-[120px] truncate focus:outline-none focus:ring-1 focus:ring-[#8D6E63] py-0"
+                           >
+                             <option value="">Chưa phân loại</option>
+                             {allCategories.map(cat => (
+                               <option key={cat} value={cat}>{cat}</option>
+                             ))}
+                             <option value="__new__" className="text-blue-600 font-bold">+ Thêm mới...</option>
+                           </select>
+                         </div>
+
+                         {/* Action Buttons: Edit (Pencil) & Delete (Trash) */}
+                         <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all z-10">
+                           <button
+                              onClick={(e) => { e.stopPropagation(); handleStartEditTerm(item); }}
+                              className="p-1 bg-white shadow-xs border border-[#D7CCC8] rounded text-[#5D4037] hover:text-[#2E7D32] hover:bg-green-50 transition-colors"
+                              title="Sửa từ này"
+                            >
+                              <Pencil size={11} />
+                            </button>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleDelete(item.id); }}
+                              className="p-1 bg-white shadow-xs border border-[#D7CCC8] rounded text-[#BCAAA4] hover:text-[#D32F2F] hover:bg-red-50 transition-colors"
+                              title="Xóa"
+                            >
+                              <Trash2 size={11} />
+                            </button>
+                         </div>
+                      </td>
+                    </tr>
+                  )
+                ))
+              )}
+            </tbody>
+          </table>
+        ) : (
+          <table className="w-full text-left border-collapse">
+            <thead className="bg-[#EFEBE9] sticky top-0 z-10 shadow-sm">
+              <tr>
+                <th className="py-0.5 px-1 text-[10px] font-bold text-[#5D4037] uppercase tracking-wider w-[26%] border-r border-[#D7CCC8]">Trung</th>
+                <th className="py-0.5 px-1 text-[10px] font-bold text-[#5D4037] uppercase tracking-wider w-[32%] border-r border-[#D7CCC8]">Việt</th>
+                <th className="py-0.5 px-1 text-[10px] font-bold text-[#5D4037] uppercase tracking-wider w-[18%] border-r border-[#D7CCC8]">Ngôi 3</th>
+                <th className="py-0.5 px-1 text-[10px] font-bold text-[#5D4037] uppercase tracking-wider w-[24%]">Chi tiết</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#EFEBE9] bg-white">
+              {filteredChars.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="py-8 text-center text-xs text-[#BCAAA4] italic">
+                    {searchTerm ? 'Không tìm thấy nhân vật' : 'Chưa có nhân vật'}
+                  </td>
+                </tr>
+              ) : (
+                filteredChars.map((char) => (
+                  editingCharId === char.id ? (
+                    <tr key={char.id} className="bg-[#FFF9C4] border-y border-[#FBC02D] shadow-xs">
+                      <td className="p-1" colSpan={4}>
+                        <div className="space-y-1">
+                          <div className="grid grid-cols-3 gap-1">
+                            <input
+                              type="text"
+                              value={editCharChinese}
+                              onChange={(e) => setEditCharChinese(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleSaveEditChar(char.id);
+                                if (e.key === 'Escape') handleCancelEditChar();
+                              }}
+                              className="px-1.5 py-0.5 text-xs bg-white border border-[#8D6E63] rounded font-serif-sc font-medium text-[#3E2723] outline-none"
+                              placeholder="Tên Trung"
+                              autoFocus
+                            />
+                            <input
+                              type="text"
+                              value={editCharViet}
+                              onChange={(e) => setEditCharViet(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleSaveEditChar(char.id);
+                                if (e.key === 'Escape') handleCancelEditChar();
+                              }}
+                              className="px-1.5 py-0.5 text-xs bg-white border border-[#8D6E63] rounded font-bold text-[#3E2723] outline-none"
+                              placeholder="Tên Việt"
+                            />
+                            <input
+                              type="text"
+                              value={editCharPronouns}
+                              onChange={(e) => setEditCharPronouns(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleSaveEditChar(char.id);
+                                if (e.key === 'Escape') handleCancelEditChar();
+                              }}
+                              className="px-1.5 py-0.5 text-xs bg-white border border-[#8D6E63] rounded text-[#3E2723] outline-none"
+                              placeholder="Ngôi xưng"
+                            />
+                          </div>
+                          <input
+                            type="text"
+                            value={editCharDesc}
+                            onChange={(e) => setEditCharDesc(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleSaveEditChar(char.id);
+                              if (e.key === 'Escape') handleCancelEditChar();
+                            }}
+                            className="w-full px-1.5 py-0.5 text-xs bg-white border border-[#D7CCC8] rounded text-[#5D4037] outline-none"
+                            placeholder="Chi tiết / mô tả nhân vật..."
+                          />
+                          <div className="flex justify-end items-center gap-1 pt-0.5">
+                            <button
+                              onClick={() => handleSaveEditChar(char.id)}
+                              className="px-2 py-0.5 bg-[#4E342E] text-white text-[10px] font-bold rounded flex items-center gap-1 hover:bg-[#3E2723] shadow-xs cursor-pointer"
+                              title="Lưu (Enter)"
+                            >
+                              <Check size={11} /> Lưu
+                            </button>
+                            <button
+                              onClick={handleCancelEditChar}
+                              className="px-1.5 py-0.5 bg-white border border-[#D7CCC8] text-[#5D4037] text-[10px] rounded hover:bg-[#EFEBE9] cursor-pointer"
+                              title="Hủy (Esc)"
+                            >
+                              <X size={11} />
+                            </button>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : (
+                    <tr 
+                      key={char.id} 
+                      onDoubleClick={() => handleStartEditChar(char)}
+                      className="group hover:bg-[#FFF8E1] transition-colors cursor-pointer"
+                      title="Nhấp đúp để sửa nhân vật này"
+                    >
+                      <td className="py-1 px-1 text-[11px] font-serif-sc font-medium text-[#3E2723] align-top border-r border-[#EFEBE9] leading-tight w-[26%]">
+                        {char.chineseName}
+                      </td>
+                      <td className="py-1 px-1 text-[11px] font-bold text-[#3E2723] align-top border-r border-[#EFEBE9] leading-tight w-[32%]">
+                        {char.vietName}
+                      </td>
+                      <td className="py-1 px-1 text-[10px] text-[#5D4037] align-top border-r border-[#EFEBE9] leading-tight w-[18%]">
+                        {char.pronouns || <span className="text-[#BCAAA4] italic">-</span>}
+                      </td>
+                      <td className="py-1 px-1 text-[10px] text-[#795548] align-top relative leading-tight pr-14 w-[24%]">
+                        <span className="line-clamp-2">{char.description || <span className="text-[#BCAAA4] italic">-</span>}</span>
+                        
+                        <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all z-10">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleStartEditChar(char); }}
+                            className="p-1 bg-white shadow-xs border border-[#D7CCC8] rounded text-[#5D4037] hover:text-[#2E7D32] hover:bg-green-50 transition-colors"
+                            title="Sửa nhân vật"
+                          >
+                            <Pencil size={11} />
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleDeleteChar(char.id); }}
+                            className="p-1 bg-white shadow-xs border border-[#D7CCC8] rounded text-[#BCAAA4] hover:text-[#D32F2F] hover:bg-red-50 transition-colors"
+                            title="Xóa nhân vật"
+                          >
+                            <Trash2 size={11} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                ))
+              )}
+            </tbody>
+          </table>
+        )}
       </div>
 
-      {/* Add New */}
-      <div className="p-1 border-t border-[#D7CCC8] bg-[#EFE5D9] space-y-1">
-         <div className="flex gap-1">
-            <input
-                type="text"
-                placeholder="Từ gốc"
-                value={newTerm}
-               
-                onChange={(e) => setNewTerm(e.target.value)}
-                className={`w-1/2 px-1 py-0.5 text-[10px] border border-[#D7CCC8] rounded outline-none focus:border-[#8D6E63] font-serif-sc`}
-            />
-            <input
-               type="text"
-               placeholder="Nghĩa TV"
-               value={newMeaning}
-              
-               onChange={(e) => setNewMeaning(e.target.value)}
-               onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
-               className={`w-1/2 px-1 py-0.5 text-[10px] border border-[#D7CCC8] rounded outline-none focus:border-[#8D6E63]`}
-            />
-         </div>
-         <div className="flex gap-1 items-center">
-            {isCreatingCat ? (
-              <div className="flex gap-1 items-center w-full">
-                <input
+      {/* Add New Section */}
+      {activeTab === 'vocab' ? (
+        <div className="p-1.5 border-t border-[#D7CCC8] bg-[#EFE5D9] space-y-1">
+           <div className="flex gap-1">
+              <input
                   type="text"
-                  placeholder="Tên phân loại mới..."
-                  value={newCatInput}
-                  onChange={(e) => setNewCatInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
+                  placeholder="Từ gốc"
+                  value={newTerm}
+                  onChange={(e) => setNewTerm(e.target.value)}
+                  className={`w-1/2 px-1 py-0.5 text-[10px] border border-[#D7CCC8] rounded outline-none focus:border-[#8D6E63] font-serif-sc bg-white`}
+              />
+              <input
+                 type="text"
+                 placeholder="Nghĩa TV"
+                 value={newMeaning}
+                 onChange={(e) => setNewMeaning(e.target.value)}
+                 onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
+                 className={`w-1/2 px-1 py-0.5 text-[10px] border border-[#D7CCC8] rounded outline-none focus:border-[#8D6E63] bg-white`}
+              />
+           </div>
+           <div className="flex gap-1 items-center">
+              {isCreatingCat ? (
+                <div className="flex gap-1 items-center w-full">
+                  <input
+                    type="text"
+                    placeholder="Tên phân loại mới..."
+                    value={newCatInput}
+                    onChange={(e) => setNewCatInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        if (newCatInput.trim()) setCategoryVal(newCatInput.trim());
+                        setIsCreatingCat(false);
+                      }
+                    }}
+                    className="w-full text-[10px] px-1 py-0.5 border border-[#D7CCC8] rounded outline-none focus:border-[#8D6E63] bg-white"
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
                       if (newCatInput.trim()) setCategoryVal(newCatInput.trim());
                       setIsCreatingCat(false);
-                    }
-                  }}
-                  className="w-full text-[10px] px-1 py-0.5 border border-[#D7CCC8] rounded outline-none focus:border-[#8D6E63] bg-white"
-                  autoFocus
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (newCatInput.trim()) setCategoryVal(newCatInput.trim());
-                    setIsCreatingCat(false);
-                  }}
-                  className="px-1.5 py-0.5 bg-[#3E2723] text-[#F5E6D3] rounded text-[10px] font-bold"
+                    }}
+                    className="px-1.5 py-0.5 bg-[#3E2723] text-[#F5E6D3] rounded text-[10px] font-bold"
+                  >
+                    Lưu
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsCreatingCat(false)}
+                    className="px-1.5 py-0.5 bg-[#D7CCC8] text-[#3E2723] rounded text-[10px] font-bold"
+                  >
+                    Hủy
+                  </button>
+                </div>
+              ) : (
+                <select
+                   value={categoryVal}
+                   onChange={(e) => {
+                     if (e.target.value === "__new__") {
+                       setIsCreatingCat(true);
+                       setNewCatInput("");
+                     } else {
+                       setCategoryVal(e.target.value);
+                     }
+                   }}
+                   className={`w-full text-[10px] px-1 py-0.5 border border-[#D7CCC8] rounded outline-none focus:border-[#8D6E63] bg-white cursor-pointer`}
                 >
-                  Lưu
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsCreatingCat(false)}
-                  className="px-1.5 py-0.5 bg-[#D7CCC8] text-[#3E2723] rounded text-[10px] font-bold"
-                >
-                  Hủy
-                </button>
-              </div>
-            ) : (
-              <select
-                 value={categoryVal}
-                 onChange={(e) => {
-                   if (e.target.value === "__new__") {
-                     setIsCreatingCat(true);
-                     setNewCatInput("");
-                   } else {
-                     setCategoryVal(e.target.value);
-                   }
-                 }}
-                 className={`w-full text-[10px] px-1 py-0.5 border border-[#D7CCC8] rounded outline-none focus:border-[#8D6E63] bg-white cursor-pointer`}
+                   <option value="">-- Chọn phân loại --</option>
+                   {allCategories.map(cat => (
+                     <option key={cat} value={cat}>{cat}</option>
+                   ))}
+                   <option value="__new__" className="text-blue-600 font-bold">+ Thêm phân loại mới...</option>
+                </select>
+              )}
+           </div>
+           <button 
+              onClick={handleAdd}
+              disabled={!newTerm.trim() || !newMeaning.trim()}
+              className="w-full bg-[#3E2723] text-[#F5E6D3] py-0.5 rounded text-[10px] font-bold uppercase hover:bg-[#4E342E] disabled:opacity-50 flex justify-center items-center gap-1 shadow-sm cursor-pointer"
+           >
+              <Plus size={10} /> Thêm từ
+           </button>
+        </div>
+      ) : (
+        <div className="p-1.5 border-t border-[#D7CCC8] bg-[#EFE5D9] space-y-1">
+           <div className="grid grid-cols-3 gap-1">
+              <input
+                type="text"
+                placeholder="Tên Trung"
+                value={newCharChinese}
+                onChange={(e) => setNewCharChinese(e.target.value)}
+                className="px-1 py-0.5 text-[10px] border border-[#D7CCC8] rounded outline-none focus:border-[#8D6E63] font-serif-sc bg-white"
+              />
+              <input
+                type="text"
+                placeholder="Tên Việt"
+                value={newCharViet}
+                onChange={(e) => setNewCharViet(e.target.value)}
+                className="px-1 py-0.5 text-[10px] border border-[#D7CCC8] rounded outline-none focus:border-[#8D6E63] font-bold bg-white"
+              />
+              <input
+                type="text"
+                placeholder="Ngôi xưng"
+                value={newCharPronouns}
+                onChange={(e) => setNewCharPronouns(e.target.value)}
+                className="px-1 py-0.5 text-[10px] border border-[#D7CCC8] rounded outline-none focus:border-[#8D6E63] bg-white"
+              />
+           </div>
+           <div className="flex gap-1">
+              <input
+                type="text"
+                placeholder="Chi tiết / mô tả nhân vật..."
+                value={newCharDesc}
+                onChange={(e) => setNewCharDesc(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleAddChar()}
+                className="flex-1 px-1 py-0.5 text-[10px] border border-[#D7CCC8] rounded outline-none focus:border-[#8D6E63] bg-white"
+              />
+              <button
+                onClick={handleAddChar}
+                disabled={!newCharChinese.trim() || !newCharViet.trim()}
+                className="px-2 py-0.5 bg-[#3E2723] text-[#F5E6D3] text-[10px] font-bold rounded hover:bg-[#4E342E] disabled:opacity-50 shadow-sm flex items-center gap-1 cursor-pointer shrink-0"
               >
-                 <option value="">-- Chọn phân loại --</option>
-                 {allCategories.map(cat => (
-                   <option key={cat} value={cat}>{cat}</option>
-                 ))}
-                 <option value="__new__" className="text-blue-600 font-bold">+ Thêm phân loại mới...</option>
-              </select>
-            )}
-         </div>
-         <button 
-            onClick={handleAdd}
-            disabled={!newTerm.trim() || !newMeaning.trim()}
-            className="w-full bg-[#3E2723] text-[#F5E6D3] py-0.5 rounded text-[10px] font-bold uppercase hover:bg-[#4E342E] disabled:opacity-50 flex justify-center items-center gap-1 shadow-sm"
-         >
-            <Plus size={10} /> Thêm
-         </button>
-      </div>
+                <Plus size={10} /> Thêm NV
+              </button>
+           </div>
+        </div>
+      )}
     </div>
   );
 };

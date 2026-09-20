@@ -281,6 +281,12 @@ useEffect(() => {
          }
      });
 
+     db.getCharacters().then(chars => {
+         if (chars && chars.length > 0) {
+             setSession(prev => ({ ...prev, characters: chars }));
+         }
+     });
+
      db.getAllChapters().then(savedChapters => {
          if (savedChapters) {
              setChapters(savedChapters);
@@ -558,6 +564,20 @@ useEffect(() => {
 
   const updateSession = (updates: Partial<TranslationSession>) => {
     setSession(prev => ({ ...prev, ...updates }));
+  };
+
+  const handleUpdateCharacters = (novelChars: Character[]) => {
+    try {
+      const currentId = session.currentNovelId;
+      const otherChars = (session.characters || []).filter(c => c.novelId && c.novelId !== currentId);
+      const merged = [...novelChars, ...otherChars];
+      updateSession({ characters: merged });
+      db.saveCharacters(merged).catch(err => {
+        console.error("App: db.saveCharacters failed", err);
+      });
+    } catch (err) {
+      console.error("App: handleUpdateCharacters caught error:", err);
+    }
   };
 
   const autoSaveLinkedChapter = (newResult: any, newCompleted?: number[]) => {
@@ -1512,6 +1532,8 @@ useEffect(() => {
                         console.error("App Sidebar: onUpdateTerms caught error:", err);
                     }
                 }} 
+                characters={session.characters}
+                onUpdateCharacters={handleUpdateCharacters}
                 sheetUrl={session.sheetUrl} 
                 onUpdateSheetUrl={(url) => updateSession({ sheetUrl: url })} 
                 refreshTrigger={vpLoaded}
@@ -1554,6 +1576,8 @@ useEffect(() => {
                             console.error("App Sidebar: onUpdateTerms caught error:", err);
                         }
                     }} 
+                    characters={session.characters}
+                    onUpdateCharacters={handleUpdateCharacters}
                     sheetUrl={session.sheetUrl} 
                     onUpdateSheetUrl={(url) => updateSession({ sheetUrl: url })} 
                     refreshTrigger={vpLoaded}
@@ -1810,7 +1834,7 @@ useEffect(() => {
             <WorldInfoPanel 
                 currentNovelId={session.currentNovelId || ''}
                 characters={session.characters} 
-                onUpdateCharacters={(chars) => updateSession({ characters: chars })} 
+                onUpdateCharacters={handleUpdateCharacters} 
                 relationships={session.relationships} 
                 onUpdateRelationships={(rels) => updateSession({ relationships: rels })} 
                 notes={session.notes} 
@@ -1843,7 +1867,7 @@ useEffect(() => {
                 <WorldInfoPanel 
                     currentNovelId={session.currentNovelId || ''}
                     characters={session.characters} 
-                    onUpdateCharacters={(chars) => updateSession({ characters: chars })} 
+                    onUpdateCharacters={handleUpdateCharacters} 
                     relationships={session.relationships} 
                     onUpdateRelationships={(rels) => updateSession({ relationships: rels })} 
                     notes={session.notes} 

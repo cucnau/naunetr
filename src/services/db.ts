@@ -1,5 +1,5 @@
 
-import { CustomTerm, Chapter, VietphraseFileItem } from '../types';
+import { CustomTerm, Chapter, VietphraseFileItem, Character } from '../types';
 
 // IndexedDB Service
 const DB_NAME = 'ChiVietDB';
@@ -11,6 +11,7 @@ const STORE_CHAPTERS = 'chapters';
 export const KEY_VIETPHRASE = 'vietphrase_data';
 export const KEY_VIETPHRASE_FILES = 'vietphrase_files';
 export const KEY_CURRENT_NOVEL = 'current_novel_id';
+export const KEY_CHARACTERS = 'characters_data';
 
 const dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
     if (typeof window === 'undefined' || !window.indexedDB) {
@@ -282,6 +283,37 @@ export const db = {
             });
         } catch (e) {
             console.error("DB Clear Chapters Error", e);
+        }
+    },
+
+    async getCharacters(): Promise<Character[]> {
+        try {
+            const db = await dbPromise;
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(STORE_SETTINGS, 'readonly');
+                const store = tx.objectStore(STORE_SETTINGS);
+                const req = store.get(KEY_CHARACTERS);
+                req.onsuccess = () => resolve(req.result || []);
+                req.onerror = () => reject(req.error);
+            });
+        } catch (e) {
+            console.error("DB Get Characters Error", e);
+            return [];
+        }
+    },
+
+    async saveCharacters(chars: Character[]): Promise<void> {
+        try {
+            const db = await dbPromise;
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(STORE_SETTINGS, 'readwrite');
+                const store = tx.objectStore(STORE_SETTINGS);
+                const req = store.put(chars, KEY_CHARACTERS);
+                req.onsuccess = () => resolve();
+                req.onerror = () => reject(req.error);
+            });
+        } catch (e) {
+            console.error("DB Save Characters Error", e);
         }
     }
 };
