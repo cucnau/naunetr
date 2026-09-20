@@ -1344,10 +1344,18 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
                                   </div>
                                 ) : (
                                   <div className={`${isFocusMode ? 'text-[18.5px]' : 'text-[14.5px]'} font-serif-sc leading-[1.2] text-[#3E2723] m-0 whitespace-normal break-words flex items-start gap-1 group/raw`}>
-                                     <span className={`inline-flex items-center justify-center mr-0.5 select-none align-middle transform -translate-y-[1px] ${isFocusMode ? 'text-[11px] min-w-[18px]' : 'text-[9px] min-w-[14px]'} font-bold ${isDone ? 'text-[#3E2723]/70 font-black' : 'text-[#A1887F]/40'}`}>
+                                     <span 
+                                       onClick={() => onToggleComplete?.(idx)}
+                                       className={`inline-flex items-center justify-center mr-0.5 select-none align-middle transform -translate-y-[1px] ${isFocusMode ? 'text-[11px] min-w-[18px]' : 'text-[9px] min-w-[14px]'} font-bold cursor-pointer hover:underline ${isDone ? 'text-green-800 font-black' : 'text-[#A1887F]/40 hover:text-[#3E2723]'}`}
+                                       title={isDone ? "Đã xong (Bấm để bỏ)" : "Bấm để đánh dấu xong"}
+                                     >
                                          {idx + 1}.
                                      </span>
-                                     <div className="flex-1 min-w-0">
+                                     <div 
+                                       onDoubleClick={() => handleStartEditCell(idx, 'source', cleanSource)}
+                                       className="flex-1 min-w-0 cursor-text"
+                                       title="Bấm đúp để sửa chữ Hán (Raw)"
+                                     >
                                        {renderSourceWithHighlight(cleanSource) || <span className="opacity-30 italic text-[11px]">[Trống]</span>}
                                      </div>
                                      <button
@@ -1356,7 +1364,7 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
                                          handleStartEditCell(idx, 'source', cleanSource);
                                        }}
                                        title="Sửa câu tiếng Trung (Raw)"
-                                       className="opacity-0 group-hover/raw:opacity-100 hover:opacity-100 text-[#A1887F] hover:text-[#5D4037] p-0.5 rounded hover:bg-[#D7CCC8]/50 transition-all shrink-0"
+                                       className="hidden group-hover/raw:inline-flex text-[#A1887F] hover:text-[#5D4037] p-0.5 rounded hover:bg-[#D7CCC8]/50 transition-all shrink-0"
                                      >
                                        <Pencil size={10} />
                                      </button>
@@ -1417,7 +1425,7 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
                                         handleStartEditCell(idx, 'quick', cleanQuick);
                                       }}
                                       title="Chỉnh sửa Vietphrase dòng này"
-                                      className="opacity-0 group-hover/vp:opacity-100 text-[#A1887F] hover:text-[#8D6E63] p-0.5 rounded hover:bg-[#D7CCC8]/40 transition-all shrink-0"
+                                      className="hidden group-hover/vp:inline-flex text-[#A1887F] hover:text-[#8D6E63] p-0.5 rounded hover:bg-[#D7CCC8]/40 transition-all shrink-0"
                                     >
                                       <Pencil size={9} />
                                     </button>
@@ -1426,31 +1434,9 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
                               </div>
                            </div>
 
-                           {/* Cột 2: Bản edit */}
-                           <div className="w-full sm:w-[55%] py-1 px-2 sm:py-0 relative sm:pr-14 border-none bg-transparent">
-                              <div className="flex items-start gap-1.5 py-0.5">
-                                  {/* Thao tác ở bên trái dành riêng cho điện thoại dọc (ở cột edit) */}
-                                  <div className="sm:hidden flex items-center gap-0.5 shrink-0 mt-0.5">
-                                    <button
-                                      onClick={() => onDeleteSegment?.(idx)}
-                                      className="p-0.5 rounded transition-all text-[#A1887F]/50 hover:text-red-600 hover:bg-red-50"
-                                      title="Xóa hàng này"
-                                    >
-                                      <Trash2 size={isFocusMode ? 13 : 11} />
-                                    </button>
-                                    <button
-                                      onClick={() => onToggleComplete?.(idx)}
-                                      className={`p-0.5 rounded transition-all ${
-                                        isDone
-                                          ? 'text-[#5D4037] bg-[#D7CCC8]/80'
-                                          : 'text-[#A1887F]/50 hover:text-[#3E2723]'
-                                      }`}
-                                      title={isDone ? "Đã xong (Bấm để bỏ)" : "Đánh dấu xong"}
-                                    >
-                                      <CheckCircle2 size={isFocusMode ? 14 : 12} />
-                                    </button>
-                                  </div>
-
+                           {/* Cột 2: Bản edit - Đầy đủ 100% không chừa khoảng trống, các nút thao tác nổi khi hover */}
+                           <div className="w-full sm:w-[55%] py-1 px-2 sm:py-0 relative border-none bg-transparent">
+                              <div className="flex items-start py-0.5">
                                   <div className="flex-1 min-w-0 flex flex-col">
                                       <EditableSegment 
                                         text={cleanNatural} 
@@ -1521,7 +1507,7 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
                                               handleStartEditCell(idx, 'deepl', cleanDeepl);
                                             }}
                                             title="Chỉnh sửa GG/DeepL dòng này"
-                                            className="opacity-0 group-hover/deepl:opacity-100 text-[#A1887F] hover:text-[#5D4037] p-0.5 rounded hover:bg-[#D7CCC8]/40 transition-all shrink-0"
+                                            className="hidden group-hover/deepl:inline-flex text-[#A1887F] hover:text-[#5D4037] p-0.5 rounded hover:bg-[#D7CCC8]/40 transition-all shrink-0"
                                           >
                                             <Pencil size={9} />
                                           </button>
@@ -1530,25 +1516,25 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
                                   </div>
                               </div>
 
-                              {/* Thao tác ở bên phải dành riêng cho Desktop / Laptop / Màn hình ngang */}
-                              <div className="hidden sm:flex items-center gap-1 absolute top-0.5 right-0.5 z-10">
-                                 <button
-                                    onClick={() => onDeleteSegment?.(idx)}
-                                    className="opacity-0 group-hover/row:opacity-100 p-1 rounded-full transition-all shadow-sm border bg-white/90 hover:bg-red-50 text-[#A1887F]/60 hover:text-red-600 border-[#D7CCC8] hover:border-red-200"
-                                    title="Xóa hàng này (Ctrl+Z để hoàn tác)"
-                                 >
-                                    <Trash2 size={isFocusMode ? 13 : 11} />
-                                 </button>
+                              {/* Thao tác dòng: Xóa hàng & Đánh dấu hoàn thành (xếp dọc, siêu gọn, chỉ hiện khi hover, không che chữ) */}
+                              <div className="opacity-0 pointer-events-none group-hover/row:opacity-100 group-hover/row:pointer-events-auto transition-opacity duration-150 flex flex-col gap-0.5 absolute top-1 right-0.5 z-20 bg-[#F5E6D3]/95 hover:bg-[#F5E6D3] border border-[#D7CCC8] shadow-xs rounded p-0.5 backdrop-blur-xs">
                                  <button
                                     onClick={() => onToggleComplete?.(idx)}
-                                    className={`p-1 rounded-full transition-all shadow-sm border ${
+                                    className={`p-0.5 rounded transition-colors ${
                                       isDone 
-                                        ? 'opacity-100 bg-[#EFEBE9] border-[#D7CCC8] text-[#5D4037] hover:bg-[#D7CCC8]' 
-                                        : 'opacity-0 group-hover/row:opacity-100 bg-white/70 hover:bg-white text-[#A1887F] hover:text-[#3E2723] border-[#D7CCC8]'
+                                        ? 'text-green-700 bg-green-100/80 font-bold' 
+                                        : 'text-[#8D6E63] hover:text-green-700 hover:bg-green-50'
                                     }`}
-                                    title={isDone ? "Đã đánh dấu hoàn thành (Click để bỏ)" : "Đánh dấu hoàn thành"}
+                                    title={isDone ? "Đã đánh dấu hoàn thành (Bấm để bỏ)" : "Đánh dấu hoàn thành"}
                                  >
-                                    <CheckCircle2 size={isFocusMode ? 14 : 12} />
+                                    <CheckCircle2 size={isFocusMode ? 12 : 11} />
+                                 </button>
+                                 <button
+                                    onClick={() => onDeleteSegment?.(idx)}
+                                    className="p-0.5 rounded text-[#8D6E63] hover:text-red-600 hover:bg-red-50 transition-colors"
+                                    title="Xóa hàng này (Ctrl+Z để hoàn tác)"
+                                 >
+                                    <Trash2 size={isFocusMode ? 12 : 11} />
                                  </button>
                               </div>
                            </div>
