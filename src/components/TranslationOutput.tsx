@@ -297,6 +297,7 @@ const EditableSource = ({
   const [isFocused, setIsFocused] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const debounceTimeout = useRef<NodeJS.Timeout | null>(null);
+  const mouseDownPos = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     setLocalText(text);
@@ -337,6 +338,24 @@ const EditableSource = ({
       e.preventDefault();
       setIsFocused(false);
     }
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    mouseDownPos.current = { x: e.clientX, y: e.clientY };
+  };
+
+  const handleClick = (e: React.MouseEvent) => {
+    if (mouseDownPos.current) {
+      const dx = Math.abs(e.clientX - mouseDownPos.current.x);
+      const dy = Math.abs(e.clientY - mouseDownPos.current.y);
+      const sel = window.getSelection();
+      const hasSelection = sel && !sel.isCollapsed && sel.toString().trim().length > 0;
+      if (dx > 4 || dy > 4 || hasSelection) {
+        return; // Đang tô xanh / chọn văn bản, không kích hoạt sửa
+      }
+    }
+    setIsFocused(true);
+    setTimeout(() => textareaRef.current?.focus(), 20);
   };
 
   return (
@@ -366,10 +385,8 @@ const EditableSource = ({
           />
         ) : (
           <div 
-            onClick={() => {
-              setIsFocused(true);
-              setTimeout(() => textareaRef.current?.focus(), 20);
-            }}
+            onMouseDown={handleMouseDown}
+            onClick={handleClick}
             className="cursor-text min-h-[1.2em]"
             title="Bấm vào để sửa chữ Hán trực tiếp"
           >
@@ -395,6 +412,7 @@ const EditableQuick = ({
   const [isFocused, setIsFocused] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const debounceTimeout = useRef<NodeJS.Timeout | null>(null);
+  const mouseDownPos = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     setLocalText(text);
@@ -437,6 +455,24 @@ const EditableQuick = ({
     }
   };
 
+  const handleMouseDown = (e: React.MouseEvent) => {
+    mouseDownPos.current = { x: e.clientX, y: e.clientY };
+  };
+
+  const handleClick = (e: React.MouseEvent) => {
+    if (mouseDownPos.current) {
+      const dx = Math.abs(e.clientX - mouseDownPos.current.x);
+      const dy = Math.abs(e.clientY - mouseDownPos.current.y);
+      const sel = window.getSelection();
+      const hasSelection = sel && !sel.isCollapsed && sel.toString().trim().length > 0;
+      if (dx > 4 || dy > 4 || hasSelection) {
+        return; // Đang tô xanh / chọn văn bản, không kích hoạt sửa
+      }
+    }
+    setIsFocused(true);
+    setTimeout(() => textareaRef.current?.focus(), 20);
+  };
+
   return (
     <div className="pl-5 sm:pl-[18px] -mt-0.5 w-full">
       {isFocused ? (
@@ -455,10 +491,8 @@ const EditableQuick = ({
         />
       ) : (
         <div 
-          onClick={() => {
-            setIsFocused(true);
-            setTimeout(() => textareaRef.current?.focus(), 20);
-          }}
+          onMouseDown={handleMouseDown}
+          onClick={handleClick}
           className={`${isFocusMode ? 'text-[13px]' : 'text-[10px]'} text-[#8D6E63] leading-[1.1] opacity-70 italic break-words cursor-text hover:opacity-100 transition-opacity min-h-[1.1em]`}
           title="Bấm vào để sửa Vietphrase trực tiếp"
         >
@@ -483,6 +517,7 @@ const EditableDeepl = ({
   const [isFocused, setIsFocused] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const debounceTimeout = useRef<NodeJS.Timeout | null>(null);
+  const mouseDownPos = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     setLocalText(text);
@@ -525,6 +560,24 @@ const EditableDeepl = ({
     }
   };
 
+  const handleMouseDown = (e: React.MouseEvent) => {
+    mouseDownPos.current = { x: e.clientX, y: e.clientY };
+  };
+
+  const handleClick = (e: React.MouseEvent) => {
+    if (mouseDownPos.current) {
+      const dx = Math.abs(e.clientX - mouseDownPos.current.x);
+      const dy = Math.abs(e.clientY - mouseDownPos.current.y);
+      const sel = window.getSelection();
+      const hasSelection = sel && !sel.isCollapsed && sel.toString().trim().length > 0;
+      if (dx > 4 || dy > 4 || hasSelection) {
+        return; // Đang tô xanh / chọn văn bản, không kích hoạt sửa
+      }
+    }
+    setIsFocused(true);
+    setTimeout(() => textareaRef.current?.focus(), 20);
+  };
+
   return (
     <div className="-mt-0.5 w-full">
       {isFocused ? (
@@ -543,10 +596,8 @@ const EditableDeepl = ({
         />
       ) : (
         <div 
-          onClick={() => {
-            setIsFocused(true);
-            setTimeout(() => textareaRef.current?.focus(), 20);
-          }}
+          onMouseDown={handleMouseDown}
+          onClick={handleClick}
           className={`${isFocusMode ? 'text-[11.5px]' : 'text-[8.5px]'} text-[#A1887F] leading-[1.1] italic opacity-60 break-words cursor-text hover:opacity-90 transition-opacity min-h-[1.1em]`}
           title="Bấm vào để sửa GG/DeepL trực tiếp"
         >
