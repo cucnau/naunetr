@@ -1582,7 +1582,7 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
                            </div>
 
                            {/* Cột 2: Bản edit - Đầy đủ 100% không chừa khoảng trống, các nút thao tác nổi khi hover */}
-                           <div className="w-full sm:w-[55%] py-1 px-2 sm:py-0 relative border-none bg-transparent">
+                           <div className="w-full sm:w-[55%] py-1 pl-2 pr-7 sm:py-0 sm:pl-2 sm:pr-7 relative border-none bg-transparent">
                               <div className="flex items-start py-0.5">
                                   <div className="flex-1 min-w-0 flex flex-col">
                                       {/* Bản edit - Bấm chuột vào để sửa trực tiếp */}
@@ -1606,25 +1606,25 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
                                   </div>
                               </div>
 
-                              {/* Thao tác dòng: Xóa hàng & Đánh dấu hoàn thành (xếp dọc, siêu gọn, chỉ hiện khi hover, không che chữ) */}
-                              <div className="opacity-0 pointer-events-none group-hover/row:opacity-100 group-hover/row:pointer-events-auto transition-opacity duration-150 flex flex-col gap-0.5 absolute top-1 right-0.5 z-20 bg-[#F5E6D3]/95 hover:bg-[#F5E6D3] border border-[#D7CCC8] shadow-xs rounded p-0.5 backdrop-blur-xs">
+                              {/* Thao tác dòng: Xóa hàng & Đánh dấu hoàn thành (chỉ hiển thị icon, không có nền màu be) */}
+                              <div className="opacity-0 pointer-events-none group-hover/row:opacity-100 group-hover/row:pointer-events-auto transition-opacity duration-150 flex flex-col gap-1 absolute top-1 right-1 z-20">
                                  <button
                                     onClick={() => onToggleComplete?.(idx)}
-                                    className={`p-0.5 rounded transition-colors ${
+                                    className={`p-0.5 rounded-full transition-colors ${
                                       isDone 
-                                        ? 'text-green-700 bg-green-100/80 font-bold' 
-                                        : 'text-[#8D6E63] hover:text-green-700 hover:bg-green-50'
+                                        ? 'text-green-700 hover:text-green-800' 
+                                        : 'text-[#A1887F]/70 hover:text-green-700'
                                     }`}
                                     title={isDone ? "Đã đánh dấu hoàn thành (Bấm để bỏ)" : "Đánh dấu hoàn thành"}
                                  >
-                                    <CheckCircle2 size={isFocusMode ? 12 : 11} />
+                                    <CheckCircle2 size={isFocusMode ? 13 : 11} />
                                  </button>
                                  <button
                                     onClick={() => onDeleteSegment?.(idx)}
-                                    className="p-0.5 rounded text-[#8D6E63] hover:text-red-600 hover:bg-red-50 transition-colors"
+                                    className="p-0.5 rounded-full text-[#A1887F]/70 hover:text-red-600 transition-colors"
                                     title="Xóa hàng này (Ctrl+Z để hoàn tác)"
                                  >
-                                    <Trash2 size={isFocusMode ? 12 : 11} />
+                                    <Trash2 size={isFocusMode ? 13 : 11} />
                                  </button>
                               </div>
                            </div>
