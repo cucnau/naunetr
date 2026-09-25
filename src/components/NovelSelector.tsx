@@ -14,9 +14,13 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, on
   const [novels, setNovels] = useState<Novel[]>(() => {
     try {
       const saved = localStorage.getItem('cached_novels_list');
-      return saved ? JSON.parse(saved) : [];
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+      return [{ id: 'default', name: 'Truyện mặc định' }];
     } catch (e) {
-      return [];
+      return [{ id: 'default', name: 'Truyện mặc định' }];
     }
   });
   const [loading, setLoading] = useState(false);
@@ -27,7 +31,7 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, on
     const unsub = onAuthStateChanged(auth, (user) => {
       setIsSignedIn(!!user);
       if (user) {
-        // Load local cache if available
+        // Load local cache if available for this user
         try {
           const userCache = localStorage.getItem(`cached_novels_${user.uid}`);
           if (userCache) {
@@ -40,12 +44,31 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, on
         } catch (_) {}
         fetchNovels(user.uid);
       } else {
-        setNovels([]);
-        setError(null);
+        // When not logged in, maintain local novels instead of wiping out
+        try {
+          const saved = localStorage.getItem('cached_novels_list');
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setNovels(parsed);
+              if (!currentNovelId) onSelectNovel(parsed[0].id);
+              return;
+            }
+          }
+        } catch (_) {}
+        const defaultList = [{ id: 'default', name: 'Truyện mặc định' }];
+        setNovels(defaultList);
+        if (!currentNovelId) onSelectNovel('default');
       }
     });
     return () => unsub();
   }, []);
+
+  useEffect(() => {
+    if (!currentNovelId && novels.length > 0) {
+      onSelectNovel(novels[0].id);
+    }
+  }, [currentNovelId, novels]);
 
   const fetchNovels = async (uid?: string) => {
     setLoading(true);
@@ -59,7 +82,7 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, on
           localStorage.setItem(`cached_novels_${currentUid}`, JSON.stringify(data));
         }
         localStorage.setItem('cached_novels_list', JSON.stringify(data));
-        if (!currentNovelId) {
+        if (!currentNovelId || !data.some(n => n.id === currentNovelId)) {
           onSelectNovel(data[0].id);
         }
       }
@@ -79,7 +102,8 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, on
     const newNovel: Novel = { id, name: trimmedName };
 
     // 1. Cập nhật giao diện ngay lập tức (Optimistic UI)
-    const updatedNovels = [...novels, newNovel];
+    const filteredOld = novels.filter(n => !(n.id === 'default' && n.name === 'Truyện mặc định' && novels.length === 1));
+    const updatedNovels = [...filteredOld, newNovel];
     setNovels(updatedNovels);
     onSelectNovel(newNovel.id);
     
@@ -89,30 +113,30 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, on
     }
     localStorage.setItem('cached_novels_list', JSON.stringify(updatedNovels));
 
-    // 2. Đồng bộ lên Firestore ở chế độ nền
-    try {
-      setLoading(true);
-      setError(null);
-      await createNovel(id, trimmedName);
-    } catch (e: any) {
-      console.warn("Chưa đồng bộ lên đám mây được, đã lưu trên máy cục bộ:", e);
-    } finally {
-      setLoading(false);
+    // 2. Đồng bộ lên Firestore ở chế độ nền nếu đã đăng nhập
+    if (auth.currentUser) {
+      try {
+        setLoading(true);
+        setError(null);
+        await createNovel(id, trimmedName);
+      } catch (e: any) {
+        console.warn("Chưa đồng bộ lên đám mây được, đã lưu trên máy cục bộ:", e);
+      } finally {
+        setLoading(false);
+      }
     }
   };
 
-  if (!isSignedIn) return null;
-
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="flex items-center gap-1.5 shrink-0">
       <div className="flex items-center gap-1 bg-[#5D4037] rounded-md border border-[#4E342E] px-2 py-1">
         <Book size={12} className="text-[#D7CCC8]" />
         <select 
-          value={currentNovelId || ''} 
+          value={currentNovelId || (novels[0]?.id || '')} 
           onChange={(e) => onSelectNovel(e.target.value)}
-          className="bg-transparent text-[#D7CCC8] text-[10px] outline-none max-w-[120px]"
+          className="bg-transparent text-[#D7CCC8] text-[10px] outline-none max-w-[120px] cursor-pointer"
         >
-          <option value="" disabled>-- Chọn truyện --</option>
+          {novels.length === 0 && <option value="" disabled>-- Chọn truyện --</option>}
           {novels.map(n => (
             <option key={n.id} value={n.id} className="text-black bg-white">{n.name}</option>
           ))}

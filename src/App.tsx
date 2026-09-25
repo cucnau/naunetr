@@ -267,6 +267,37 @@ function AppContent() {
     return chapters.filter(c => c.novelId === session.currentNovelId);
   }, [chapters, session.currentNovelId]);
 
+  const currentNovelCharacters = useMemo(() => {
+    if (!session.currentNovelId) return [];
+    return (session.characters || []).filter(c => c.novelId === session.currentNovelId);
+  }, [session.characters, session.currentNovelId]);
+
+  const currentNovelRelationships = useMemo(() => {
+    if (!session.currentNovelId) return [];
+    return (session.relationships || []).filter(r => r.novelId === session.currentNovelId);
+  }, [session.relationships, session.currentNovelId]);
+
+  // Migration: Tự động gán novelId cho nhân vật / quan hệ cũ nếu chưa có novelId (chỉ gắn vào truyện ban đầu)
+  useEffect(() => {
+    if (!session.currentNovelId) return;
+    const hasLegacyChars = (session.characters || []).some(c => !c.novelId);
+    const hasLegacyRels = (session.relationships || []).some(r => !r.novelId);
+    if (hasLegacyChars || hasLegacyRels) {
+      setSession(prev => {
+        const curId = prev.currentNovelId;
+        if (!curId) return prev;
+        const updatedChars = (prev.characters || []).map(c => c.novelId ? c : { ...c, novelId: curId });
+        const updatedRels = (prev.relationships || []).map(r => r.novelId ? r : { ...r, novelId: curId });
+        db.saveCharacters(updatedChars).catch(console.error);
+        return {
+          ...prev,
+          characters: updatedChars,
+          relationships: updatedRels
+        };
+      });
+    }
+  }, [session.currentNovelId]);
+
   // --- EFFECTS ---
   // Init Vietphrase Engine from DB & Load Custom Terms
 useEffect(() => {
@@ -577,14 +608,29 @@ useEffect(() => {
   const handleUpdateCharacters = (novelChars: Character[]) => {
     try {
       const currentId = session.currentNovelId;
+      if (!currentId) return;
+      const novelCharsWithId = novelChars.map(c => ({ ...c, novelId: currentId }));
       const otherChars = (session.characters || []).filter(c => c.novelId && c.novelId !== currentId);
-      const merged = [...novelChars, ...otherChars];
+      const merged = [...novelCharsWithId, ...otherChars];
       updateSession({ characters: merged });
       db.saveCharacters(merged).catch(err => {
         console.error("App: db.saveCharacters failed", err);
       });
     } catch (err) {
       console.error("App: handleUpdateCharacters caught error:", err);
+    }
+  };
+
+  const handleUpdateRelationships = (novelRels: Relationship[]) => {
+    try {
+      const currentId = session.currentNovelId;
+      if (!currentId) return;
+      const novelRelsWithId = novelRels.map(r => ({ ...r, novelId: currentId }));
+      const otherRels = (session.relationships || []).filter(r => r.novelId && r.novelId !== currentId);
+      const merged = [...novelRelsWithId, ...otherRels];
+      updateSession({ relationships: merged });
+    } catch (err) {
+      console.error("App: handleUpdateRelationships caught error:", err);
     }
   };
 
@@ -993,10 +1039,11 @@ useEffect(() => {
         for (const line of lines.slice(0, 5)) {
           if (line.match(/(Chương\s+\d+|第[一二三四五六七八九十百千万\d]+章)/i)) {
             const customMap = new Map<string, string>();
-            (session.characters || []).forEach(c => {
+            currentNovelCharacters.forEach(c => {
                 if (c.chineseName && c.vietName) customMap.set(c.chineseName.trim(), c.vietName.trim());
             });
-            (session.customTerms || []).forEach(t => {
+            const curId = session.currentNovelId;
+            (session.customTerms || []).filter(t => !curId || !t.novelId || t.novelId === curId).forEach(t => {
                 if (t.term && t.meaning) customMap.set(t.term.trim(), t.meaning.trim());
             });
             autoName = vietphraseEngine.translate(line, customMap);
@@ -1068,10 +1115,11 @@ useEffect(() => {
         for (const line of lines.slice(0, 5)) {
           if (line.match(/(Chương\s+\d+|第[一二三四五六七八九十百千万\d]+章)/i)) {
             const customMap = new Map<string, string>();
-            (session.characters || []).forEach(c => {
+            currentNovelCharacters.forEach(c => {
                 if (c.chineseName && c.vietName) customMap.set(c.chineseName.trim(), c.vietName.trim());
             });
-            (session.customTerms || []).forEach(t => {
+            const curId = session.currentNovelId;
+            (session.customTerms || []).filter(t => !curId || !t.novelId || t.novelId === curId).forEach(t => {
                 if (t.term && t.meaning) customMap.set(t.term.trim(), t.meaning.trim());
             });
             autoName = vietphraseEngine.translate(line, customMap);
@@ -1119,10 +1167,11 @@ useEffect(() => {
     const inputLines = session.inputText.split(/\r?\n/).map(l => l.replace(/\r$/, ''));
     
     const customMap = new Map<string, string>();
-    (session.characters || []).forEach(c => {
+    currentNovelCharacters.forEach(c => {
         if (c.chineseName && c.vietName) customMap.set(c.chineseName.trim(), c.vietName.trim());
     });
-    (session.customTerms || []).forEach(t => {
+    const curId = session.currentNovelId;
+    (session.customTerms || []).filter(t => !curId || !t.novelId || t.novelId === curId).forEach(t => {
         if (t.term && t.meaning) customMap.set(t.term.trim(), t.meaning.trim());
     });
 
@@ -1339,12 +1388,16 @@ useEffect(() => {
 
   const handleSelectNovel = (novelId: string) => {
     lastLocalEditTimeRef.current = Date.now();
-    updateSession({ currentNovelId: novelId });
+    updateSession({ 
+      currentNovelId: novelId,
+      currentChapterId: undefined,
+      currentHistoryId: undefined
+    });
     db.saveCurrentNovelId(novelId).catch(console.error);
 
     saveUserLiveWorkspaceToCloud({
       novelId,
-      chapterId: session.currentChapterId,
+      chapterId: '',
       status: session.status,
       result: session.result,
       completedSegments: session.completedSegments,
@@ -1777,7 +1830,7 @@ useEffect(() => {
                             <TranslationOutput 
                                 data={session.result} 
                                 customTerms={session.customTerms} 
-                                characters={session.characters} 
+                                characters={currentNovelCharacters} 
                                 completedSegments={session.completedSegments || []}
                                 onUpdateSegment={handleUpdateSegment} 
                                 onUpdateAllSegments={handleUpdateAllSegments}
@@ -1808,16 +1861,7 @@ useEffect(() => {
                                         console.error("App Output: onUpdateTerms caught error:", err);
                                     }
                                 }}
-                                onUpdateCharacters={(novelChars) => {
-                                    try {
-                                        const currentId = session.currentNovelId;
-                                        const otherChars = (session.characters || []).filter(c => c.novelId && c.novelId !== currentId);
-                                        const merged = [...novelChars, ...otherChars];
-                                        updateSession({ characters: merged });
-                                    } catch (err) {
-                                        console.error("App Output: onUpdateCharacters caught error:", err);
-                                    }
-                                }}
+                                onUpdateCharacters={handleUpdateCharacters}
                                 currentNovelId={session.currentNovelId || ''}
                             />
                         </div>
@@ -1835,13 +1879,13 @@ useEffect(() => {
         </main>
 
         {/* RIGHT SIDEBAR (Desktop / Laptop) */}
-        <div className={`w-[340px] border-l border-[#D7CCC8] bg-[#EFE5D9] shrink-0 ${isFocusMode ? 'hidden' : 'hidden xl:block'}`}>
+        <div className={`w-[360px] border-l border-[#D7CCC8] bg-[#EFE5D9] shrink-0 ${isFocusMode ? 'hidden' : 'hidden xl:block'}`}>
             <WorldInfoPanel 
                 currentNovelId={session.currentNovelId || ''}
-                characters={session.characters} 
+                characters={currentNovelCharacters} 
                 onUpdateCharacters={handleUpdateCharacters} 
-                relationships={session.relationships} 
-                onUpdateRelationships={(rels) => updateSession({ relationships: rels })} 
+                relationships={currentNovelRelationships} 
+                onUpdateRelationships={handleUpdateRelationships} 
                 notes={session.notes} 
                 onUpdateNotes={(val) => updateSession({ notes: val })} 
                 sheetUrl={session.sheetUrl} 
@@ -1856,7 +1900,7 @@ useEffect(() => {
               className="fixed inset-0 bg-black/40 backdrop-blur-xs transition-opacity" 
               onClick={() => setShowMobileWorldInfo(false)} 
             />
-            <div className="relative w-84 max-w-[88vw] bg-[#EFE5D9] h-full shadow-2xl z-10 flex flex-col animate-in slide-in-from-right duration-200">
+            <div className="relative w-96 max-w-[92vw] bg-[#EFE5D9] h-full shadow-2xl z-10 flex flex-col animate-in slide-in-from-right duration-200">
               <div className="flex items-center justify-between p-2.5 bg-[#4E342E] text-white border-b border-[#3E2723]">
                 <span className="text-xs font-bold text-[#FFECB3] flex items-center gap-1.5">
                   <Users size={14} /> Nhân vật & Thiết lập
@@ -1871,10 +1915,10 @@ useEffect(() => {
               <div className="flex-1 overflow-hidden">
                 <WorldInfoPanel 
                     currentNovelId={session.currentNovelId || ''}
-                    characters={session.characters} 
+                    characters={currentNovelCharacters} 
                     onUpdateCharacters={handleUpdateCharacters} 
-                    relationships={session.relationships} 
-                    onUpdateRelationships={(rels) => updateSession({ relationships: rels })} 
+                    relationships={currentNovelRelationships} 
+                    onUpdateRelationships={handleUpdateRelationships} 
                     notes={session.notes} 
                     onUpdateNotes={(val) => updateSession({ notes: val })} 
                     sheetUrl={session.sheetUrl} 

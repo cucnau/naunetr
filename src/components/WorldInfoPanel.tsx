@@ -39,14 +39,33 @@ export const WorldInfoPanel: React.FC<WorldInfoPanelProps> = ({
   const [syncMessage, setSyncMessage] = useState<{type: 'success' | 'error', text: string} | null>(null);
   const [isSignedIn, setIsSignedIn] = useState(!!auth.currentUser);
 
-  const charsRef = useRef(characters);
-  const relsRef = useRef(relationships);
+  // Filter items strictly for current novel so new novel resets cleanly
+  const novelCharacters = React.useMemo(() => {
+    if (!currentNovelId) return [];
+    return (characters || []).filter(c => c.novelId === currentNovelId);
+  }, [characters, currentNovelId]);
+
+  const novelRelationships = React.useMemo(() => {
+    if (!currentNovelId) return [];
+    return (relationships || []).filter(r => r.novelId === currentNovelId);
+  }, [relationships, currentNovelId]);
+
+  const charsRef = useRef(novelCharacters);
+  const relsRef = useRef(novelRelationships);
   useEffect(() => {
-    charsRef.current = characters;
-  }, [characters]);
+    charsRef.current = novelCharacters;
+  }, [novelCharacters]);
   useEffect(() => {
-    relsRef.current = relationships;
-  }, [relationships]);
+    relsRef.current = novelRelationships;
+  }, [novelRelationships]);
+
+  const prevNovelIdRef = useRef(currentNovelId);
+  useEffect(() => {
+    if (prevNovelIdRef.current !== currentNovelId) {
+      prevNovelIdRef.current = currentNovelId;
+      isPullingRef.current = true;
+    }
+  }, [currentNovelId]);
 
   // Auto Sync State
   const [autoSync, setAutoSync] = useState<boolean>(() => {
@@ -92,7 +111,7 @@ export const WorldInfoPanel: React.FC<WorldInfoPanelProps> = ({
     }, 2500);
 
     return () => clearTimeout(timer);
-  }, [characters, relationships, autoSync, isSignedIn]); 
+  }, [novelCharacters, novelRelationships, autoSync, isSignedIn]); 
 
   // Dedicated Effect for Characters
   useEffect(() => {
@@ -101,7 +120,7 @@ export const WorldInfoPanel: React.FC<WorldInfoPanelProps> = ({
         syncData('char', 'POST', true);
     }, 2000);
     return () => clearTimeout(timer);
-  }, [characters, autoSync, isSignedIn]);
+  }, [novelCharacters, autoSync, isSignedIn]);
 
   // Dedicated Effect for Relationships
   useEffect(() => {
@@ -110,7 +129,7 @@ export const WorldInfoPanel: React.FC<WorldInfoPanelProps> = ({
         syncData('rel', 'POST', true);
     }, 2000);
     return () => clearTimeout(timer);
-  }, [relationships, autoSync, isSignedIn]);
+  }, [novelRelationships, autoSync, isSignedIn]);
 
 
   // --- SYNC HANDLERS ---
@@ -181,10 +200,10 @@ export const WorldInfoPanel: React.FC<WorldInfoPanelProps> = ({
         setSyncMessage({ type: 'success', text: `Đã tải ${mergedData.length} mục!` });
       } else {
         if (type === 'char') {
-          const toPush = charsRef.current.filter(c => !c.novelId || c.novelId === currentNovelId).map(c => ({ ...c, novelId: currentNovelId }));
+          const toPush = charsRef.current.filter(c => c.novelId === currentNovelId).map(c => ({ ...c, novelId: currentNovelId }));
           await syncFirestoreData<Character>(type, currentNovelId, 'POST', toPush);
         } else {
-          const toPush = relsRef.current.filter(r => !r.novelId || r.novelId === currentNovelId).map(r => ({ ...r, novelId: currentNovelId }));
+          const toPush = relsRef.current.filter(r => r.novelId === currentNovelId).map(r => ({ ...r, novelId: currentNovelId }));
           await syncFirestoreData<Relationship>(type, currentNovelId, 'POST', toPush);
         }
         if (!silent) setSyncMessage({ type: 'success', text: 'Đã lưu lên mây!' });
@@ -212,16 +231,16 @@ export const WorldInfoPanel: React.FC<WorldInfoPanelProps> = ({
       pronouns: '',
       description: ''
     };
-    onUpdateCharacters([...characters, newChar]);
+    onUpdateCharacters([...novelCharacters, newChar]);
   };
 
   const updateChar = (id: string, field: keyof Character, value: string) => {
-    onUpdateCharacters(characters.map(c => c.id === id ? { ...c, [field]: value } : c));
+    onUpdateCharacters(novelCharacters.map(c => c.id === id ? { ...c, [field]: value } : c));
   };
 
   const deleteChar = (id: string) => {
     deleteFirestoreDoc('char', id);
-    onUpdateCharacters(characters.filter(c => c.id !== id));
+    onUpdateCharacters(novelCharacters.filter(c => c.id !== id));
   };
 
   // --- RELATIONSHIP HANDLERS ---
@@ -235,23 +254,23 @@ export const WorldInfoPanel: React.FC<WorldInfoPanelProps> = ({
       callBtoA: '',
       note: ''
     };
-    onUpdateRelationships([...relationships, newRel]);
+    onUpdateRelationships([...novelRelationships, newRel]);
   };
 
   const updateRel = (id: string, field: keyof Relationship, value: string) => {
-    onUpdateRelationships(relationships.map(r => r.id === id ? { ...r, [field]: value } : r));
+    onUpdateRelationships(novelRelationships.map(r => r.id === id ? { ...r, [field]: value } : r));
   };
 
   const deleteRel = (id: string) => {
     deleteFirestoreDoc('rel', id);
-    onUpdateRelationships(relationships.filter(r => r.id !== id));
+    onUpdateRelationships(novelRelationships.filter(r => r.id !== id));
   };
 
   // --- RENDER HELPERS ---
   
   // Group relationships by Character A
   const getGroupedRelationships = () => {
-    const sorted = [...relationships].sort((a, b) => a.charA.localeCompare(b.charA));
+    const sorted = [...novelRelationships].sort((a, b) => a.charA.localeCompare(b.charA));
     const groups: { [key: string]: Relationship[] } = {};
     
     sorted.forEach(rel => {
@@ -263,13 +282,13 @@ export const WorldInfoPanel: React.FC<WorldInfoPanelProps> = ({
     return groups;
   };
 
-  const filteredCharacters = characters.filter(c => 
+  const filteredCharacters = novelCharacters.filter(c => 
     c.chineseName.toLowerCase().includes(searchTerm.toLowerCase()) || 
     c.vietName.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   return (
-    <div className="flex flex-col h-full bg-[#EFE5D9] border-l border-[#D7CCC8] w-[360px] shrink-0 transition-all">
+    <div className="flex flex-col h-full bg-[#EFE5D9] w-full max-w-full shrink-0 transition-all overflow-hidden">
       
       {/* Tab Header */}
       <div className="flex border-b border-[#D7CCC8] bg-[#D7CCC8]/30">
@@ -355,7 +374,7 @@ export const WorldInfoPanel: React.FC<WorldInfoPanelProps> = ({
                              });
                            }
                          });
-                         onUpdateCharacters([...characters, ...newItems]);
+                         onUpdateCharacters([...novelCharacters, ...newItems]);
                          setSyncMessage({ type: 'success', text: `Đã thêm ${newItems.length} NV!` });
                        } else {
                          const newItems: Relationship[] = [];
@@ -374,7 +393,7 @@ export const WorldInfoPanel: React.FC<WorldInfoPanelProps> = ({
                              });
                            }
                          });
-                         onUpdateRelationships([...relationships, ...newItems]);
+                         onUpdateRelationships([...novelRelationships, ...newItems]);
                          setSyncMessage({ type: 'success', text: `Đã thêm ${newItems.length} QH!` });
                        }
                        setBulkText('');
@@ -397,13 +416,13 @@ export const WorldInfoPanel: React.FC<WorldInfoPanelProps> = ({
       )}
 
       {/* Content */}
-      <div className="flex-1 overflow-hidden bg-[#F5E6D3] flex flex-col">
+      <div className="flex-1 min-h-0 overflow-hidden bg-[#F5E6D3] flex flex-col">
         
         {/* --- CHARACTER TAB --- */}
         {activeTab === 'char' && (
           <>
-            <div className="p-1 border-b border-[#D7CCC8] bg-[#EFE5D9] flex gap-2 sticky top-0 z-20 items-center">
-               <div className="relative flex-1">
+            <div className="p-1.5 border-b border-[#D7CCC8] bg-[#EFE5D9] flex gap-1.5 sticky top-0 z-20 items-center">
+               <div className="relative flex-1 min-w-0">
                   <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-[#A1887F]" />
                   <input 
                     type="text" 
@@ -415,7 +434,7 @@ export const WorldInfoPanel: React.FC<WorldInfoPanelProps> = ({
                </div>
                
                {/* Sync Tools */}
-               <div className="flex items-center gap-0.5 border-l border-[#D7CCC8] pl-1">
+               <div className="flex items-center gap-0.5 border-l border-[#D7CCC8] pl-1 shrink-0">
                   <button onClick={() => setShowSettings(!showSettings)} className={`p-1 rounded hover:bg-[#D7CCC8] text-[#A1887F]`} title="Cài đặt đồng bộ">
                      <Settings size={14} />
                   </button>
@@ -427,12 +446,17 @@ export const WorldInfoPanel: React.FC<WorldInfoPanelProps> = ({
                   </button>
                </div>
 
-               <button onClick={handleAddChar} className="bg-[#3E2723] text-white px-2 py-1 rounded text-[10px] font-bold flex items-center gap-1 hover:bg-[#4E342E] ml-0.5 shadow-sm h-6">
-                  <Plus size={10} />
+               <button 
+                  onClick={handleAddChar} 
+                  className="bg-[#3E2723] text-white px-2 py-1 rounded text-[10px] font-bold flex items-center gap-1 hover:bg-[#4E342E] shadow-sm h-6 shrink-0 cursor-pointer"
+                  title="Thêm nhân vật mới"
+               >
+                  <Plus size={11} />
+                  <span>Thêm</span>
                </button>
             </div>
             
-            <div className="flex-1 overflow-auto">
+            <div className="flex-1 min-h-0 overflow-auto">
               <table className="w-full text-left border-collapse">
                 <thead className="bg-[#D7CCC8] sticky top-0 z-10 text-[9px] font-bold text-[#3E2723] uppercase">
                   <tr>
@@ -495,9 +519,9 @@ export const WorldInfoPanel: React.FC<WorldInfoPanelProps> = ({
         {/* --- RELATIONSHIP TAB --- */}
         {activeTab === 'rel' && (
           <>
-            <div className="p-1 border-b border-[#D7CCC8] bg-[#EFE5D9] flex justify-end sticky top-0 z-20 items-center gap-1">
+            <div className="p-1.5 border-b border-[#D7CCC8] bg-[#EFE5D9] flex justify-end sticky top-0 z-20 items-center gap-1.5">
                {/* Sync Tools */}
-               <div className="flex items-center gap-0.5 border-r border-[#D7CCC8] pr-1 mr-0.5">
+               <div className="flex items-center gap-0.5 border-r border-[#D7CCC8] pr-1 mr-0.5 shrink-0">
                   <button onClick={() => setShowSettings(!showSettings)} className={`p-1 rounded hover:bg-[#D7CCC8] text-[#A1887F]`} title="Cài đặt đồng bộ">
                      <Settings size={14} />
                   </button>
@@ -509,11 +533,11 @@ export const WorldInfoPanel: React.FC<WorldInfoPanelProps> = ({
                   </button>
                </div>
 
-               <button onClick={handleAddRel} className="bg-[#5D4037] text-white px-2 py-1 rounded text-[10px] font-bold flex items-center gap-1 hover:bg-[#795548] shadow-sm h-6">
+               <button onClick={handleAddRel} className="bg-[#5D4037] text-white px-2 py-1 rounded text-[10px] font-bold flex items-center gap-1 hover:bg-[#795548] shadow-sm h-6 shrink-0 cursor-pointer" title="Thêm quan hệ">
                   <Plus size={10} /> Thêm QH
                </button>
             </div>
-            <div className="flex-1 overflow-auto">
+            <div className="flex-1 min-h-0 overflow-auto">
                <table className="w-full text-left border-collapse">
                 <thead className="bg-[#D7CCC8] sticky top-0 z-10 text-[9px] font-bold text-[#3E2723] uppercase">
                   <tr>

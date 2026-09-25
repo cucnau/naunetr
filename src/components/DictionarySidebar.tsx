@@ -408,7 +408,7 @@ export const DictionarySidebar: React.FC<DictionarySidebarProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#EFE5D9] border-r border-[#D7CCC8] w-80 shrink-0">
+    <div className="flex flex-col h-full bg-[#EFE5D9] w-full shrink-0">
       {/* Header */}
       <div className="p-3 border-b border-[#D7CCC8] bg-[#D7CCC8]/30 flex items-center justify-between">
          <div className="flex items-center gap-2 text-[#3E2723] font-bold">
@@ -782,7 +782,7 @@ export const DictionarySidebar: React.FC<DictionarySidebarProps> = ({
       </div>
 
       {/* Table Content */}
-      <div className="flex-1 overflow-y-auto bg-[#F5E6D3]">
+      <div className="flex-1 min-h-0 overflow-y-auto bg-[#F5E6D3]">
         <table className="w-full text-left border-collapse">
           <thead className="bg-[#EFEBE9] sticky top-0 z-10 shadow-sm">
             <tr>
@@ -923,7 +923,7 @@ export const DictionarySidebar: React.FC<DictionarySidebarProps> = ({
       </div>
 
       {/* Add New Section */}
-      <div className="p-1.5 border-t border-[#D7CCC8] bg-[#EFE5D9] space-y-1">
+      <div className="p-1.5 border-t border-[#D7CCC8] bg-[#EFE5D9] space-y-1 shrink-0">
          <div className="flex gap-1">
             <input
                 type="text"

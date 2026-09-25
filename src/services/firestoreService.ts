@@ -239,11 +239,11 @@ export const syncFirestoreData = async <T extends { id: string, novelId?: string
     const localMap = new Map<string, any>();
     querySnapshot.forEach((doc) => {
       const data = doc.data();
-      // Match if belongs to this novelId OR is a global/legacy item without novelId
-      if (!data.novelId || data.novelId === novelId) {
+      // Match strictly if belongs to this novelId
+      if (data.novelId === novelId) {
         localMap.set(doc.id, data);
         const { userId, createdAt, ...rest } = data;
-        result.push({ id: doc.id, ...rest, novelId: data.novelId || novelId });
+        result.push({ id: doc.id, ...rest, novelId: data.novelId });
       }
     });
 
