@@ -124,8 +124,10 @@ const EditableSegment = ({
     const debounceTimeout = useRef<NodeJS.Timeout | null>(null);
     
     useEffect(() => {
-        setLocalText(text);
-    }, [text]);
+        if (!isFocused) {
+            setLocalText(text);
+        }
+    }, [text, isFocused]);
 
     useEffect(() => {
         setShortcuts(getStoredShortcuts(novelId));
@@ -300,8 +302,10 @@ const EditableSource = ({
   const mouseDownPos = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
-    setLocalText(text);
-  }, [text]);
+    if (!isFocused) {
+      setLocalText(text);
+    }
+  }, [text, isFocused]);
 
   const adjustHeight = () => {
     if (textareaRef.current) {
@@ -359,10 +363,10 @@ const EditableSource = ({
   };
 
   return (
-    <div className={`${isFocusMode ? 'text-[18.5px]' : 'text-[14.5px]'} font-serif-sc leading-[1.2] text-[#3E2723] m-0 whitespace-normal break-words flex items-start gap-1`}>
+    <div className={`${isFocusMode ? 'text-[18.5px]' : 'text-[14.5px]'} font-serif-sc leading-[1.2] text-[#3E2723] m-0 whitespace-normal break-words flex items-start gap-0 sm:gap-1`}>
       <span 
         onClick={onToggleComplete}
-        className={`inline-flex items-center justify-center mr-0.5 select-none align-middle transform -translate-y-[1px] ${isFocusMode ? 'text-[11px] min-w-[18px]' : 'text-[9px] min-w-[14px]'} font-bold cursor-pointer hover:underline ${isDone ? 'text-green-800 font-black' : 'text-[#A1887F]/40 hover:text-[#3E2723]'}`}
+        className={`inline-flex items-center justify-center select-none align-middle transform -translate-y-[1px] ${isFocusMode ? 'w-6 text-[11px]' : 'w-5 text-[9px]'} sm:w-auto ${isFocusMode ? 'sm:min-w-[18px]' : 'sm:min-w-[14px]'} sm:mr-0.5 shrink-0 font-bold cursor-pointer hover:underline ${isDone ? 'text-green-800 font-black' : 'text-[#A1887F]/40 hover:text-[#3E2723]'}`}
         title={isDone ? "Đã xong (Bấm để bỏ)" : "Bấm để đánh dấu xong"}
       >
         {idx + 1}.
@@ -415,8 +419,10 @@ const EditableQuick = ({
   const mouseDownPos = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
-    setLocalText(text);
-  }, [text]);
+    if (!isFocused) {
+      setLocalText(text);
+    }
+  }, [text, isFocused]);
 
   const adjustHeight = () => {
     if (textareaRef.current) {
@@ -474,7 +480,7 @@ const EditableQuick = ({
   };
 
   return (
-    <div className="pl-5 sm:pl-[18px] -mt-0.5 w-full">
+    <div className={`${isFocusMode ? 'pl-6 sm:pl-[22px]' : 'pl-5 sm:pl-[18px]'} -mt-0.5 w-full`}>
       {isFocused ? (
         <textarea
           ref={textareaRef}
@@ -520,8 +526,10 @@ const EditableDeepl = ({
   const mouseDownPos = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
-    setLocalText(text);
-  }, [text]);
+    if (!isFocused) {
+      setLocalText(text);
+    }
+  }, [text, isFocused]);
 
   const adjustHeight = () => {
     if (textareaRef.current) {
@@ -743,17 +751,17 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
     });
   }, []);
 
-  // Filter terms and characters for current novel
+  // Filter terms and characters strictly for current novel
   const currentCustomTerms = useMemo(() => {
     const list = Array.isArray(customTerms) ? customTerms : [];
-    if (!currentNovelId) return list;
-    return list.filter(t => !t.novelId || t.novelId === currentNovelId);
+    if (!currentNovelId) return [];
+    return list.filter(t => t.novelId === currentNovelId);
   }, [customTerms, currentNovelId]);
 
   const currentCharacters = useMemo(() => {
     const list = Array.isArray(characters) ? characters : [];
-    if (!currentNovelId) return list;
-    return list.filter(c => !c.novelId || c.novelId === currentNovelId);
+    if (!currentNovelId) return [];
+    return list.filter(c => c.novelId === currentNovelId);
   }, [characters, currentNovelId]);
 
   // Combined terms map for Vietphrase translate (customTerms take priority over characters)
@@ -1052,7 +1060,8 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
       const cleanSource = (seg.source || '').trim();
       const cleanNatural = (seg.natural || '').trim();
       const cleanDeepl = (seg.deepl || '').trim();
-      const cleanQuick = (vietphraseEngine.translate(cleanSource, customMap) || '').trim();
+      const autoVp = vietphraseEngine.translate(cleanSource, customMap) || '';
+      const cleanQuick = ((seg as any).isManualQuick && seg.quick ? seg.quick : (autoVp || seg.quick || '')).trim();
 
       if (!cleanSource && !cleanNatural) return;
 
@@ -1589,9 +1598,10 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
                    {data.segments.map((seg, idx) => {
                       const isDone = completedSegments.includes(idx);
                       const cleanSource = (seg.source || '').trim();
-                      const cleanNatural = (seg.natural || '').trim();
-                      const cleanDeepl = (seg.deepl || '').trim();
-                      const cleanQuick = (seg.quick !== undefined && seg.quick !== '' ? seg.quick : (vietphraseEngine.translate(cleanSource, customMap) || '')).trim();
+                      const cleanNatural = seg.natural ?? '';
+                      const cleanDeepl = seg.deepl ?? '';
+                      const autoVp = vietphraseEngine.translate(cleanSource, customMap) || '';
+                      const cleanQuick = (seg as any).isManualQuick && seg.quick ? seg.quick : (autoVp || seg.quick || '');
 
                       return (
                         <div 
@@ -1626,15 +1636,48 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
                                  {/* Vietphrase - Bấm chuột vào để sửa trực tiếp */}
                                  <EditableQuick
                                    text={cleanQuick}
-                                   onUpdate={(val) => onUpdateSegmentField?.(idx, 'quick', val)}
+                                   onUpdate={(val) => {
+                                     onUpdateSegmentField?.(idx, 'quick', val);
+                                     onUpdateSegmentField?.(idx, 'isManualQuick' as any, 'true');
+                                   }}
                                    isFocusMode={isFocusMode}
                                  />
                               </div>
                            </div>
 
-                           {/* Cột 2: Bản edit - Đầy đủ 100% không chừa khoảng trống, các nút thao tác nổi khi hover */}
-                           <div className="w-full sm:w-[55%] py-1 pl-2 pr-7 sm:py-0 sm:pl-2 sm:pr-7 relative border-none bg-transparent">
+                           {/* Cột 2: Bản edit */}
+                           <div className="w-full sm:w-[55%] py-1 pl-2 pr-2 sm:py-0 sm:pl-2 sm:pr-7 relative border-none bg-transparent">
                               <div className="flex items-start py-0.5">
+                                  {/* Trên điện thoại: Nút tick & Nút xóa đặt ở trước tương đương với số đoạn 1 2 3 để song song */}
+                                  <div className={`flex sm:hidden flex-col items-center justify-start gap-1 ${isFocusMode ? 'w-6' : 'w-5'} shrink-0 select-none pt-0.5`}>
+                                     <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          onToggleComplete?.(idx);
+                                        }}
+                                        className={`p-0.5 rounded transition-colors ${
+                                          isDone 
+                                            ? 'text-green-700 font-bold' 
+                                            : 'text-[#A1887F]/60 active:text-green-700'
+                                        }`}
+                                        title={isDone ? "Đã xong (Bấm để bỏ)" : "Bấm để đánh dấu xong"}
+                                     >
+                                        <CheckCircle2 size={isFocusMode ? 14 : 12} className={isDone ? "stroke-[2.5]" : "stroke-[1.75]"} />
+                                     </button>
+                                     <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          onDeleteSegment?.(idx);
+                                        }}
+                                        className="p-0.5 rounded text-[#A1887F]/40 active:text-red-600 transition-colors"
+                                        title="Xóa hàng này (Ctrl+Z để hoàn tác)"
+                                     >
+                                        <Trash2 size={isFocusMode ? 13 : 11} className="stroke-[1.75]" />
+                                     </button>
+                                  </div>
+
                                   <div className="flex-1 min-w-0 flex flex-col">
                                       {/* Bản edit - Bấm chuột vào để sửa trực tiếp */}
                                       <EditableSegment 
@@ -1657,8 +1700,8 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
                                   </div>
                               </div>
 
-                              {/* Thao tác dòng: Xóa hàng & Đánh dấu hoàn thành (chỉ hiển thị icon, không có nền màu be) */}
-                              <div className="opacity-0 pointer-events-none group-hover/row:opacity-100 group-hover/row:pointer-events-auto transition-opacity duration-150 flex flex-col gap-1 absolute top-1 right-1 z-20">
+                              {/* Thao tác dòng trên máy tính: Xóa hàng & Đánh dấu hoàn thành (chỉ hiển thị khi hover) */}
+                              <div className="opacity-0 pointer-events-none group-hover/row:opacity-100 group-hover/row:pointer-events-auto transition-opacity duration-150 hidden sm:flex flex-col gap-1 absolute top-1 right-1 z-20">
                                  <button
                                     onClick={() => onToggleComplete?.(idx)}
                                     className={`p-0.5 rounded-full transition-colors ${

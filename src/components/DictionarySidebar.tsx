@@ -121,15 +121,13 @@ export const DictionarySidebar: React.FC<DictionarySidebarProps> = ({
     return () => unsubscribe();
   }, []);
 
-  // Fetch when novel changes
+  const prevNovelIdRef = useRef(currentNovelId);
   useEffect(() => {
-      if (isSignedIn && currentNovelId) {
-          const timer = setTimeout(() => {
-              handlePullFromCloud(true);
-          }, 500);
-          return () => clearTimeout(timer);
-      }
-  }, [currentNovelId, isSignedIn]);
+    if (prevNovelIdRef.current !== currentNovelId) {
+      prevNovelIdRef.current = currentNovelId;
+      isPullingRef.current = true;
+    }
+  }, [currentNovelId]);
 
   const termsRef = useRef(terms);
   useEffect(() => {
@@ -185,9 +183,10 @@ export const DictionarySidebar: React.FC<DictionarySidebarProps> = ({
     return () => clearTimeout(timer);
   }, [terms, autoSync, isSignedIn]);
 
-  // Filter terms belonging strictly to current novel or global
+  // Filter terms belonging strictly to current novel
   const currentNovelTerms = useMemo(() => {
-    return terms.filter(t => !currentNovelId || !t.novelId || t.novelId === currentNovelId);
+    if (!currentNovelId) return [];
+    return terms.filter(t => t.novelId === currentNovelId);
   }, [terms, currentNovelId]);
 
   // Extract all categories for current novel
@@ -284,7 +283,7 @@ export const DictionarySidebar: React.FC<DictionarySidebarProps> = ({
     if (!silent) setSyncMessage(null);
     try {
       const data = await syncFirestoreData<CustomTerm>('vocab', currentNovelId, 'GET');
-      const currentLocal = termsRef.current.filter(t => !t.novelId || t.novelId === currentNovelId);
+      const currentLocal = termsRef.current.filter(t => t.novelId === currentNovelId);
       
       // CRITICAL PROTECTION: If silent pull returned empty cloud data but we have local data, do not overwrite!
       if (silent && data.length === 0 && currentLocal.length > 0) {
@@ -352,7 +351,7 @@ export const DictionarySidebar: React.FC<DictionarySidebarProps> = ({
     setIsSyncing(true);
     if (!silent) setSyncMessage(null);
     try {
-      const toPush = termsRef.current.filter(t => !t.novelId || t.novelId === currentNovelId).map(t => ({ ...t, novelId: currentNovelId }));
+      const toPush = termsRef.current.filter(t => t.novelId === currentNovelId).map(t => ({ ...t, novelId: currentNovelId }));
       await syncFirestoreData<CustomTerm>('vocab', currentNovelId, 'POST', toPush);
       if (!silent) setSyncMessage({ type: 'success', text: 'Đã lưu lên mây!' });
       else setSyncMessage({ type: 'success', text: 'Đã tự động lưu từ vựng' });

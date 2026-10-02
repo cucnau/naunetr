@@ -277,24 +277,37 @@ function AppContent() {
     return (session.relationships || []).filter(r => r.novelId === session.currentNovelId);
   }, [session.relationships, session.currentNovelId]);
 
-  // Migration: Tự động gán novelId cho nhân vật / quan hệ cũ nếu chưa có novelId (chỉ gắn vào truyện ban đầu)
+  const currentNovelTerms = useMemo(() => {
+    if (!session.currentNovelId) return [];
+    return (session.customTerms || []).filter(t => t.novelId === session.currentNovelId);
+  }, [session.customTerms, session.currentNovelId]);
+
+  // Migration: Tự động gán novelId cho từ vựng / nhân vật / quan hệ cũ nếu chưa có novelId (chỉ gắn vào truyện ban đầu)
+  const migratedRef = useRef(false);
   useEffect(() => {
-    if (!session.currentNovelId) return;
+    if (migratedRef.current || !session.currentNovelId) return;
     const hasLegacyChars = (session.characters || []).some(c => !c.novelId);
     const hasLegacyRels = (session.relationships || []).some(r => !r.novelId);
-    if (hasLegacyChars || hasLegacyRels) {
+    const hasLegacyTerms = (session.customTerms || []).some(t => !t.novelId);
+    if (hasLegacyChars || hasLegacyRels || hasLegacyTerms) {
+      migratedRef.current = true;
       setSession(prev => {
         const curId = prev.currentNovelId;
         if (!curId) return prev;
         const updatedChars = (prev.characters || []).map(c => c.novelId ? c : { ...c, novelId: curId });
         const updatedRels = (prev.relationships || []).map(r => r.novelId ? r : { ...r, novelId: curId });
+        const updatedTerms = (prev.customTerms || []).map(t => t.novelId ? t : { ...t, novelId: curId });
         db.saveCharacters(updatedChars).catch(console.error);
+        db.bulkSaveCustomTerms(updatedTerms).catch(console.error);
         return {
           ...prev,
           characters: updatedChars,
-          relationships: updatedRels
+          relationships: updatedRels,
+          customTerms: updatedTerms
         };
       });
+    } else {
+      migratedRef.current = true;
     }
   }, [session.currentNovelId]);
 
@@ -481,11 +494,11 @@ useEffect(() => {
         setSession(prev => {
           const currentId = session.currentNovelId;
           const otherTerms = (prev.customTerms || []).filter(t => t.novelId && t.novelId !== currentId);
-          const localNovelTerms = (prev.customTerms || []).filter(t => !t.novelId || t.novelId === currentId);
+          const localNovelTerms = (prev.customTerms || []).filter(t => t.novelId === currentId);
           
           const termMap = new Map<string, any>();
           localNovelTerms.forEach(t => termMap.set(t.id, t));
-          cloudTerms.forEach(t => termMap.set(t.id, t));
+          cloudTerms.forEach(t => termMap.set(t.id, { ...t, novelId: currentId }));
           
           const merged = [...Array.from(termMap.values()), ...otherTerms];
           db.bulkSaveCustomTerms(merged).catch(console.error);
@@ -631,6 +644,22 @@ useEffect(() => {
       updateSession({ relationships: merged });
     } catch (err) {
       console.error("App: handleUpdateRelationships caught error:", err);
+    }
+  };
+
+  const handleUpdateTerms = (novelTerms: CustomTerm[]) => {
+    try {
+      const currentId = session.currentNovelId;
+      if (!currentId) return;
+      const novelTermsWithId = novelTerms.map(t => ({ ...t, novelId: currentId }));
+      const otherTerms = (session.customTerms || []).filter(t => t.novelId && t.novelId !== currentId);
+      const merged = [...novelTermsWithId, ...otherTerms];
+      updateSession({ customTerms: merged });
+      db.bulkSaveCustomTerms(merged).catch(err => {
+        console.error("App: db.bulkSaveCustomTerms failed", err);
+      });
+    } catch (err) {
+      console.error("App: handleUpdateTerms caught error:", err);
     }
   };
 
@@ -1042,8 +1071,7 @@ useEffect(() => {
             currentNovelCharacters.forEach(c => {
                 if (c.chineseName && c.vietName) customMap.set(c.chineseName.trim(), c.vietName.trim());
             });
-            const curId = session.currentNovelId;
-            (session.customTerms || []).filter(t => !curId || !t.novelId || t.novelId === curId).forEach(t => {
+            currentNovelTerms.forEach(t => {
                 if (t.term && t.meaning) customMap.set(t.term.trim(), t.meaning.trim());
             });
             autoName = vietphraseEngine.translate(line, customMap);
@@ -1118,8 +1146,7 @@ useEffect(() => {
             currentNovelCharacters.forEach(c => {
                 if (c.chineseName && c.vietName) customMap.set(c.chineseName.trim(), c.vietName.trim());
             });
-            const curId = session.currentNovelId;
-            (session.customTerms || []).filter(t => !curId || !t.novelId || t.novelId === curId).forEach(t => {
+            currentNovelTerms.forEach(t => {
                 if (t.term && t.meaning) customMap.set(t.term.trim(), t.meaning.trim());
             });
             autoName = vietphraseEngine.translate(line, customMap);
@@ -1170,8 +1197,7 @@ useEffect(() => {
     currentNovelCharacters.forEach(c => {
         if (c.chineseName && c.vietName) customMap.set(c.chineseName.trim(), c.vietName.trim());
     });
-    const curId = session.currentNovelId;
-    (session.customTerms || []).filter(t => !curId || !t.novelId || t.novelId === curId).forEach(t => {
+    currentNovelTerms.forEach(t => {
         if (t.term && t.meaning) customMap.set(t.term.trim(), t.meaning.trim());
     });
 
@@ -1391,19 +1417,25 @@ useEffect(() => {
     updateSession({ 
       currentNovelId: novelId,
       currentChapterId: undefined,
-      currentHistoryId: undefined
+      currentHistoryId: undefined,
+      result: null,
+      inputText: '',
+      deeplText: '',
+      preEditedText: '',
+      completedSegments: [],
+      status: AppStatus.IDLE
     });
     db.saveCurrentNovelId(novelId).catch(console.error);
 
     saveUserLiveWorkspaceToCloud({
       novelId,
       chapterId: '',
-      status: session.status,
-      result: session.result,
-      completedSegments: session.completedSegments,
-      inputText: session.inputText,
-      deeplText: session.deeplText,
-      preEditedText: session.preEditedText,
+      status: AppStatus.IDLE,
+      result: null,
+      completedSegments: [],
+      inputText: '',
+      deeplText: '',
+      preEditedText: '',
       updatedAt: Date.now()
     }, true);
   };
@@ -1461,9 +1493,9 @@ useEffect(() => {
     }
 
     // Chỉ xuất dữ liệu của bộ truyện hiện tại
-    const filteredTerms = (session.customTerms || []).filter(t => !currentId || !t.novelId || t.novelId === currentId);
-    const filteredChars = (session.characters || []).filter(c => !currentId || !c.novelId || c.novelId === currentId);
-    const filteredRels = (session.relationships || []).filter(r => !currentId || !r.novelId || r.novelId === currentId);
+    const filteredTerms = (session.customTerms || []).filter(t => currentId && t.novelId === currentId);
+    const filteredChars = (session.characters || []).filter(c => currentId && c.novelId === currentId);
+    const filteredRels = (session.relationships || []).filter(r => currentId && r.novelId === currentId);
     const filteredShortcuts = getStoredShortcuts(currentId);
 
     exportToExcel(filteredTerms, filteredChars, filteredRels, novelName, filteredShortcuts);
@@ -1580,20 +1612,9 @@ useEffect(() => {
         <div className={`w-80 border-r border-[#D7CCC8] bg-[#EFE5D9] shrink-0 ${isFocusMode ? 'hidden' : 'hidden lg:block'}`}>
             <DictionarySidebar 
                 currentNovelId={session.currentNovelId || ''}
-                terms={session.customTerms} onExportExcel={handleExportExcel} 
-                onUpdateTerms={(novelTerms) => {
-                    try {
-                        const currentId = session.currentNovelId;
-                        const otherTerms = (session.customTerms || []).filter(t => t.novelId && t.novelId !== currentId);
-                        const merged = [...novelTerms, ...otherTerms];
-                        updateSession({ customTerms: merged });
-                        db.bulkSaveCustomTerms(merged).catch(err => {
-                            console.error("App Sidebar: db.bulkSaveCustomTerms failed", err);
-                        });
-                    } catch (err) {
-                        console.error("App Sidebar: onUpdateTerms caught error:", err);
-                    }
-                }} 
+                terms={currentNovelTerms} 
+                onExportExcel={handleExportExcel} 
+                onUpdateTerms={handleUpdateTerms} 
                 sheetUrl={session.sheetUrl} 
                 onUpdateSheetUrl={(url) => updateSession({ sheetUrl: url })} 
                 refreshTrigger={vpLoaded}
@@ -1622,20 +1643,9 @@ useEffect(() => {
               <div className="flex-1 overflow-hidden">
                 <DictionarySidebar 
                     currentNovelId={session.currentNovelId || ''}
-                    terms={session.customTerms} onExportExcel={handleExportExcel} 
-                    onUpdateTerms={(novelTerms) => {
-                        try {
-                            const currentId = session.currentNovelId;
-                            const otherTerms = (session.customTerms || []).filter(t => t.novelId && t.novelId !== currentId);
-                            const merged = [...novelTerms, ...otherTerms];
-                            updateSession({ customTerms: merged });
-                            db.bulkSaveCustomTerms(merged).catch(err => {
-                                console.error("App Sidebar: db.bulkSaveCustomTerms failed", err);
-                            });
-                        } catch (err) {
-                            console.error("App Sidebar: onUpdateTerms caught error:", err);
-                        }
-                    }} 
+                    terms={currentNovelTerms} 
+                    onExportExcel={handleExportExcel} 
+                    onUpdateTerms={handleUpdateTerms} 
                     sheetUrl={session.sheetUrl} 
                     onUpdateSheetUrl={(url) => updateSession({ sheetUrl: url })} 
                     refreshTrigger={vpLoaded}
@@ -1653,20 +1663,32 @@ useEffect(() => {
                 {/* INPUT AREA */}
                 {!isFocusMode && (
                   <div className="mt-2 bg-white rounded-xl shadow-sm border border-[#D7CCC8] overflow-hidden transition-all focus-within:ring-2 focus-within:ring-[#8D6E63]/20 focus-within:border-[#8D6E63]/50 mb-2 flex flex-col">
-                      <div className="flex justify-between items-center bg-[#EFEBE9]/50 px-3 py-1.5 border-b border-[#EFEBE9]">
-                          <div className="flex items-center gap-2">
-                              <span className="bg-[#5D4037] text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wider">
-                                  {mode === 'beta' ? 'Nguồn & Tham chiếu (Beta)' : 'Nguồn & Tham chiếu'}
-                              </span>
-                              <div className="flex items-center gap-1 text-[10px] font-bold text-[#8D6E63]">
-                                  <Layers size={10} />
+                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center bg-[#EFEBE9]/50 px-2.5 sm:px-3 py-1.5 border-b border-[#EFEBE9] gap-1.5 sm:gap-2">
+                          {/* Hàng 1 trên mobile / Bên trái trên desktop */}
+                          <div className="flex items-center justify-between sm:justify-start gap-2">
+                              <div className="flex items-center gap-1 text-[10px] font-bold text-[#8D6E63] shrink-0 whitespace-nowrap">
+                                  <Layers size={11} />
                                   <span>{segmentCount} đoạn văn</span>
                               </div>
-                          </div>
-                          <div className="flex items-center gap-2">
                               <label 
                                   title="Tự động lọc bỏ các dòng trống khi dán nội dung vào ô Raw, DeepL, Edit" 
-                                  className="text-[10px] text-[#5D4037] hover:text-[#3E2723] px-1.5 py-1 rounded hover:bg-[#D7CCC8]/60 flex items-center gap-1 cursor-pointer select-none"
+                                  className="sm:hidden text-[10px] text-[#5D4037] hover:text-[#3E2723] px-1.5 py-0.5 rounded hover:bg-[#D7CCC8]/60 flex items-center gap-1.5 cursor-pointer select-none shrink-0 whitespace-nowrap"
+                              >
+                                  <input 
+                                      type="checkbox" 
+                                      checked={autoCleanBlankLines} 
+                                      onChange={(e) => setAutoCleanBlankLines(e.target.checked)} 
+                                      className="w-3.5 h-3.5 rounded text-[#5D4037] focus:ring-0 cursor-pointer"
+                                  />
+                                  <span>Tự xóa dòng trống khi dán</span>
+                              </label>
+                          </div>
+
+                          {/* Hàng 2 trên mobile / Bên phải trên desktop */}
+                          <div className="flex items-center justify-end gap-1.5 sm:gap-2 overflow-x-auto scrollbar-none">
+                              <label 
+                                  title="Tự động lọc bỏ các dòng trống khi dán nội dung vào ô Raw, DeepL, Edit" 
+                                  className="hidden sm:flex text-[10px] text-[#5D4037] hover:text-[#3E2723] px-1.5 py-1 rounded hover:bg-[#D7CCC8]/60 items-center gap-1 cursor-pointer select-none shrink-0 whitespace-nowrap"
                               >
                                   <input 
                                       type="checkbox" 
@@ -1680,26 +1702,16 @@ useEffect(() => {
                                   onClick={handleCleanAllBlankLines} 
                                   disabled={!session.inputText && !session.deeplText && !session.preEditedText} 
                                   title="Lọc bỏ toàn bộ dòng trống trong tất cả các ô nhập" 
-                                  className="text-[10px] text-[#8D6E63] hover:text-[#3E2723] px-2 py-1 rounded hover:bg-[#D7CCC8] flex items-center gap-1 disabled:opacity-50"
+                                  className="text-[10px] text-[#8D6E63] hover:text-[#3E2723] px-2 py-1 rounded hover:bg-[#D7CCC8] flex items-center gap-1 disabled:opacity-50 shrink-0 whitespace-nowrap bg-[#EFEBE9]/60 sm:bg-transparent"
                               >
-                                  <Scissors size={10} /> Xóa dòng trống
-                              </button>
-                              <button 
-                                  onClick={() => handleInputChange({ 
-                                      inputText: EXAMPLE_TEXT, 
-                                      deeplText: "Đường dài mới biết ngựa hay, ở lâu mới biết lòng dạ con người.",
-                                      preEditedText: mode === 'beta' ? "Đường dài mới biết sức ngựa, ngày lâu mới tỏ lòng người." : ""
-                                  })} 
-                                  className="text-[10px] text-[#8D6E63] hover:text-[#3E2723] px-2 py-1 rounded hover:bg-[#D7CCC8] flex items-center gap-1"
-                              >
-                                  <Quote size={10} /> Ví dụ
+                                  <Scissors size={11} /> <span>Xóa dòng trống</span>
                               </button>
                               <button 
                                   onClick={handleClearSession} 
                                   disabled={!session.inputText && !session.deeplText && !session.preEditedText} 
-                                  className="text-[10px] text-[#8D6E63] hover:text-[#3E2723] px-2 py-1 rounded hover:bg-[#D7CCC8] flex items-center gap-1 disabled:opacity-50"
+                                  className="text-[10px] text-[#8D6E63] hover:text-[#3E2723] px-2 py-1 rounded hover:bg-[#D7CCC8] flex items-center gap-1 disabled:opacity-50 shrink-0 whitespace-nowrap bg-[#EFEBE9]/60 sm:bg-transparent"
                               >
-                                  <Eraser size={10} /> Xóa
+                                  <Eraser size={11} /> <span>Xóa</span>
                               </button>
                           </div>
                       </div>
@@ -1829,7 +1841,7 @@ useEffect(() => {
                         <div className={isFocusMode ? "h-[calc(100vh-4.2rem)]" : "h-[calc(100vh-4.5rem)]"}>
                             <TranslationOutput 
                                 data={session.result} 
-                                customTerms={session.customTerms} 
+                                customTerms={currentNovelTerms} 
                                 characters={currentNovelCharacters} 
                                 completedSegments={session.completedSegments || []}
                                 onUpdateSegment={handleUpdateSegment} 
@@ -1848,19 +1860,7 @@ useEffect(() => {
                                 currentChapterId={session.currentChapterId}
                                 currentChapterName={chapters.find(c => c.id === session.currentChapterId)?.name}
                                 chaptersCount={currentNovelChapters.length}
-                                onUpdateTerms={(novelTerms) => {
-                                    try {
-                                        const currentId = session.currentNovelId;
-                                        const otherTerms = (session.customTerms || []).filter(t => t.novelId && t.novelId !== currentId);
-                                        const merged = [...novelTerms, ...otherTerms];
-                                        updateSession({ customTerms: merged });
-                                        db.bulkSaveCustomTerms(merged).catch(err => {
-                                            console.error("App Output: db.bulkSaveCustomTerms failed", err);
-                                        });
-                                    } catch (err) {
-                                        console.error("App Output: onUpdateTerms caught error:", err);
-                                    }
-                                }}
+                                onUpdateTerms={handleUpdateTerms}
                                 onUpdateCharacters={handleUpdateCharacters}
                                 currentNovelId={session.currentNovelId || ''}
                             />
@@ -1936,7 +1936,7 @@ useEffect(() => {
         isOpen={showChapters} 
         onClose={() => setShowChapters(false)} 
         chapters={currentNovelChapters} 
-        customTerms={session.customTerms} 
+        customTerms={currentNovelTerms} 
         onSelectChapter={handleRestoreChapter} 
         onDeleteChapter={handleDeleteChapter} 
         onRenameChapter={handleRenameChapter} 
