@@ -1537,19 +1537,19 @@ useEffect(() => {
         
         {/* RIGHT CONTROLS */}
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            {/* Nút mở Từ vựng cho màn hình nhỏ / Tablet (Chỉ icon) */}
+            {/* Nút mở Từ vựng cho màn hình nhỏ / Tablet hoặc khi vào Chế độ tập trung (Chỉ icon) */}
             <button
               onClick={() => setShowMobileSidebar(true)}
-              className="lg:hidden flex items-center justify-center text-[#FFECB3] hover:text-white bg-[#5D4037]/60 p-2 sm:px-2.5 sm:py-1 rounded-full border border-[#FFECB3]/20 transition-colors"
+              className={`${isFocusMode ? 'flex' : 'lg:hidden flex'} items-center justify-center text-[#FFECB3] hover:text-white bg-[#5D4037]/60 p-2 sm:px-2.5 sm:py-1 rounded-full border border-[#FFECB3]/20 transition-colors`}
               title="Kho Từ vựng"
             >
                <BookA size={14} />
             </button>
 
-            {/* Nút mở Nhân vật & Quan hệ cho màn hình nhỏ / Tablet (Chỉ icon) */}
+            {/* Nút mở Nhân vật & Quan hệ cho màn hình nhỏ / Tablet hoặc khi vào Chế độ tập trung (Chỉ icon) */}
             <button
               onClick={() => setShowMobileWorldInfo(true)}
-              className="xl:hidden flex items-center justify-center text-[#FFECB3] hover:text-white bg-[#5D4037]/60 p-2 sm:px-2.5 sm:py-1 rounded-full border border-[#FFECB3]/20 transition-colors"
+              className={`${isFocusMode ? 'flex' : 'xl:hidden flex'} items-center justify-center text-[#FFECB3] hover:text-white bg-[#5D4037]/60 p-2 sm:px-2.5 sm:py-1 rounded-full border border-[#FFECB3]/20 transition-colors`}
               title="Bảng Nhân vật & Thiết lập"
             >
                <Users size={14} />
@@ -1623,7 +1623,7 @@ useEffect(() => {
 
         {/* MOBILE / TABLET SLIDE-OVER DRAWER FOR DICTIONARY */}
         {showMobileSidebar && (
-          <div className="fixed inset-0 z-50 flex lg:hidden animate-in fade-in duration-150">
+          <div className={`fixed inset-0 z-50 flex ${isFocusMode ? '' : 'lg:hidden'} animate-in fade-in duration-150`}>
             <div 
               className="fixed inset-0 bg-black/40 backdrop-blur-xs transition-opacity" 
               onClick={() => setShowMobileSidebar(false)} 
@@ -1895,7 +1895,7 @@ useEffect(() => {
 
         {/* MOBILE / TABLET SLIDE-OVER DRAWER FOR WORLD INFO & CHARACTERS */}
         {showMobileWorldInfo && (
-          <div className="fixed inset-0 z-50 flex justify-end xl:hidden animate-in fade-in duration-150">
+          <div className={`fixed inset-0 z-50 flex justify-end ${isFocusMode ? '' : 'xl:hidden'} animate-in fade-in duration-150`}>
             <div 
               className="fixed inset-0 bg-black/40 backdrop-blur-xs transition-opacity" 
               onClick={() => setShowMobileWorldInfo(false)} 
