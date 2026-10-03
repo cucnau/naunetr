@@ -79,7 +79,7 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({
         <div className="px-6 py-4 border-b border-[#D7CCC8] flex justify-between items-center bg-[#EFE5D9]">
           <div className="flex items-center gap-2 text-[#3E2723]">
             <Clock size={20} className="text-[#5D4037]" />
-            <h2 className="text-lg font-bold">Lịch Sử Dịch Thuật</h2>
+            <h2 className="text-lg font-bold">Lịch Sử Edit</h2>
           </div>
           <button 
             onClick={onClose}
@@ -107,7 +107,7 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({
         <div className="flex-1 overflow-y-auto p-4 bg-[#F5E6D3] space-y-4">
           {Object.keys(groupedHistory).length === 0 ? (
             <div className="text-center py-12 text-[#BCAAA4] italic">
-              {searchTerm ? 'Không tìm thấy kết quả phù hợp.' : 'Chưa có lịch sử dịch thuật.'}
+              {searchTerm ? 'Không tìm thấy kết quả phù hợp.' : 'Chưa có lịch sử edit.'}
             </div>
           ) : (
             Object.entries(groupedHistory).map(([dateLabel, items]) => (
@@ -123,11 +123,7 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({
                        <div className="text-[10px] text-[#A1887F] mb-1 flex justify-between items-center">
                           <div className="flex items-center gap-2">
                              <span>{new Date(item.timestamp).toLocaleTimeString('vi-VN', {hour: '2-digit', minute:'2-digit'})}</span>
-                             {item.modelId && (
-                                <span className="bg-[#EFEBE9] text-[#5D4037] px-1.5 py-0.5 rounded text-[8px] font-mono border border-[#D7CCC8]">
-                                   {item.modelId}
-                                </span>
-                             )}
+
                           </div>
                           <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                              <button 
@@ -154,7 +150,7 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({
                        <button
                           onClick={() => onSelect(item)}
                           className="absolute right-3 top-1/2 -translate-y-1/2 bg-[#3E2723] text-[#FFECB3] p-2 rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-all hover:bg-[#4E342E] hover:scale-105"
-                          title="Khôi phục bản dịch này"
+                          title="Khôi phục bản edit này"
                        >
                           <RotateCcw size={16} />
                        </button>

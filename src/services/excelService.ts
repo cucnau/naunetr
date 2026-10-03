@@ -15,7 +15,7 @@ export const exportToExcel = (
   const vocabData = terms.map((t, index) => ({
     "STT": index + 1,
     "Từ gốc (Trung)": t.term,
-    "Nghĩa dịch (Việt)": t.meaning,
+    "Nghĩa edit (Việt)": t.meaning,
     "Phân loại": t.category || "Chưa phân loại"
   }));
   const wsVocab = XLSX.utils.json_to_sheet(vocabData);
@@ -25,7 +25,7 @@ export const exportToExcel = (
   const charData = characters.map((c, index) => ({
     "STT": index + 1,
     "Tên gốc (Trung)": c.chineseName,
-    "Tên dịch (Việt)": c.vietName,
+    "Tên edit (Việt)": c.vietName,
     "Xưng hô / Đại từ": c.pronouns,
     "Mô tả": c.description
   }));

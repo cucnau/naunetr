@@ -15,7 +15,9 @@ import { ChapterArchiveModal } from './components/ChapterArchiveModal';
 import { ShortcutModal } from './components/ShortcutModal';
 import { AuthPanel } from './components/AuthPanel';
 import { NovelSelector } from './components/NovelSelector';
-import { BookOpen, Loader2, Eraser, Quote, Layout, History, AlertTriangle, Layers, PenLine, FolderOpen, Keyboard, BookA, Users, X, Wifi, Scissors, CheckSquare, Square } from 'lucide-react';
+import { FontSelectorModal } from './components/FontSelectorModal';
+import { initFont } from './services/fontService';
+import { BookOpen, Loader2, Eraser, Quote, Layout, History, AlertTriangle, Layers, FolderOpen, Keyboard, BookA, Users, X, Wifi, Scissors, CheckSquare, Square, Type } from 'lucide-react';
 import { checkAndApplyShortcut, getStoredShortcuts, isShortcutsEnabled, syncShortcutsFromCloud } from './services/shortcutService';
 
 const EXAMPLE_TEXT = "路遥知马力，日久见人心。";
@@ -151,7 +153,7 @@ const sanitizeResult = (result: TranslationResponse | null): TranslationResponse
 
 const createNewSession = (): TranslationSession => ({
   id: 'session_main',
-  name: `Bản edit`,
+  name: `Edit`,
   inputText: '',
   deeplText: '',
   preEditedText: '',
@@ -215,9 +217,14 @@ function AppContent() {
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showMobileSidebar, setShowMobileSidebar] = useState(false);
   const [showMobileWorldInfo, setShowMobileWorldInfo] = useState(false);
+  const [showFontModal, setShowFontModal] = useState(false);
   const [shortcuts, setShortcuts] = useState(() => getStoredShortcuts(session.currentNovelId));
   const [shortcutsEnabled, setShortcutsEnabled] = useState(() => isShortcutsEnabled());
   const [vpLoaded, setVpLoaded] = useState(false);
+
+  useEffect(() => {
+    initFont();
+  }, []);
 
   useEffect(() => {
     setShortcuts(getStoredShortcuts(session.currentNovelId));
@@ -1505,17 +1512,10 @@ useEffect(() => {
     <div className="h-screen flex flex-col bg-[#F5E6D3] text-[#3E2723] font-sans overflow-hidden">
       
       {/* HEADER */}
-      <header className="bg-[#4E342E] text-[#F5E6D3] border-b border-[#3E2723] h-14 flex items-center justify-between px-3 sm:px-4 shrink-0 z-20 shadow-md overflow-x-auto no-scrollbar">
+      <header className={`bg-[#4E342E] text-[#F5E6D3] border-b border-[#3E2723] h-14 items-center justify-between px-3 sm:px-4 shrink-0 z-20 shadow-md overflow-x-auto no-scrollbar ${isFocusMode ? 'hidden' : 'flex'}`}>
         <div className="flex items-center gap-1.5 sm:gap-4 shrink-0">
-          <div className="flex items-center gap-2" title="Edit">
-            <div className="text-[#FFECB3]">
-              <PenLine size={22} />
-            </div>
-            <h1 style={{ fontFamily: '"Nunito", sans-serif' }} className="hidden sm:block text-2xl font-extrabold tracking-wide text-[#FFECB3] pt-1">Edit</h1>
-          </div>
-
           {/* Segmented Mode Control */}
-          <div className="flex bg-[#3E2723] p-0.5 rounded-lg border border-[#5D4037] ml-1 sm:ml-2">
+          <div className="flex bg-[#3E2723] p-0.5 rounded-lg border border-[#5D4037]">
             <button
               onClick={() => setMode('edit')}
               className={`px-2 sm:px-3 py-1 rounded-md text-[11px] font-bold transition-all ${mode === 'edit' ? 'bg-[#FFECB3] text-[#3E2723] shadow-sm' : 'text-[#D7CCC8] hover:text-[#FFECB3]'}`}
@@ -1537,19 +1537,19 @@ useEffect(() => {
         
         {/* RIGHT CONTROLS */}
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            {/* Nút mở Từ vựng cho màn hình nhỏ / Tablet hoặc khi vào Chế độ tập trung (Chỉ icon) */}
+            {/* Nút mở Từ vựng cho màn hình nhỏ / Tablet (Chỉ icon) */}
             <button
               onClick={() => setShowMobileSidebar(true)}
-              className={`${isFocusMode ? 'flex' : 'lg:hidden flex'} items-center justify-center text-[#FFECB3] hover:text-white bg-[#5D4037]/60 p-2 sm:px-2.5 sm:py-1 rounded-full border border-[#FFECB3]/20 transition-colors`}
+              className="lg:hidden flex items-center justify-center text-[#FFECB3] hover:text-white bg-[#5D4037]/60 p-2 sm:px-2.5 sm:py-1 rounded-full border border-[#FFECB3]/20 transition-colors"
               title="Kho Từ vựng"
             >
                <BookA size={14} />
             </button>
 
-            {/* Nút mở Nhân vật & Quan hệ cho màn hình nhỏ / Tablet hoặc khi vào Chế độ tập trung (Chỉ icon) */}
+            {/* Nút mở Nhân vật & Quan hệ cho màn hình nhỏ / Tablet (Chỉ icon) */}
             <button
               onClick={() => setShowMobileWorldInfo(true)}
-              className={`${isFocusMode ? 'flex' : 'xl:hidden flex'} items-center justify-center text-[#FFECB3] hover:text-white bg-[#5D4037]/60 p-2 sm:px-2.5 sm:py-1 rounded-full border border-[#FFECB3]/20 transition-colors`}
+              className="xl:hidden flex items-center justify-center text-[#FFECB3] hover:text-white bg-[#5D4037]/60 p-2 sm:px-2.5 sm:py-1 rounded-full border border-[#FFECB3]/20 transition-colors"
               title="Bảng Nhân vật & Thiết lập"
             >
                <Users size={14} />
@@ -1575,6 +1575,14 @@ useEffect(() => {
                    {shortcuts.filter(s => s.enabled).length}
                  </span>
                )}
+            </button>
+            <button 
+              onClick={() => setShowFontModal(true)} 
+              className="flex items-center gap-1.5 text-[10px] font-medium text-[#FFECB3] hover:text-white hover:bg-[#5D4037] bg-[#5D4037]/30 px-2 sm:px-2.5 py-1 rounded-full border border-[#FFECB3]/20 transition-colors"
+              title="Đổi phông chữ hiển thị toàn ứng dụng"
+            >
+               <Type size={12} />
+               <span className="hidden sm:inline">Phông chữ</span>
             </button>
             <button onClick={() => setShowChapters(true)} className="flex items-center gap-1.5 text-[10px] font-medium text-[#FFECB3] hover:text-white hover:bg-[#5D4037] bg-[#5D4037]/30 px-2 sm:px-2.5 py-1 rounded-full border border-[#FFECB3]/20 transition-colors">
                <FolderOpen size={12} />
@@ -1657,8 +1665,8 @@ useEffect(() => {
 
         {/* CENTER MAIN CONTENT */}
         <main className="flex-1 flex flex-col h-full overflow-hidden bg-[#F5E6D3] min-w-0">
-          <div className="flex-1 overflow-y-auto overflow-x-hidden scroll-smooth scrollbar-thin scrollbar-thumb-[#D7CCC8] scrollbar-track-transparent">
-             <div className="flex flex-col px-2 pb-2">
+          <div className={`flex-1 ${isFocusMode ? 'h-full flex flex-col p-2 sm:p-3 overflow-hidden' : 'overflow-y-auto overflow-x-hidden scroll-smooth scrollbar-thin scrollbar-thumb-[#D7CCC8] scrollbar-track-transparent'}`}>
+             <div className={`flex flex-col ${isFocusMode ? 'h-full flex-1 min-h-0' : 'px-2 pb-2'}`}>
                 
                 {/* INPUT AREA */}
                 {!isFocusMode && (
@@ -1719,7 +1727,7 @@ useEffect(() => {
                       <div className={`grid ${mode === 'beta' ? 'grid-cols-1 sm:grid-cols-3' : 'grid-cols-1 sm:grid-cols-2'} flex-1 min-h-[140px] divide-y sm:divide-y-0 sm:divide-x divide-[#EFEBE9]`}>
                           <div className="flex flex-col flex-1">
                               <div className="flex justify-between items-center px-3 pt-1.5 pb-1 bg-[#FAFAFA]/40">
-                                  <div className="text-[9px] font-bold text-[#8D6E63] uppercase tracking-wider">1. Văn bản gốc (Trung)</div>
+                                  <div className="text-[9px] font-bold text-[#8D6E63] uppercase tracking-wider">1. Raw</div>
                                   <button
                                       type="button"
                                       onClick={() => handleCleanFieldBlankLines('inputText')}
@@ -1735,14 +1743,14 @@ useEffect(() => {
                                   value={session.inputText}
                                   onChange={(e) => handleInputChange({ inputText: e.target.value })}
                                   onPaste={(e) => handlePasteWithClean(e, 'inputText')}
-                                  placeholder="Nhập văn bản nguồn (Trung)..."
+                                  placeholder="Nhập Raw..."
                                   className="flex-1 p-3 text-lg font-serif-sc bg-transparent border-none outline-none resize-none placeholder:text-[#BCAAA4] leading-relaxed"
                                   spellCheck="false"
                               />
                           </div>
                           <div className="flex flex-col flex-1">
                               <div className="flex justify-between items-center px-3 pt-1.5 pb-1 bg-[#FAFAFA]/40">
-                                  <div className="text-[9px] font-bold text-[#8D6E63] uppercase tracking-wider">2. Bản dịch GG / DeepL {mode === 'beta' && <span className="text-[8px] font-normal lowercase text-[#BCAAA4]">(không bắt buộc)</span>}</div>
+                                  <div className="text-[9px] font-bold text-[#8D6E63] uppercase tracking-wider">2. DeepL {mode === 'beta' && <span className="text-[8px] font-normal lowercase text-[#BCAAA4]">(không bắt buộc)</span>}</div>
                                   <button
                                       type="button"
                                       onClick={() => handleCleanFieldBlankLines('deeplText')}
@@ -1768,7 +1776,7 @@ useEffect(() => {
                                           }
                                       }
                                   }}
-                                  placeholder="Dán bản dịch GG/DeepL vào đây..."
+                                  placeholder="Dán DeepL vào đây..."
                                   className="flex-1 p-3 text-sm bg-transparent border-none outline-none resize-none placeholder:text-[#BCAAA4] leading-relaxed"
                                   spellCheck="false"
                               />
@@ -1776,7 +1784,7 @@ useEffect(() => {
                           {mode === 'beta' && (
                               <div className="flex flex-col flex-1">
                                   <div className="flex justify-between items-center px-3 pt-1.5 pb-1 bg-[#FAFAFA]/40">
-                                      <div className="text-[9px] font-bold text-[#E64A19] uppercase tracking-wider flex items-center gap-1">3. Bản edit sẵn <span className="bg-[#E64A19] text-white text-[7px] px-1 rounded-full uppercase">Beta</span></div>
+                                      <div className="text-[9px] font-bold text-[#E64A19] uppercase tracking-wider flex items-center gap-1">3. Edit sẵn <span className="bg-[#E64A19] text-white text-[7px] px-1 rounded-full uppercase">Beta</span></div>
                                       <button
                                           type="button"
                                           onClick={() => handleCleanFieldBlankLines('preEditedText')}
@@ -1802,7 +1810,7 @@ useEffect(() => {
                                               }
                                           }
                                       }}
-                                      placeholder="Dán bản edit sẵn vào đây..."
+                                      placeholder="Dán edit sẵn vào đây..."
                                       className="flex-1 p-3 text-sm bg-transparent border-none outline-none resize-none placeholder:text-[#BCAAA4] leading-relaxed font-medium text-[#4E342E]"
                                       spellCheck="false"
                                   />
@@ -1837,8 +1845,8 @@ useEffect(() => {
 
                 {/* RESULT */}
                 {(session.result && (session.status === AppStatus.SUCCESS || session.status === AppStatus.LOADING)) ? (
-                    <div className={isFocusMode ? "mt-1" : "sticky top-2 z-10"}>
-                        <div className={isFocusMode ? "h-[calc(100vh-4.2rem)]" : "h-[calc(100vh-4.5rem)]"}>
+                    <div className={isFocusMode ? "h-full flex-1 flex flex-col min-h-0" : "sticky top-2 z-10"}>
+                        <div className={isFocusMode ? "h-full flex-1 min-h-0" : "h-[calc(100vh-4.5rem)]"}>
                             <TranslationOutput 
                                 data={session.result} 
                                 customTerms={currentNovelTerms} 
@@ -1862,7 +1870,8 @@ useEffect(() => {
                                 chaptersCount={currentNovelChapters.length}
                                 onUpdateTerms={handleUpdateTerms}
                                 onUpdateCharacters={handleUpdateCharacters}
-                                currentNovelId={session.currentNovelId || ''}
+                                onOpenVocab={() => setShowMobileSidebar(true)}
+                                onOpenWorldInfo={() => setShowMobileWorldInfo(true)}
                             />
                         </div>
                     </div>
@@ -1948,6 +1957,11 @@ useEffect(() => {
         onClose={() => setShowShortcuts(false)} 
         currentNovelId={session.currentNovelId || ''}
         onSelectNovel={(id) => updateSession({ currentNovelId: id })}
+      />
+
+      <FontSelectorModal
+        isOpen={showFontModal}
+        onClose={() => setShowFontModal(false)}
       />
     </div>
   );

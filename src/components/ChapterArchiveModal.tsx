@@ -171,7 +171,7 @@ export const ChapterArchiveModal: React.FC<ChapterArchiveModalProps> = ({
                     <th style="width: 22%; background-color: #EFEBE9; color: #3E2723; border: 1px solid #D7CCC8;">Raw</th>
                     <th style="width: 23%; background-color: #EFEBE9; color: #3E2723; border: 1px solid #D7CCC8;">Vietphrase</th>
                     <th style="width: 23%; background-color: #EFEBE9; color: #3E2723; border: 1px solid #D7CCC8;">GG/DL</th>
-                    <th style="width: 32%; background-color: #EFEBE9; color: #3E2723; border: 1px solid #D7CCC8;">Bản edit</th>
+                    <th style="width: 32%; background-color: #EFEBE9; color: #3E2723; border: 1px solid #D7CCC8;">Edit</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -209,7 +209,7 @@ export const ChapterArchiveModal: React.FC<ChapterArchiveModalProps> = ({
             </body>
             </html>
           `;
-          zip.file(`Bản dịch song ngữ (Edit & Raw)/${fileWithExt}`, '\ufeff' + parallelHtmlContent);
+          zip.file(`Bản edit song ngữ (Edit & Raw)/${fileWithExt}`, '\ufeff' + parallelHtmlContent);
         }
 
         // Option 3: Only Edit
@@ -233,7 +233,7 @@ export const ChapterArchiveModal: React.FC<ChapterArchiveModalProps> = ({
             </body>
             </html>
           `;
-          zip.file(`Bản dịch tinh chỉnh (Chỉ Edit)/${fileWithExt}`, '\ufeff' + editHtmlContent);
+          zip.file(`Bản edit tinh chỉnh (Chỉ Edit)/${fileWithExt}`, '\ufeff' + editHtmlContent);
         }
       });
 
@@ -324,7 +324,7 @@ export const ChapterArchiveModal: React.FC<ChapterArchiveModalProps> = ({
         <div className="flex-1 overflow-y-auto p-4 bg-[#F5E6D3]/50 space-y-2">
           {filteredChapters.length === 0 ? (
             <div className="text-center py-16 text-[#BCAAA4] italic text-xs">
-              {searchTerm ? 'Không tìm thấy chương nào phù hợp.' : 'Kho chương trống. Hãy lưu chương từ phần kết quả dịch!'}
+              {searchTerm ? 'Không tìm thấy chương nào phù hợp.' : 'Kho chương trống. Hãy lưu chương từ phần kết quả edit!'}
             </div>
           ) : (
             filteredChapters.map(c => {
@@ -390,7 +390,7 @@ export const ChapterArchiveModal: React.FC<ChapterArchiveModalProps> = ({
                           {new Date(c.timestamp).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })}
                         </span>
                         <span>•</span>
-                        <span>{c.result?.segments?.length || 0} đoạn dịch</span>
+                        <span>{c.result?.segments?.length || 0} đoạn edit</span>
                         {c.completedSegments && c.completedSegments.length > 0 && (
                           <>
                             <span>•</span>
@@ -412,10 +412,10 @@ export const ChapterArchiveModal: React.FC<ChapterArchiveModalProps> = ({
                         }
                       }}
                       className="flex items-center gap-1 text-[10px] font-bold text-[#5D4037] hover:text-[#3E2723] bg-[#EFEBE9] hover:bg-[#D7CCC8] px-2.5 py-1 rounded transition-colors"
-                      title="Nạp vào editor để dịch tiếp"
+                      title="Nạp vào editor để edit tiếp"
                     >
                       <RotateCcw size={11} />
-                      <span>Sửa tiếp</span>
+                      <span>Edit tiếp</span>
                     </button>
                     
                     <button
@@ -501,7 +501,7 @@ export const ChapterArchiveModal: React.FC<ChapterArchiveModalProps> = ({
                   />
                   <div>
                     <span className="text-xs font-bold text-[#3E2723] group-hover:text-[#5D4037] transition-colors">
-                      Thư mục: Bản dịch song ngữ (Edit & Raw)
+                      Thư mục: Bản edit song ngữ (Edit & Raw)
                     </span>
                     <p className="text-[10px] text-[#A1887F]">
                       Chứa file dạng đoạn Raw và đoạn Edit dính sát nhau, phân dòng rõ ràng.
@@ -519,10 +519,10 @@ export const ChapterArchiveModal: React.FC<ChapterArchiveModalProps> = ({
                   />
                   <div>
                     <span className="text-xs font-bold text-[#3E2723] group-hover:text-[#5D4037] transition-colors">
-                      Thư mục: Bản dịch tinh chỉnh (Chỉ Edit)
+                      Thư mục: Bản edit tinh chỉnh (Chỉ Edit)
                     </span>
                     <p className="text-[10px] text-[#A1887F]">
-                      Chứa file chỉ có các đoạn dịch đã tinh chỉnh mượt mà (sạch Raw).
+                      Chứa file chỉ có các đoạn edit đã tinh chỉnh mượt mà (sạch Raw).
                     </p>
                   </div>
                 </label>

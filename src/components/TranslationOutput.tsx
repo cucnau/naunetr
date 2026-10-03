@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { TranslationResponse, VocabItem, CustomTerm, Character, TextShortcut } from '../types';
-import { Copy, TableProperties, Check, Info, X, Users, ClipboardList, CheckCircle2, FileDown, BookOpen, Undo2, Redo2, Search, Maximize2, Minimize2, ChevronLeft, ChevronRight, Loader2, Pencil, Trash2, Plus, UserPlus } from 'lucide-react';
+import { Copy, Check, Info, X, Users, ClipboardList, CheckCircle2, FileDown, BookOpen, Undo2, Redo2, Search, Maximize2, Minimize2, ChevronLeft, ChevronRight, Loader2, Pencil, Trash2, Plus, UserPlus, BookA } from 'lucide-react';
 import { vietphraseEngine } from '../services/vietphraseService';
 import { checkAndApplyShortcut, getStoredShortcuts } from '../services/shortcutService';
 // Deleted smartClassify import
@@ -30,6 +30,8 @@ interface TranslationOutputProps {
   currentChapterId?: string;
   currentChapterName?: string;
   chaptersCount?: number;
+  onOpenVocab?: () => void;
+  onOpenWorldInfo?: () => void;
 }
 
 const escapeRegExp = (string: string) => {
@@ -252,7 +254,7 @@ const EditableSegment = ({
                     setIsFocused(true);
                     setTimeout(() => textareaRef.current?.focus(), 20);
                 }}
-                className={`w-full bg-transparent border-none p-0 text-[#4E342E] leading-[1.2] ${isFocusMode ? 'text-[19px]' : 'text-[15px]'} m-0 block whitespace-pre-wrap break-words min-h-[1.2em] cursor-text`}
+                className={`w-full bg-transparent border-none p-0 text-[#4E342E] leading-[1.2] ${isFocusMode ? 'text-[15px] sm:text-[19px]' : 'text-[15px]'} m-0 block whitespace-pre-wrap break-words min-h-[1.2em] cursor-text`}
                 style={{ fontWeight: 400, display: 'block', margin: 0 }}
             >
                 {renderSearchTextHighlight(localText)}
@@ -269,7 +271,7 @@ const EditableSegment = ({
             onBlur={handleBlur}
             onFocus={handleFocus}
             placeholder="..."
-            className={`w-full bg-transparent border-none outline-none resize-none overflow-hidden p-0 text-[#4E342E] placeholder:text-[#A1887F]/30 leading-[1.2] ${isFocusMode ? 'text-[19px]' : 'text-[15px]'} focus:ring-0 m-0 block whitespace-normal min-h-[1.2em]`}
+            className={`w-full bg-transparent border-none outline-none resize-none overflow-hidden p-0 text-[#4E342E] placeholder:text-[#A1887F]/30 leading-[1.2] ${isFocusMode ? 'text-[15px] sm:text-[19px]' : 'text-[15px]'} focus:ring-0 m-0 block whitespace-normal min-h-[1.2em]`}
             style={{ fontWeight: 400, display: 'block', margin: 0 }}
             rows={1}
             spellCheck={false}
@@ -363,10 +365,10 @@ const EditableSource = ({
   };
 
   return (
-    <div className={`${isFocusMode ? 'text-[18.5px]' : 'text-[14.5px]'} font-serif-sc leading-[1.2] text-[#3E2723] m-0 whitespace-normal break-words flex items-start gap-0 sm:gap-1`}>
+    <div className={`${isFocusMode ? 'text-[14.5px] sm:text-[18.5px]' : 'text-[14.5px]'} font-serif-sc leading-[1.2] text-[#3E2723] m-0 whitespace-normal break-words flex items-start gap-0 sm:gap-1`}>
       <span 
         onClick={onToggleComplete}
-        className={`inline-flex items-center justify-center select-none align-middle transform -translate-y-[1px] ${isFocusMode ? 'w-6 text-[11px]' : 'w-5 text-[9px]'} sm:w-auto ${isFocusMode ? 'sm:min-w-[18px]' : 'sm:min-w-[14px]'} sm:mr-0.5 shrink-0 font-bold cursor-pointer hover:underline ${isDone ? 'text-green-800 font-black' : 'text-[#A1887F]/40 hover:text-[#3E2723]'}`}
+        className={`inline-flex items-center justify-center select-none align-middle transform -translate-y-[1px] w-5 text-[9px] ${isFocusMode ? 'sm:w-auto sm:text-[11px] sm:min-w-[18px]' : 'sm:w-auto sm:min-w-[14px]'} sm:mr-0.5 shrink-0 font-bold cursor-pointer hover:underline ${isDone ? 'text-green-800 font-black' : 'text-[#A1887F]/40 hover:text-[#3E2723]'}`}
         title={isDone ? "Đã xong (Bấm để bỏ)" : "Bấm để đánh dấu xong"}
       >
         {idx + 1}.
@@ -382,7 +384,7 @@ const EditableSource = ({
             onBlur={handleBlur}
             onKeyDown={handleKeyDown}
             placeholder="Nhập chữ Hán..."
-            className={`w-full bg-transparent border-none outline-none resize-none overflow-hidden p-0 text-[#3E2723] font-serif-sc leading-[1.2] ${isFocusMode ? 'text-[18.5px]' : 'text-[14.5px]'} focus:ring-0 m-0 block whitespace-normal min-h-[1.2em]`}
+            className={`w-full bg-transparent border-none outline-none resize-none overflow-hidden p-0 text-[#3E2723] font-serif-sc leading-[1.2] ${isFocusMode ? 'text-[14.5px] sm:text-[18.5px]' : 'text-[14.5px]'} focus:ring-0 m-0 block whitespace-normal min-h-[1.2em]`}
             style={{ fontWeight: 400, display: 'block', margin: 0 }}
             rows={1}
             spellCheck={false}
@@ -480,7 +482,7 @@ const EditableQuick = ({
   };
 
   return (
-    <div className={`${isFocusMode ? 'pl-6 sm:pl-[22px]' : 'pl-5 sm:pl-[18px]'} -mt-0.5 w-full`}>
+    <div className={`${isFocusMode ? 'pl-5 sm:pl-[22px]' : 'pl-5 sm:pl-[18px]'} -mt-0.5 w-full`}>
       {isFocused ? (
         <textarea
           ref={textareaRef}
@@ -490,7 +492,7 @@ const EditableQuick = ({
           onBlur={handleBlur}
           onKeyDown={handleKeyDown}
           placeholder="Nhập Vietphrase..."
-          className={`w-full bg-transparent border-none outline-none resize-none overflow-hidden p-0 text-[#8D6E63] italic leading-[1.1] ${isFocusMode ? 'text-[13px]' : 'text-[10px]'} focus:ring-0 m-0 block whitespace-normal min-h-[1.1em]`}
+          className={`w-full bg-transparent border-none outline-none resize-none overflow-hidden p-0 text-[#8D6E63] italic leading-[1.1] ${isFocusMode ? 'text-[10px] sm:text-[13px]' : 'text-[10px]'} focus:ring-0 m-0 block whitespace-normal min-h-[1.1em]`}
           style={{ fontWeight: 400, display: 'block', margin: 0 }}
           rows={1}
           spellCheck={false}
@@ -499,7 +501,7 @@ const EditableQuick = ({
         <div 
           onMouseDown={handleMouseDown}
           onClick={handleClick}
-          className={`${isFocusMode ? 'text-[13px]' : 'text-[10px]'} text-[#8D6E63] leading-[1.1] opacity-70 italic break-words cursor-text hover:opacity-100 transition-opacity min-h-[1.1em]`}
+          className={`${isFocusMode ? 'text-[10px] sm:text-[13px]' : 'text-[10px]'} text-[#8D6E63] leading-[1.1] opacity-70 italic break-words cursor-text hover:opacity-100 transition-opacity min-h-[1.1em]`}
           title="Bấm vào để sửa Vietphrase trực tiếp"
         >
           {localText || <span className="opacity-40 not-italic text-[9px]">[+ Thêm Vietphrase]</span>}
@@ -597,7 +599,7 @@ const EditableDeepl = ({
           onBlur={handleBlur}
           onKeyDown={handleKeyDown}
           placeholder="Nhập GG/DeepL..."
-          className={`w-full bg-transparent border-none outline-none resize-none overflow-hidden p-0 text-[#A1887F] italic leading-[1.1] ${isFocusMode ? 'text-[11.5px]' : 'text-[8.5px]'} focus:ring-0 m-0 block whitespace-normal min-h-[1.1em]`}
+          className={`w-full bg-transparent border-none outline-none resize-none overflow-hidden p-0 text-[#A1887F] italic leading-[1.1] ${isFocusMode ? 'text-[8.5px] sm:text-[11.5px]' : 'text-[8.5px]'} focus:ring-0 m-0 block whitespace-normal min-h-[1.1em]`}
           style={{ fontWeight: 400, display: 'block', margin: 0 }}
           rows={1}
           spellCheck={false}
@@ -606,7 +608,7 @@ const EditableDeepl = ({
         <div 
           onMouseDown={handleMouseDown}
           onClick={handleClick}
-          className={`${isFocusMode ? 'text-[11.5px]' : 'text-[8.5px]'} text-[#A1887F] leading-[1.1] italic opacity-60 break-words cursor-text hover:opacity-90 transition-opacity min-h-[1.1em]`}
+          className={`${isFocusMode ? 'text-[8.5px] sm:text-[11.5px]' : 'text-[8.5px]'} text-[#A1887F] leading-[1.1] italic opacity-60 break-words cursor-text hover:opacity-90 transition-opacity min-h-[1.1em]`}
           title="Bấm vào để sửa GG/DeepL trực tiếp"
         >
           {localText || <span className="opacity-40 not-italic text-[8px] hover:opacity-100">[+ Thêm GG/DeepL]</span>}
@@ -640,7 +642,9 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
     currentNovelId,
     currentChapterId,
     currentChapterName,
-    chaptersCount = 0
+    chaptersCount = 0,
+    onOpenVocab,
+    onOpenWorldInfo
 }) => {
   const [showNamingModal, setShowNamingModal] = useState(false);
   const [exportFileName, setExportFileName] = useState('');
@@ -653,7 +657,7 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
     item: VocabItem; 
     position: { x: number; y: number }; 
     side: 'top' | 'bottom';
-    type?: 'char' | 'custom' | 'ai';
+    type?: 'char' | 'custom' | 'vocab';
     rawItem?: CustomTerm | Character | VocabItem;
   } | null>(null);
 
@@ -1093,7 +1097,7 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
               <th style="width: 22%; background-color: #EFEBE9; color: #3E2723; border: 1px solid #D7CCC8;">Raw</th>
               <th style="width: 23%; background-color: #EFEBE9; color: #3E2723; border: 1px solid #D7CCC8;">Vietphrase</th>
               <th style="width: 23%; background-color: #EFEBE9; color: #3E2723; border: 1px solid #D7CCC8;">GG/DL</th>
-              <th style="width: 32%; background-color: #EFEBE9; color: #3E2723; border: 1px solid #D7CCC8;">Bản edit</th>
+              <th style="width: 32%; background-color: #EFEBE9; color: #3E2723; border: 1px solid #D7CCC8;">Edit</th>
             </tr>
           </thead>
           <tbody>
@@ -1187,7 +1191,7 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
   const handleVocabClick = (
     event: React.MouseEvent, 
     vocab: VocabItem & { rawItem?: CustomTerm | Character | VocabItem }, 
-    type: 'char' | 'custom' | 'ai' = 'ai'
+    type: 'char' | 'custom' | 'vocab' = 'vocab'
   ) => {
      const selection = window.getSelection();
      if (selection && !selection.isCollapsed && selection.toString().trim().length > 0) {
@@ -1283,7 +1287,7 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
     setActiveVocab(null);
   };
 
-  const handleQuickAddAiVocab = (item: VocabItem, addType: 'term' | 'char') => {
+  const handleQuickAddVocab = (item: VocabItem, addType: 'term' | 'char') => {
     if (addType === 'term') {
       const newTerm: CustomTerm = {
         id: Date.now().toString(),
@@ -1308,18 +1312,18 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
   };
 
   const { pattern, termMap } = React.useMemo(() => {
-    const map = new Map<string, VocabItem & { type: 'char' | 'custom' | 'ai'; rawItem?: CustomTerm | Character | VocabItem }>();
-    const aiVocab = data.vocabulary || [];
+    const map = new Map<string, VocabItem & { type: 'char' | 'custom' | 'vocab'; rawItem?: CustomTerm | Character | VocabItem }>();
+    const extraVocab = data.vocabulary || [];
 
     const allTerms = [
         ...currentCustomTerms.map(c => ({ term: c.term, item: c, type: 'custom' as const })),
         ...currentCharacters.map(c => ({ term: c.chineseName, item: c, type: 'char' as const })),
-        ...aiVocab.map(v => ({ term: v.term, item: v, type: 'ai' as const }))
+        ...extraVocab.map(v => ({ term: v.term, item: v, type: 'vocab' as const }))
     ]
     .filter(t => t.term && t.term.trim().length > 0);
 
-    // Sort by length descending, then by type priority (custom > char > ai)
-    const typePriority = { custom: 1, char: 2, ai: 3 };
+    // Sort by length descending, then by type priority (custom > char > vocab)
+    const typePriority = { custom: 1, char: 2, vocab: 3 };
     allTerms.sort((a, b) => {
         if (b.term.length !== a.term.length) {
             return b.term.length - a.term.length;
@@ -1397,8 +1401,8 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
                  return <span key={i} onClick={(e) => handleVocabClick(e, match, 'char')} className="border-b border-dashed border-[#5D4037] bg-[#EFEBE9] cursor-pointer hover:bg-[#D7CCC8] transition-colors rounded-sm px-0.5 text-[#3E2723] font-bold leading-none inline-block">{part}</span>;
              } else if (match.type === 'custom') {
                  return <span key={i} onClick={(e) => handleVocabClick(e, match, 'custom')} className="border-b border-dashed border-[#5D4037] bg-[#EFEBE9] cursor-pointer hover:bg-[#D7CCC8] transition-colors rounded-sm px-0.5 text-[#3E2723] font-bold leading-none inline-block">{part}</span>;
-             } else if (match.type === 'ai') {
-                 return <span key={i} onClick={(e) => handleVocabClick(e, match, 'ai')} className="border-b-2 border-dashed border-[#FBC02D] bg-[#FFF9C4] cursor-pointer hover:bg-[#FFF176] transition-colors rounded-sm px-0.5 text-[#3E2723] font-bold leading-none inline-block shadow-[inset_0_-2px_0_rgba(251,192,45,0.2)]">{part}</span>;
+             } else if (match.type === 'vocab') {
+                 return <span key={i} onClick={(e) => handleVocabClick(e, match, 'vocab')} className="border-b-2 border-dashed border-[#FBC02D] bg-[#FFF9C4] cursor-pointer hover:bg-[#FFF176] transition-colors rounded-sm px-0.5 text-[#3E2723] font-bold leading-none inline-block shadow-[inset_0_-2px_0_rgba(251,192,45,0.2)]">{part}</span>;
              }
         }
 
@@ -1413,9 +1417,28 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
   return (
     <div className="bg-white flex flex-col h-full overflow-hidden relative border border-[#D7CCC8] rounded-xl shadow-sm">
       <div className="shrink-0 bg-white">
-          <div className="flex items-center justify-between bg-[#EFEBE9] px-3 py-1 border-b border-[#D7CCC8]">
-             <div className="flex items-center gap-1.5 text-[#3E2723] font-bold text-[10px] uppercase tracking-tight"><TableProperties size={12} /><span>Bảng đối chiếu</span></div>
-             <div className="flex items-center gap-1">
+          <div className="flex items-center justify-end bg-[#EFEBE9] px-3 py-1 border-b border-[#D7CCC8]">
+             <div className="flex items-center gap-1 overflow-x-auto scrollbar-none">
+                {/* Khi ở Chế độ tập trung: 2 nút Kho từ vựng & Bảng nhân vật xưng hô chuyển sang bên cạnh các nút hoàn tác */}
+                {isFocusMode && (
+                  <div className="flex items-center gap-0.5 border-r border-[#D7CCC8] pr-1.5 mr-0.5">
+                    <button 
+                      onClick={onOpenVocab} 
+                      title="Kho Từ vựng"
+                      className="p-1 rounded text-[#5D4037] hover:bg-[#D7CCC8] hover:text-[#3E2723] transition-colors"
+                    >
+                      <BookA size={12} />
+                    </button>
+                    <button 
+                      onClick={onOpenWorldInfo} 
+                      title="Bảng Nhân vật & Xưng hô"
+                      className="p-1 rounded text-[#5D4037] hover:bg-[#D7CCC8] hover:text-[#3E2723] transition-colors"
+                    >
+                      <Users size={12} />
+                    </button>
+                  </div>
+                )}
+
                 {/* Undo / Redo */}
                 <div className="flex items-center gap-0.5 border-r border-[#D7CCC8] pr-1.5 mr-0.5">
                    <button 
@@ -1457,7 +1480,7 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
                 {/* Edit & Raw copy button */}
                 <button 
                    onClick={() => copyToClipboard(getParallelText(), 'parallel')} 
-                   title="Sao chép Đối chiếu (Gốc & Edit)" 
+                   title="Sao chép Đối chiếu (Raw & Edit)" 
                    className="p-1 rounded text-[#5D4037] hover:text-[#3E2723] bg-white border border-[#D7CCC8] hover:bg-[#D7CCC8] transition-colors shadow-sm mr-1"
                 >
                    {copiedMode === 'parallel' ? <Check size={11} className="text-green-600 font-bold" /> : <ClipboardList size={11} />}
@@ -1466,7 +1489,7 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
                 {/* Edit only copy button */}
                 <button 
                    onClick={() => copyToClipboard(getNaturalText(), 'all')} 
-                   title="Sao chép Bản dịch (Chỉ phần Edit)" 
+                   title="Sao chép Edit (Chỉ phần Edit)" 
                    className="p-1 rounded text-[#8D6E63] hover:text-[#3E2723] bg-white border border-[#D7CCC8] hover:bg-[#D7CCC8] transition-colors shadow-sm mr-1"
                 >
                    {copiedMode === 'all' ? <Check size={11} className="text-green-600 font-bold" /> : <Copy size={11} />}
@@ -1585,8 +1608,8 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
           )}
           {hasSegments && (
              <div className="hidden sm:flex w-full bg-[#EFEBE9] text-[#5D4037] text-[9px] font-bold uppercase tracking-wider shadow-sm border-t border-[#D7CCC8]">
-                 <div className="w-[45%] p-1 border-r border-[#D7CCC8] pl-2">Nguồn</div>
-                 <div className="w-[55%] p-1 pl-2">Bản edit</div>
+                 <div className="w-[45%] p-1 border-r border-[#D7CCC8] pl-2">Raw</div>
+                 <div className="w-[55%] p-1 pl-2">Edit</div>
              </div>
           )}
       </div>
@@ -1649,7 +1672,7 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
                            <div className="w-full sm:w-[55%] py-1 pl-2 pr-2 sm:py-0 sm:pl-2 sm:pr-7 relative border-none bg-transparent">
                               <div className="flex items-start py-0.5">
                                   {/* Trên điện thoại: Nút tick & Nút xóa đặt ở trước tương đương với số đoạn 1 2 3 để song song */}
-                                  <div className={`flex sm:hidden flex-col items-center justify-start gap-1 ${isFocusMode ? 'w-6' : 'w-5'} shrink-0 select-none pt-0.5`}>
+                                  <div className="flex sm:hidden flex-col items-center justify-start gap-1 w-5 shrink-0 select-none pt-0.5">
                                      <button
                                         type="button"
                                         onClick={(e) => {
@@ -1663,7 +1686,7 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
                                         }`}
                                         title={isDone ? "Đã xong (Bấm để bỏ)" : "Bấm để đánh dấu xong"}
                                      >
-                                        <CheckCircle2 size={isFocusMode ? 14 : 12} className={isDone ? "stroke-[2.5]" : "stroke-[1.75]"} />
+                                        <CheckCircle2 size={12} className={isDone ? "stroke-[2.5]" : "stroke-[1.75]"} />
                                      </button>
                                      <button
                                         type="button"
@@ -1674,7 +1697,7 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
                                         className="p-0.5 rounded text-[#A1887F]/40 active:text-red-600 transition-colors"
                                         title="Xóa hàng này (Ctrl+Z để hoàn tác)"
                                      >
-                                        <Trash2 size={isFocusMode ? 13 : 11} className="stroke-[1.75]" />
+                                        <Trash2 size={11} className="stroke-[1.75]" />
                                      </button>
                                   </div>
 
@@ -1757,9 +1780,9 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
                         </h3>
                         <div className="flex items-center gap-1">
                             <span className="bg-[#EFEBE9] text-[#5D4037] px-1 py-0.5 rounded text-[8px] font-mono border border-[#D7CCC8]">
-                                {activeVocab.type === 'char' ? 'Nhân vật' : activeVocab.type === 'custom' ? 'Từ điển riêng' : activeVocab.item.pinyin || 'Dịch tự động'}
+                                {activeVocab.type === 'char' ? 'Nhân vật' : activeVocab.type === 'custom' ? 'Từ điển riêng' : activeVocab.item.pinyin || 'Edit tự động'}
                             </span>
-                            {activeVocab.item.hanViet && activeVocab.type === 'ai' && (
+                            {activeVocab.item.hanViet && activeVocab.type === 'vocab' && (
                               <span className="text-[10px] text-[#8D6E63] font-medium ml-1">
                                 {activeVocab.item.hanViet}
                               </span>
@@ -1904,21 +1927,21 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
                             </div>
                         )}
 
-                        {/* Nút Thêm Nhanh dành cho Từ AI (Chưa có trong kho từ vựng) */}
-                        {activeVocab.type === 'ai' && (
+                        {/* Nút Thêm Nhanh dành cho Từ vựng (Chưa có trong kho từ vựng) */}
+                        {activeVocab.type === 'vocab' && (
                             <div className="pt-2 border-t border-[#EFEBE9] space-y-1">
                                 <div className="text-[8px] font-bold text-[#8D6E63] uppercase tracking-wider">Thêm nhanh vào kho:</div>
                                 <div className="grid grid-cols-2 gap-1">
                                     <button
                                         type="button"
-                                        onClick={() => handleQuickAddAiVocab(activeVocab.item, 'term')}
+                                        onClick={() => handleQuickAddVocab(activeVocab.item, 'term')}
                                         className="px-2 py-1.5 bg-[#5D4037] text-white hover:bg-[#3E2723] rounded text-[10px] font-bold flex items-center justify-center gap-1 shadow-2xs transition-colors cursor-pointer"
                                     >
                                         <Plus size={11} /> + Từ vựng
                                     </button>
                                     <button
                                         type="button"
-                                        onClick={() => handleQuickAddAiVocab(activeVocab.item, 'char')}
+                                        onClick={() => handleQuickAddVocab(activeVocab.item, 'char')}
                                         className="px-2 py-1.5 bg-[#8D6E63] text-white hover:bg-[#5D4037] rounded text-[10px] font-bold flex items-center justify-center gap-1 shadow-2xs transition-colors cursor-pointer"
                                     >
                                         <UserPlus size={11} /> + Nhân vật
@@ -1967,7 +1990,7 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
                 }}
               />
               <p className="text-[10px] text-[#A1887F] mt-2 italic">
-                Bảng sẽ xuất ra Word gồm 4 cột đối chiếu: Nguồn, Vietphrase, GG/DL và Bản edit.
+                Bảng sẽ xuất ra Word gồm 4 cột đối chiếu: Raw, Vietphrase, DeepL và Edit.
               </p>
             </div>
             
@@ -2179,7 +2202,7 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
                           handleSaveSelectedVocab();
                         }
                       }}
-                      placeholder="Nhập nghĩa dịch cho từ..."
+                      placeholder="Nhập nghĩa edit cho từ..."
                       className="w-full bg-white border border-[#D7CCC8] rounded px-2 py-1 text-[#3E2723] text-xs font-bold outline-none focus:border-[#8D6E63] focus:ring-1 focus:ring-[#8D6E63] transition-all"
                       autoFocus
                     />
@@ -2304,7 +2327,7 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
                           handleSaveSelectedCharacter();
                         }
                       }}
-                      placeholder="Nhập tên tiếng Việt dịch..."
+                      placeholder="Nhập tên tiếng Việt edit..."
                       className="w-full bg-white border border-[#D7CCC8] rounded px-2 py-1 text-[#3E2723] text-xs font-bold outline-none focus:border-[#8D6E63] focus:ring-1 focus:ring-[#8D6E63] transition-all"
                       autoFocus
                     />

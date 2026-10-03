@@ -539,7 +539,7 @@ export const DictionarySidebar: React.FC<DictionarySidebarProps> = ({
                 </div>
 
                 <p className="text-[9px] text-[#8D6E63] mt-1.5 italic leading-tight">
-                    * Bạn có thể chọn <strong>nhiều file cùng lúc</strong> (Vietphrase.txt, Names.txt, PhuTu.txt, LuatNhan.txt...). Dữ liệu tự động lưu ngoại tuyến và gộp vào từ điển dịch.
+                    * Bạn có thể chọn <strong>nhiều file cùng lúc</strong> (Vietphrase.txt, Names.txt, PhuTu.txt, LuatNhan.txt...). Dữ liệu tự động lưu ngoại tuyến và gộp vào từ điển edit.
                 </p>
                 <input 
                     type="file" 

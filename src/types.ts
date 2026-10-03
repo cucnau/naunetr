@@ -110,7 +110,7 @@ export interface TranslationSession {
   status: AppStatus;
   result: TranslationResponse | null;
   error: string | null;
-  modelId: string; // Model AI được chọn cho session này
+  modelId: string;
   currentHistoryId?: string; // Liên kết với bản ghi lịch sử
   currentChapterId?: string; // Liên kết với chương đang biên tập
   
