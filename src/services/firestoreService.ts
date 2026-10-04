@@ -1,6 +1,6 @@
 import { db, auth } from './firebase';
 import { collection, doc, setDoc, getDocs, deleteDoc, writeBatch, query, where, Timestamp, onSnapshot } from 'firebase/firestore';
-import { CustomTerm, Character, Relationship, Novel, Chapter, TextShortcut, TranslationSegment } from '../types';
+import { CustomTerm, Character, Relationship, Novel, Chapter, TextShortcut, TranslationSegment, TranslationResponse } from '../types';
 
 export enum OperationType {
   CREATE = 'create',

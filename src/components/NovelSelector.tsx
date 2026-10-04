@@ -155,7 +155,7 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, on
           title={`${error} - Bấm để tải lại từ Cloud`}
           onClick={() => fetchNovels()}
         >
-          🔄 Thử lại
+          Thử lại
         </span>
       )}
     </div>

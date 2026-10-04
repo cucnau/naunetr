@@ -64,14 +64,18 @@ export interface TextShortcut {
   category?: string;     // Phân loại tùy chọn
 }
 
+export type VietphraseCategory = 'names' | 'vietphrase' | 'nouns' | 'suffixes' | 'pronouns' | 'lacviet' | 'other';
+
 export interface VietphraseFileItem {
   id: string;
-  name: string;        // Tên file (VD: Vietphrase.txt, Names.txt, TienHiep.txt)
+  name: string;        // Tên file (VD: Vietphrase.txt, Names.txt, HauTu.txt, DanhTu.txt)
   size: number;        // Dung lượng byte
   wordCount: number;   // Số lượng từ/cụm từ trong file
   content: string;     // Nội dung text gốc
   enabled: boolean;    // Đang bật hay tắt file này
   uploadedAt: number;  // Thời điểm nạp file
+  fileType?: VietphraseCategory; // Phân tầng ưu tiên: 'names' | 'vietphrase' | 'nouns' | 'suffixes' | 'pronouns' | 'lacviet' | 'other'
+  priority?: number;   // Thứ tự ưu tiên
 }
 
 export interface HistoryItem {

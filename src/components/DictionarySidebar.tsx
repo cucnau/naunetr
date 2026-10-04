@@ -1,11 +1,11 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { CustomTerm, VietphraseFileItem } from '../types';
-import { Plus, Trash2, BookUser, Settings, Download, Upload, Loader2, Save, Code, Copy, Search, X, RefreshCw, FileText, CheckCircle, FileUp, AlertCircle, FileSpreadsheet, Layers, Pencil, Check } from 'lucide-react';
+import { CustomTerm, VietphraseFileItem, VietphraseCategory } from '../types';
+import { Plus, Trash2, BookUser, Settings, Download, Upload, Loader2, Save, Code, Copy, Search, X, RefreshCw, FileText, CheckCircle, FileUp, AlertCircle, FileSpreadsheet, Layers, Pencil, Check, ChevronUp, ChevronDown } from 'lucide-react';
 import { syncFirestoreData, deleteFirestoreDoc, overwriteFirestoreData } from '../services/firestoreService';
 import { auth } from '../services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import { vietphraseEngine } from '../services/vietphraseService';
+import { vietphraseEngine, VIETPHRASE_CATEGORY_CONFIG } from '../services/vietphraseService';
 // Deleted smartClassify import
 
 interface DictionarySidebarProps {
@@ -133,6 +133,24 @@ export const DictionarySidebar: React.FC<DictionarySidebarProps> = ({
   useEffect(() => {
     termsRef.current = terms;
   }, [terms]);
+
+  // Quick Dictionary / LacViet Lookup
+  const [quickLookupQuery, setQuickLookupQuery] = useState('');
+  const [quickLookupResult, setQuickLookupResult] = useState<{
+    term: string;
+    vietphrase: string;
+    lacvietDetails: string | null;
+    layers: string[];
+  } | null>(null);
+
+  const handleExecuteQuickLookup = (q: string) => {
+    const trimmed = q.trim();
+    if (!trimmed) {
+      setQuickLookupResult(null);
+      return;
+    }
+    setQuickLookupResult(vietphraseEngine.lookupComprehensive(trimmed));
+  };
   
   // Auto Sync State
   const [autoSync, setAutoSync] = useState<boolean>(() => {
@@ -458,52 +476,110 @@ export const DictionarySidebar: React.FC<DictionarySidebarProps> = ({
                     </span>
                 </div>
 
+                {/* Thứ tự phân tầng ưu tiên trực quan */}
+                <div className="p-2 mb-2 rounded bg-[#FAF8F5] border border-[#D7CCC8]/60 text-[9px] text-[#5D4037] leading-relaxed">
+                  <div className="font-bold text-[#3E2723] mb-1 flex items-center justify-between">
+                    <span>Thứ tự phân tầng ưu tiên ghép từ:</span>
+                  </div>
+                  <div className="flex items-center gap-1 font-mono text-[8.5px] overflow-x-auto no-scrollbar py-0.5">
+                    <span className="bg-amber-100 text-amber-900 border border-amber-300 px-1 py-0.5 rounded shrink-0">1. Names</span>
+                    <span>-&gt;</span>
+                    <span className="bg-emerald-100 text-emerald-900 border border-emerald-300 px-1 py-0.5 rounded shrink-0">2. Vietphrase</span>
+                    <span>-&gt;</span>
+                    <span className="bg-indigo-100 text-indigo-900 border border-indigo-300 px-1 py-0.5 rounded shrink-0">3. Danh từ</span>
+                    <span>-&gt;</span>
+                    <span className="bg-rose-100 text-rose-900 border border-rose-300 px-1 py-0.5 rounded shrink-0">4. Hậu từ</span>
+                    <span>-&gt;</span>
+                    <span className="bg-blue-100 text-blue-900 border border-blue-300 px-1 py-0.5 rounded shrink-0">5. Pronouns</span>
+                    <span>-&gt;</span>
+                    <span className="bg-purple-100 text-purple-900 border border-purple-300 px-1 py-0.5 rounded shrink-0">6. Lạc Việt</span>
+                  </div>
+                </div>
+
                 {/* Danh sách các file Vietphrase đã nạp */}
                 {vpFiles.length > 0 && (
-                  <div className="space-y-1.5 mb-2.5 max-h-44 overflow-y-auto pr-0.5">
+                  <div className="space-y-2 mb-2.5 max-h-52 overflow-y-auto pr-0.5">
                     {vpFiles.map((file) => (
                       <div 
                         key={file.id} 
-                        className={`flex items-center justify-between p-1.5 rounded border transition-all text-xs ${
+                        className={`p-2 rounded border transition-all text-xs flex flex-col gap-1.5 ${
                           file.enabled 
                             ? 'bg-[#FAF8F5] border-[#D7CCC8] text-[#3E2723]' 
                             : 'bg-gray-50 border-gray-200 text-gray-400 opacity-60'
                         }`}
                       >
-                        <div className="flex items-center gap-1.5 overflow-hidden flex-1 mr-2 min-w-0">
-                          <button
-                            type="button"
-                            onClick={() => vietphraseEngine.toggleFile(file.id)}
-                            className={`w-3.5 h-3.5 rounded flex items-center justify-center text-[9px] border transition-colors shrink-0 ${
-                              file.enabled 
-                                ? 'bg-green-600 border-green-600 text-white' 
-                                : 'bg-white border-gray-300 text-transparent'
-                            }`}
-                            title={file.enabled ? "Bấm để tắt file này" : "Bấm để bật file này"}
-                          >
-                            ✓
-                          </button>
-                          <span className="font-mono text-[11px] truncate font-medium" title={file.name}>
-                            {file.name}
-                          </span>
+                        <div className="flex items-center justify-between gap-1.5">
+                          <div className="flex items-center gap-1.5 overflow-hidden flex-1 min-w-0">
+                            <button
+                              type="button"
+                              onClick={() => vietphraseEngine.toggleFile(file.id)}
+                              className={`w-3.5 h-3.5 rounded flex items-center justify-center text-[9px] border transition-colors shrink-0 ${
+                                file.enabled 
+                                  ? 'bg-green-600 border-green-600 text-white' 
+                                  : 'bg-white border-gray-300 text-transparent'
+                              }`}
+                              title={file.enabled ? "Bấm để tắt file này" : "Bấm để bật file này"}
+                            >
+                              <Check size={9} />
+                            </button>
+                            <span className="font-mono text-[11px] truncate font-bold text-[#3E2723]" title={file.name}>
+                              {file.name}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-0.5 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => vietphraseEngine.moveFile(file.id, 'up')}
+                              className="text-[#8D6E63] hover:text-[#3E2723] hover:bg-[#EFEBE9] p-0.5 rounded transition-colors"
+                              title="Đẩy lên trên (Ưu tiên cao hơn)"
+                            >
+                              <ChevronUp size={12} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => vietphraseEngine.moveFile(file.id, 'down')}
+                              className="text-[#8D6E63] hover:text-[#3E2723] hover:bg-[#EFEBE9] p-0.5 rounded transition-colors"
+                              title="Đẩy xuống dưới (Ưu tiên thấp hơn)"
+                            >
+                              <ChevronDown size={12} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (window.confirm(`Bạn có chắc muốn xóa file "${file.name}" khỏi từ điển?`)) {
+                                  vietphraseEngine.removeFile(file.id);
+                                }
+                              }}
+                              className="text-[#A1887F] hover:text-red-600 p-0.5 rounded transition-colors ml-1"
+                              title="Xóa file này"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
                         </div>
 
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          <span className="text-[9px] bg-[#EFE5D9] text-[#5D4037] px-1.5 py-0.5 rounded font-mono font-medium">
+                        {/* Dòng điều khiển tầng ưu tiên & số từ */}
+                        <div className="flex items-center justify-between text-[10px] pt-1 border-t border-[#EFEBE9]">
+                          <div className="flex items-center gap-1">
+                            <span className="text-[9px] text-[#8D6E63] font-medium">Tầng:</span>
+                            <select
+                              value={file.fileType || 'vietphrase'}
+                              onChange={(e) => vietphraseEngine.setFileType(file.id, e.target.value as VietphraseCategory)}
+                              className="text-[9px] font-bold py-0.5 px-1.5 rounded border border-[#D7CCC8] bg-white text-[#3E2723] cursor-pointer focus:outline-none focus:ring-1 focus:ring-[#8D6E63]"
+                            >
+                              <option value="names">1. Names (Tên riêng)</option>
+                              <option value="vietphrase">2. Vietphrase (Chung)</option>
+                              <option value="nouns">3. Danh từ (Nouns)</option>
+                              <option value="suffixes">4. Hậu từ (Suffixes)</option>
+                              <option value="pronouns">5. Pronouns (Xưng hô)</option>
+                              <option value="lacviet">6. Lạc Việt (Giải nghĩa)</option>
+                              <option value="other">7. Khác (Bổ trợ)</option>
+                            </select>
+                          </div>
+                          <span className="font-mono text-[9px] font-medium text-[#5D4037] bg-[#EFE5D9] px-1.5 py-0.5 rounded">
                             {file.wordCount.toLocaleString()} từ
                           </span>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (window.confirm(`Bạn có chắc muốn xóa file "${file.name}" khỏi từ điển?`)) {
-                                vietphraseEngine.removeFile(file.id);
-                              }
-                            }}
-                            className="text-[#A1887F] hover:text-red-600 p-0.5 rounded transition-colors"
-                            title="Xóa file này"
-                          >
-                            <Trash2 size={12} />
-                          </button>
                         </div>
                       </div>
                     ))}
@@ -526,7 +602,7 @@ export const DictionarySidebar: React.FC<DictionarySidebarProps> = ({
                     <button
                       type="button"
                       onClick={() => {
-                        if (window.confirm("⚠️ Bạn có chắc muốn XÓA TẤT CẢ các file Vietphrase đã nạp?")) {
+                        if (window.confirm("Bạn có chắc muốn XÓA TẤT CẢ các file Vietphrase đã nạp?")) {
                           vietphraseEngine.clearAllFiles();
                         }
                       }}
@@ -538,8 +614,8 @@ export const DictionarySidebar: React.FC<DictionarySidebarProps> = ({
                   )}
                 </div>
 
-                <p className="text-[9px] text-[#8D6E63] mt-1.5 italic leading-tight">
-                    * Bạn có thể chọn <strong>nhiều file cùng lúc</strong> (Vietphrase.txt, Names.txt, PhuTu.txt, LuatNhan.txt...). Dữ liệu tự động lưu ngoại tuyến và gộp vào từ điển edit.
+                <p className="text-[9px] text-[#8D6E63] mt-1.5 leading-tight">
+                    * <strong>Hỗ trợ chuẩn QuickTrans 2025:</strong> Tự động phân tầng ưu tiên (Names -&gt; Vietphrase -&gt; Danh từ -&gt; Hậu từ -&gt; Pronouns -&gt; Lạc Việt). Các cú pháp quy tắc của LuatNhan được tự động lọc bỏ để bản dịch chuẩn xác, không bị lẫn lộn nghĩa.
                 </p>
                 <input 
                     type="file" 
@@ -549,6 +625,84 @@ export const DictionarySidebar: React.FC<DictionarySidebarProps> = ({
                     multiple
                     onChange={handleMultipleFilesUpload} 
                 />
+             </div>
+
+             {/* KHỐI TRA CỨU TỪ ĐIỂN & LẠC VIỆT TRỰC TIẾP */}
+             <div className="mb-4 bg-white border border-[#D7CCC8] rounded-lg p-3">
+                <label className="text-[10px] font-bold text-[#5D4037] uppercase flex items-center justify-between mb-1.5">
+                  <span className="flex items-center gap-1">
+                    <Search size={12} /> Tra cứu Lạc Việt & Vietphrase
+                  </span>
+                  {vietphraseEngine.hasLacViet() ? (
+                    <span className="text-[8.5px] text-green-700 bg-green-50 px-1.5 py-0.5 rounded font-mono border border-green-200">
+                      Đã có file Lạc Việt ({vietphraseEngine.getStats().lacvietLookup.toLocaleString()} mục)
+                    </span>
+                  ) : (
+                    <span className="text-[8.5px] text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded font-mono border border-amber-200">
+                      Chưa nạp file Lạc Việt
+                    </span>
+                  )}
+                </label>
+
+                <div className="flex gap-1.5 mb-2">
+                  <input
+                    type="text"
+                    placeholder="Nhập chữ/từ Hán cần tra (VD: 意, 沈, 跑...)"
+                    value={quickLookupQuery}
+                    onChange={(e) => {
+                      setQuickLookupQuery(e.target.value);
+                      handleExecuteQuickLookup(e.target.value);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleExecuteQuickLookup(quickLookupQuery);
+                    }}
+                    className="flex-1 bg-[#FAF8F5] border border-[#D7CCC8] rounded px-2 py-1 text-xs text-[#3E2723] font-serif-sc outline-none focus:border-[#8D6E63] focus:bg-white"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleExecuteQuickLookup(quickLookupQuery)}
+                    className="px-2.5 py-1 bg-[#5D4037] text-white hover:bg-[#3E2723] rounded text-xs font-bold transition-colors cursor-pointer"
+                  >
+                    Tra
+                  </button>
+                </div>
+
+                {quickLookupResult && (
+                  <div className="bg-[#FAF8F5] p-2 rounded border border-[#D7CCC8]/80 text-xs space-y-2 animate-in fade-in duration-150">
+                    <div className="flex items-center justify-between border-b border-[#EFEBE9] pb-1">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-sm font-serif-sc font-bold text-[#3E2723]">
+                          {quickLookupResult.term}
+                        </span>
+                        {quickLookupResult.layers.length > 0 && (
+                          <span className="text-[8px] bg-[#EFEBE9] text-[#5D4037] px-1 py-0.5 rounded font-mono border border-[#D7CCC8]">
+                            {quickLookupResult.layers.join(' • ')}
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-xs font-bold text-[#5D4037] bg-[#FFF8E1] px-1.5 py-0.5 rounded border border-[#D7CCC8]">
+                        -&gt; {quickLookupResult.vietphrase || '(Chưa có nghĩa)'}
+                      </span>
+                    </div>
+
+                    <div>
+                      <div className="text-[9px] font-bold text-[#5D4037] uppercase tracking-wider mb-1 flex items-center gap-1">
+                        Giải nghĩa Lạc Việt:
+                      </div>
+                      {quickLookupResult.lacvietDetails ? (
+                        <div className="text-[10px] text-[#4E342E] max-h-48 overflow-y-auto whitespace-pre-line leading-relaxed font-sans bg-white p-2 rounded border border-[#EFEBE9] select-text">
+                          {quickLookupResult.lacvietDetails.replace(/\\n/g, '\n').replace(/\\t/g, '  ')}
+                        </div>
+                      ) : (
+                        <div className="text-[10px] text-[#A1887F] italic bg-white p-2 rounded border border-[#EFEBE9]">
+                          {vietphraseEngine.hasLacViet()
+                            ? "Không tìm thấy mục từ này trong file Lạc Việt đã nạp."
+                            : "Chưa có file Lạc Việt. Bạn hãy nạp file LacViet.txt ở khung bên trên rồi chọn tầng Lạc Việt."}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
              </div>
 
              {/* CLOUD SYNC SECTION */}
@@ -653,7 +807,7 @@ export const DictionarySidebar: React.FC<DictionarySidebarProps> = ({
                  <button 
                    onClick={async () => {
                      if (!bulkText.trim()) return;
-                     if (!window.confirm(`⚠️ Bạn có chắc chắn muốn GHI ĐÈ TOÀN BỘ từ vựng của bộ truyện này bằng danh sách vừa dán?\n(Tất cả từ cũ của bộ truyện này sẽ được thay thế bằng danh sách mới)`)) {
+                     if (!window.confirm(`Bạn có chắc chắn muốn GHI ĐÈ TOÀN BỘ từ vựng của bộ truyện này bằng danh sách vừa dán?\n(Tất cả từ cũ của bộ truyện này sẽ được thay thế bằng danh sách mới)`)) {
                        return;
                      }
                      

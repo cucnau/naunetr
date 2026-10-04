@@ -444,7 +444,7 @@ export const ShortcutModal: React.FC<ShortcutModalProps> = ({
               </div>
             </form>
             <div className="mt-1.5 text-[11px] text-[#8D6E63] italic">
-              💡 Khi gõ từ viết tắt và nhấn <kbd className="px-1 py-0.5 bg-gray-100 border border-gray-300 rounded text-[10px] font-mono">Dấu cách</kbd>, <kbd className="px-1 py-0.5 bg-gray-100 border border-gray-300 rounded text-[10px] font-mono">Enter</kbd> hoặc dấu câu, từ sẽ tự động bung ra đầy đủ. Hỗ trợ thông minh: <span className="font-mono">Xh</span> → <span className="font-semibold">Xe hơi</span>, <span className="font-mono">XH</span> → <span className="font-semibold">XE HƠI</span>.
+              Khi gõ từ viết tắt và nhấn <kbd className="px-1 py-0.5 bg-gray-100 border border-gray-300 rounded text-[10px] font-mono">Dấu cách</kbd>, <kbd className="px-1 py-0.5 bg-gray-100 border border-gray-300 rounded text-[10px] font-mono">Enter</kbd> hoặc dấu câu, từ sẽ tự động bung ra đầy đủ. Hỗ trợ thông minh: <span className="font-mono">Xh</span> -&gt; <span className="font-semibold">Xe hơi</span>, <span className="font-mono">XH</span> -&gt; <span className="font-semibold">XE HƠI</span>.
             </div>
           </div>
 
@@ -458,7 +458,7 @@ export const ShortcutModal: React.FC<ShortcutModalProps> = ({
                 <FileText size={14} /> Import hàng loạt / Ghi đè từ Excel ({shortcuts.length} từ)
               </span>
               <span className="text-[11px] text-[#8D6E63] underline">
-                {showBulk ? 'Thu gọn ▲' : 'Mở rộng dán nhiều từ ▼'}
+                {showBulk ? 'Thu gọn' : 'Mở rộng dán nhiều từ'}
               </span>
             </button>
 

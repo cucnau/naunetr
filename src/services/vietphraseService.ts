@@ -1,23 +1,119 @@
-
-import { CustomTerm, VietphraseFileItem } from "../types";
+import { CustomTerm, VietphraseFileItem, VietphraseCategory } from "../types";
 import { db } from "./db";
 
-export interface TrieNode {
-  children: Map<string, TrieNode>;
-  value?: string; // Nghĩa tiếng Việt
+export function detectVietphraseCategory(filename: string): VietphraseCategory {
+  const lower = filename.toLowerCase();
+
+  // 1. Hậu từ / Danh từ hậu từ / Phụ từ / Hậu tố
+  if (
+    lower.includes('hậu từ') || lower.includes('hautu') || lower.includes('hau_tu') ||
+    lower.includes('suffix') || lower.includes('hậu tố') || lower.includes('hauto') ||
+    lower.includes('phụ từ') || lower.includes('phutu')
+  ) {
+    return 'suffixes';
+  }
+
+  // 2. Danh từ (Nouns) - nếu không chứa hậu từ
+  if (
+    lower.includes('danh từ') || lower.includes('danhtu') || lower.includes('danh_tu') ||
+    lower.includes('noun')
+  ) {
+    return 'nouns';
+  }
+
+  // 3. Names (Tên riêng, nhân vật, địa danh)
+  if (lower.includes('name') || lower.includes('tên') || lower.includes('ten') || lower.includes('nhanvat') || lower.includes('nhân vật')) {
+    return 'names';
+  }
+
+  // 4. Pronouns (Đại từ nhân xưng, xưng hô)
+  if (lower.includes('pronoun') || lower.includes('đại từ') || lower.includes('daitu') || lower.includes('xưng') || lower.includes('xungho')) {
+    return 'pronouns';
+  }
+
+  // 5. Lạc Việt / Hán Việt
+  if (lower.includes('lacviet') || lower.includes('lạc việt') || lower.includes('lac_viet')) {
+    return 'lacviet';
+  }
+
+  // 6. Vietphrase chung
+  if (lower.includes('vietphrase') || lower.includes('phrase') || lower.includes('vp')) {
+    return 'vietphrase';
+  }
+
+  return 'other';
 }
+
+// Hàm lọc sạch ký tự xuống dòng / tab rác trong file từ điển thông thường
+export function cleanDictionaryValue(val: string): string {
+  if (!val) return "";
+  return val.split(/[\r\n\t]|\\n|\\t/)[0].trim();
+}
+
+// Hàm bóc tách âm Hán Việt / từ ngắn gọn sạch sẽ từ định nghĩa chi tiết của Lạc Việt
+export function extractCleanLacVietWord(raw: string): string {
+  if (!raw) return "";
+
+  // 1. Nếu có "Hán Việt: <từ>", ưu tiên trích xuất âm Hán Việt chuẩn xác
+  const hanVietMatch = raw.match(/Hán\s*Việt\s*:\s*([^\\\r\n\t;/,+\[\]]+)/i);
+  if (hanVietMatch && hanVietMatch[1] && hanVietMatch[1].trim()) {
+    const hv = hanVietMatch[1].trim();
+    return hv.split(/[,;\s]+/)[0].toLowerCase();
+  }
+
+  // 2. Tách theo dấu gạch chéo / nếu có nhiều nghĩa
+  let firstPart = raw.split('/')[0].trim();
+
+  // 3. Cắt bỏ hoàn toàn các phần chú thích từ điển từ ký tự +, [, (, \, \n, \t, số thứ tự
+  firstPart = firstPart.split(/\+|\[|\{|\(|\n|\r|\t|\\n|\\t/)[0].trim();
+
+  // 4. Cắt theo dấu phẩy hoặc chấm phẩy
+  firstPart = firstPart.split(/[,;]/)[0].trim();
+
+  // 5. Nếu từ vẫn quá dài (> 15 ký tự) thì chỉ lấy 1 từ đầu tiên
+  if (firstPart.length > 15) {
+    const words = firstPart.split(/\s+/);
+    if (words.length > 0) return words[0];
+  }
+
+  return firstPart;
+}
+
+export const VIETPHRASE_CATEGORY_CONFIG: Record<VietphraseCategory, { label: string; priorityNum: number; badgeClass: string; desc: string }> = {
+  names: { label: 'Names (Tên riêng)', priorityNum: 1, badgeClass: 'bg-amber-100 text-amber-900 border-amber-300', desc: 'Tên người, địa danh (Ưu tiên cao nhất)' },
+  vietphrase: { label: 'Vietphrase (Chung)', priorityNum: 2, badgeClass: 'bg-emerald-100 text-emerald-900 border-emerald-300', desc: 'Từ vựng chung (Cụm dài đến ngắn)' },
+  nouns: { label: 'Danh từ (Nouns)', priorityNum: 3, badgeClass: 'bg-indigo-100 text-indigo-900 border-indigo-300', desc: 'Danh từ, chức vị, thuật ngữ' },
+  suffixes: { label: 'Hậu từ (Suffixes)', priorityNum: 4, badgeClass: 'bg-rose-100 text-rose-900 border-rose-300', desc: 'Hậu từ, hậu tố danh từ (ca, tỷ, đệ, muội, môn, phái, thành, sơn...)' },
+  pronouns: { label: 'Pronouns (Xưng hô)', priorityNum: 5, badgeClass: 'bg-blue-100 text-blue-900 border-blue-300', desc: 'Đại từ nhân xưng' },
+  lacviet: { label: 'Lạc Việt (Tra cứu)', priorityNum: 6, badgeClass: 'bg-purple-100 text-purple-900 border-purple-300', desc: 'Từ điển tra nghĩa chi tiết & âm Hán Việt' },
+  other: { label: 'Khác (Bổ trợ)', priorityNum: 7, badgeClass: 'bg-stone-100 text-stone-800 border-stone-300', desc: 'Quy tắc / bổ trợ' }
+};
 
 class VietphraseEngine {
   private files: VietphraseFileItem[] = [];
-  private dictionary: Map<string, string>;
-  private maxKeyLength: number;
+  
+  // Layered Maps for Strict Priority Execution
+  private namesMap: Map<string, string> = new Map();
+  private vietphraseMap: Map<string, string> = new Map();
+  private nounsMap: Map<string, string> = new Map();
+  private suffixesMap: Map<string, string> = new Map();
+  private pronounsMap: Map<string, string> = new Map();
+  private lacvietMap: Map<string, string> = new Map();
+  private lacvietRawLookupMap: Map<string, string> = new Map(); // Lưu nguyên văn giải nghĩa để tra cứu
+  private otherMap: Map<string, string> = new Map();
+
+  private maxNamesLength: number = 0;
+  private maxVietphraseLength: number = 0;
+  private maxNounsLength: number = 0;
+  private maxSuffixesLength: number = 0;
+  private maxPronounsLength: number = 0;
+  private maxLacvietLength: number = 0;
+  private maxOtherLength: number = 0;
+
   private isLoaded: boolean = false;
   private listeners: Set<() => void> = new Set();
 
-  constructor() {
-    this.dictionary = new Map();
-    this.maxKeyLength = 0;
-  }
+  constructor() {}
 
   // Đăng ký nhận sự kiện thay đổi dữ liệu từ điển
   subscribe(listener: () => void) {
@@ -55,14 +151,18 @@ class VietphraseEngine {
             wordCount: lines.length,
             content: legacyContent,
             enabled: true,
-            uploadedAt: Date.now()
+            uploadedAt: Date.now(),
+            fileType: 'vietphrase'
           }];
           await db.saveVietphraseFiles(savedFiles);
-          console.log("Đã di chuyển dữ liệu Vietphrase cũ sang danh sách file đa năng");
         }
       }
 
-      this.files = savedFiles || [];
+      this.files = (savedFiles || []).map(f => ({
+        ...f,
+        fileType: f.fileType || detectVietphraseCategory(f.name)
+      }));
+
       this.rebuildDictionary();
     } catch (e) {
       console.error("Vietphrase init error", e);
@@ -79,7 +179,90 @@ class VietphraseEngine {
 
   // Lấy số lượng từ hiện tại trong từ điển đang hoạt động
   getSize(): number {
-    return this.dictionary.size;
+    return (
+      this.namesMap.size +
+      this.vietphraseMap.size +
+      this.nounsMap.size +
+      this.suffixesMap.size +
+      this.pronounsMap.size +
+      this.lacvietMap.size +
+      this.otherMap.size
+    );
+  }
+
+  getStats() {
+    return {
+      names: this.namesMap.size,
+      vietphrase: this.vietphraseMap.size,
+      nouns: this.nounsMap.size,
+      suffixes: this.suffixesMap.size,
+      pronouns: this.pronounsMap.size,
+      lacviet: this.lacvietMap.size,
+      lacvietLookup: this.lacvietRawLookupMap.size,
+      other: this.otherMap.size,
+      total: this.getSize()
+    };
+  }
+
+  // Lấy giải nghĩa Lạc Việt chi tiết để tra cứu khi người dùng bấm vào từ hoặc bôi đen
+  getLacVietDetails(term: string): string | null {
+    if (!term) return null;
+    const clean = term.trim();
+    if (!clean) return null;
+
+    // 1. Tìm chính xác cả cụm từ
+    if (this.lacvietRawLookupMap.has(clean)) {
+      return this.lacvietRawLookupMap.get(clean) || null;
+    }
+
+    // 2. Nếu là cụm từ gồm nhiều ký tự tiếng Trung, tra cứu chi tiết từng ký tự
+    const chars = Array.from(clean).filter(c => /[\u4e00-\u9fa5]/.test(c));
+    if (chars.length > 1) {
+      const charResults: string[] = [];
+      for (const ch of chars) {
+        if (this.lacvietRawLookupMap.has(ch)) {
+          const def = this.lacvietRawLookupMap.get(ch);
+          charResults.push(`【${ch}】:\n${def}`);
+        }
+      }
+      if (charResults.length > 0) {
+        return charResults.join('\n\n');
+      }
+    }
+
+    return null;
+  }
+
+  // Kiểm tra xem đã có từ điển tra cứu Lạc Việt được nạp chưa
+  hasLacViet(): boolean {
+    return this.lacvietRawLookupMap.size > 0;
+  }
+
+  // Tra cứu toàn diện một từ bất kỳ qua tất cả các tầng từ điển
+  lookupComprehensive(term: string): {
+    term: string;
+    vietphrase: string;
+    lacvietDetails: string | null;
+    layers: string[];
+  } {
+    const clean = (term || '').trim();
+    const vp = this.translate(clean);
+    const lacviet = this.getLacVietDetails(clean);
+
+    const layers: string[] = [];
+    if (this.namesMap.has(clean)) layers.push('Names (Tên riêng)');
+    if (this.vietphraseMap.has(clean)) layers.push('Vietphrase (Chung)');
+    if (this.nounsMap.has(clean)) layers.push('Danh từ');
+    if (this.suffixesMap.has(clean)) layers.push('Hậu từ');
+    if (this.pronounsMap.has(clean)) layers.push('Đại từ');
+    if (this.lacvietMap.has(clean) || this.lacvietRawLookupMap.has(clean)) layers.push('Lạc Việt');
+
+    return {
+      term: clean,
+      vietphrase: vp,
+      lacvietDetails: lacviet,
+      layers
+    };
   }
 
   // Lấy số file đang kích hoạt
@@ -87,53 +270,138 @@ class VietphraseEngine {
     return this.files.filter(f => f.enabled).length;
   }
 
-  // Phân tích số từ trong một nội dung file
+  // Phân tích số từ hợp lệ trong một nội dung file
   private countWordsInContent(content: string): number {
     let count = 0;
     const lines = content.split(/\r?\n/);
     for (const line of lines) {
-      if (!line.trim() || line.startsWith('#')) continue;
-      if (line.includes('=')) {
-        count++;
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('//')) continue;
+      const eqIdx = trimmed.indexOf('=');
+      if (eqIdx > 0) {
+        const key = trimmed.substring(0, eqIdx).trim();
+        // Bỏ qua các dòng quy tắc đặc biệt của LuatNhan
+        if (!key.includes('{') && !key.includes('}') && !key.includes('[') && !key.includes(']')) {
+          count++;
+        }
       }
     }
     return count;
   }
 
-  // Tái tạo lại từ điển gộp từ tất cả các file đang kích hoạt (enabled: true)
+  // Tái tạo lại từ điển gộp từ tất cả các file đang kích hoạt theo Phân Tầng Ưu Tiên
   private rebuildDictionary() {
-    this.dictionary.clear();
-    this.maxKeyLength = 0;
+    this.namesMap.clear();
+    this.vietphraseMap.clear();
+    this.nounsMap.clear();
+    this.suffixesMap.clear();
+    this.pronounsMap.clear();
+    this.lacvietMap.clear();
+    this.lacvietRawLookupMap.clear();
+    this.otherMap.clear();
+
+    this.maxNamesLength = 0;
+    this.maxVietphraseLength = 0;
+    this.maxNounsLength = 0;
+    this.maxSuffixesLength = 0;
+    this.maxPronounsLength = 0;
+    this.maxLacvietLength = 0;
+    this.maxOtherLength = 0;
 
     for (const file of this.files) {
       if (!file.enabled) continue;
 
+      const category: VietphraseCategory = file.fileType || detectVietphraseCategory(file.name);
+      let targetMap: Map<string, string>;
+      let setTargetMax: (len: number) => void;
+
+      switch (category) {
+        case 'names':
+          targetMap = this.namesMap;
+          setTargetMax = (len) => { this.maxNamesLength = Math.max(this.maxNamesLength, len); };
+          break;
+        case 'vietphrase':
+          targetMap = this.vietphraseMap;
+          setTargetMax = (len) => { this.maxVietphraseLength = Math.max(this.maxVietphraseLength, len); };
+          break;
+        case 'nouns':
+          targetMap = this.nounsMap;
+          setTargetMax = (len) => { this.maxNounsLength = Math.max(this.maxNounsLength, len); };
+          break;
+        case 'suffixes':
+          targetMap = this.suffixesMap;
+          setTargetMax = (len) => { this.maxSuffixesLength = Math.max(this.maxSuffixesLength, len); };
+          break;
+        case 'pronouns':
+          targetMap = this.pronounsMap;
+          setTargetMax = (len) => { this.maxPronounsLength = Math.max(this.maxPronounsLength, len); };
+          break;
+        case 'lacviet':
+          targetMap = this.lacvietMap;
+          setTargetMax = (len) => { this.maxLacvietLength = Math.max(this.maxLacvietLength, len); };
+          break;
+        default:
+          targetMap = this.otherMap;
+          setTargetMax = (len) => { this.maxOtherLength = Math.max(this.maxOtherLength, len); };
+          break;
+      }
+
       const lines = file.content.split(/\r?\n/);
       for (const line of lines) {
-        if (!line.trim() || line.startsWith('#')) continue;
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('//')) continue;
 
-        const parts = line.split('=');
-        if (parts.length >= 2) {
-          const key = parts[0].trim();
-          const value = parts[1].trim();
+        const eqIdx = trimmed.indexOf('=');
+        if (eqIdx > 0) {
+          const key = trimmed.substring(0, eqIdx).trim();
+          const value = trimmed.substring(eqIdx + 1).trim();
+
+          // Lọc bỏ ký hiệu quy tắc ngữ pháp của LuatNhan (như [Họ], {0}, v.v.)
+          if (key.includes('{') || key.includes('}') || key.includes('[') || key.includes(']')) {
+            continue;
+          }
+
           if (key && value) {
-            this.dictionary.set(key, value);
-            if (key.length > this.maxKeyLength) {
-              this.maxKeyLength = key.length;
+            // XỬ LÝ ĐẶC BIỆT CHO LẠC VIỆT:
+            // File Lạc Việt chứa giải nghĩa từ điển chi tiết (pinyin, âm Hán Việt, định nghĩa nhiều dòng)
+            // Ta lưu bản gốc vào lacvietRawLookupMap để phục vụ tra cứu popup
+            // Và lọc lấy duy nhất âm Hán Việt / từ sạch vào lacvietMap để nếu fallback dịch câu thì KHÔNG bị phá nát câu văn!
+            if (category === 'lacviet') {
+              if (!this.lacvietRawLookupMap.has(key)) {
+                this.lacvietRawLookupMap.set(key, value);
+              }
+              const cleanWord = extractCleanLacVietWord(value);
+              if (cleanWord && !this.lacvietMap.has(key)) {
+                this.lacvietMap.set(key, cleanWord);
+                setTargetMax(key.length);
+              }
+              continue;
+            }
+
+            // Các tầng thông thường: làm sạch các ký tự xuống dòng / tab ngẫu nhiên
+            const cleanVal = cleanDictionaryValue(value);
+            if (cleanVal) {
+              if (!targetMap.has(key)) {
+                targetMap.set(key, cleanVal);
+                setTargetMax(key.length);
+              }
             }
           }
         }
       }
     }
 
-    console.log(`Đã nạp ${this.dictionary.size} từ từ ${this.getActiveFilesCount()}/${this.files.length} file Vietphrase.`);
+    console.log(
+      `[VietphraseEngine] Đã nạp ${this.getSize()} từ: Names (${this.namesMap.size}), Vietphrase (${this.vietphraseMap.size}), Danh từ (${this.nounsMap.size}), Hậu từ (${this.suffixesMap.size}), Pronouns (${this.pronounsMap.size}), LacViet (${this.lacvietMap.size}), Tra cứu Lạc Việt (${this.lacvietRawLookupMap.size}), Khác (${this.otherMap.size})`
+    );
   }
 
-  // Nạp thêm nhiều file cùng lúc
-  async addFiles(newFiles: { name: string; content: string; size?: number }[]): Promise<{ addedCount: number; totalWords: number }> {
+  // Nạp thêm nhiều file cùng lúc với tự động nhận diện tầng ưu tiên
+  async addFiles(newFiles: { name: string; content: string; size?: number; fileType?: VietphraseCategory }[]): Promise<{ addedCount: number; totalWords: number }> {
     const createdItems: VietphraseFileItem[] = [];
 
     for (const item of newFiles) {
+      const detectedType = item.fileType || detectVietphraseCategory(item.name);
       const wordCount = this.countWordsInContent(item.content);
       const fileItem: VietphraseFileItem = {
         id: 'vp_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
@@ -142,7 +410,8 @@ class VietphraseEngine {
         wordCount: wordCount,
         content: item.content,
         enabled: true,
-        uploadedAt: Date.now()
+        uploadedAt: Date.now(),
+        fileType: detectedType
       };
       createdItems.push(fileItem);
     }
@@ -154,8 +423,41 @@ class VietphraseEngine {
 
     return {
       addedCount: createdItems.length,
-      totalWords: this.dictionary.size
+      totalWords: this.getSize()
     };
+  }
+
+  // Đổi phân loại tầng ưu tiên cho một file
+  async setFileType(id: string, fileType: VietphraseCategory): Promise<void> {
+    this.files = this.files.map(f => {
+      if (f.id === id) {
+        return { ...f, fileType };
+      }
+      return f;
+    });
+
+    this.rebuildDictionary();
+    await db.saveVietphraseFiles(this.files);
+    this.notify();
+  }
+
+  // Di chuyển thứ tự file lên hoặc xuống
+  async moveFile(id: string, direction: 'up' | 'down'): Promise<void> {
+    const index = this.files.findIndex(f => f.id === id);
+    if (index === -1) return;
+    if (direction === 'up' && index === 0) return;
+    if (direction === 'down' && index === this.files.length - 1) return;
+
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    const newFiles = [...this.files];
+    const temp = newFiles[index];
+    newFiles[index] = newFiles[targetIndex];
+    newFiles[targetIndex] = temp;
+
+    this.files = newFiles;
+    this.rebuildDictionary();
+    await db.saveVietphraseFiles(this.files);
+    this.notify();
   }
 
   // Bật/Tắt một file
@@ -183,8 +485,7 @@ class VietphraseEngine {
   // Xóa toàn bộ file
   async clearAllFiles(): Promise<void> {
     this.files = [];
-    this.dictionary.clear();
-    this.maxKeyLength = 0;
+    this.rebuildDictionary();
     await db.saveVietphraseFiles([]);
     this.notify();
   }
@@ -199,87 +500,214 @@ class VietphraseEngine {
       wordCount,
       content,
       enabled: true,
-      uploadedAt: Date.now()
+      uploadedAt: Date.now(),
+      fileType: 'vietphrase'
     };
     
-    // Ghi đè hoặc thêm vào danh sách
     this.files = [newFile];
     this.rebuildDictionary();
     if (save) {
       await db.saveVietphraseFiles(this.files);
     }
     this.notify();
-    return this.dictionary.size;
+    return this.getSize();
   }
 
-  // Thuật toán Forward Maximum Matching (Dịch ưu tiên cụm dài nhất)
-  // Cập nhật: Ưu tiên Custom Terms
+  // Thuật toán Phân Tầng Ưu Tiên (Multi-Tier Priority Forward Maximum Matching)
+  // Tầng 1: Custom Map (Từ điển riêng của truyện)
+  // Tầng 2: Names Map (Tên người, địa danh - Names.txt)
+  // Tầng 3: Vietphrase Map (Từ vựng chung cụm dài đến ngắn - Vietphrase.txt)
+  // Tầng 4: Nouns Map (Danh từ - DanhTu.txt)
+  // Tầng 5: Suffixes Map (Hậu từ / Danh từ hậu từ - HauTu.txt / ca, tỷ, môn, phái, thành, sơn...)
+  // Tầng 6: Pronouns Map (Đại từ xưng hô - Pronouns.txt)
+  // Tầng 7: LacViet Map (Từ điển Hán Việt / Lạc Việt đã được lọc sạch)
+  // Tầng 8: Other Map (Các file bổ trợ khác)
   translate(text: string, customTerms: CustomTerm[] | Map<string, string> = []): string {
-    // 1. Prepare Custom Map
+    if (!text) return "";
+
+    // 1. Chuẩn bị Custom Map của truyện
     let customMap: Map<string, string>;
     let maxCustomLength = 0;
 
     if (customTerms instanceof Map) {
-        customMap = customTerms;
-        for (const key of customMap.keys()) {
-            if (key.length > maxCustomLength) maxCustomLength = key.length;
-        }
+      customMap = customTerms;
+      for (const key of customMap.keys()) {
+        if (key.length > maxCustomLength) maxCustomLength = key.length;
+      }
     } else {
-        customMap = new Map<string, string>();
-        for (const t of customTerms) {
-            if (t.term && t.meaning) {
-                customMap.set(t.term.trim(), t.meaning.trim());
-                if (t.term.trim().length > maxCustomLength) maxCustomLength = t.term.trim().length;
-            }
+      customMap = new Map<string, string>();
+      for (const t of customTerms) {
+        if (t.term && t.meaning) {
+          const k = t.term.trim();
+          customMap.set(k, t.meaning.trim());
+          if (k.length > maxCustomLength) maxCustomLength = k.length;
         }
+      }
     }
 
-    if (this.dictionary.size === 0 && customMap.size === 0) return text;
+    if (this.getSize() === 0 && customMap.size === 0) return text;
 
     let result = "";
     let i = 0;
     const n = text.length;
-    const globalMaxLen = Math.max(this.maxKeyLength, maxCustomLength);
+
+    // Hàm phụ trợ kiểm tra và tiêu thụ Hậu từ (Suffixes) ngay sau Tên người hoặc Danh từ
+    const tryConsumeSuffix = () => {
+      if (this.maxSuffixesLength > 0 && i < n) {
+        const sLimit = Math.min(n, i + this.maxSuffixesLength);
+        for (let sj = sLimit; sj > i; sj--) {
+          const sSub = text.substring(i, sj);
+          if (this.suffixesMap.has(sSub)) {
+            let sMeaning = this.suffixesMap.get(sSub) || sSub;
+            if (sMeaning.includes('/')) sMeaning = sMeaning.split('/')[0];
+            result += sMeaning + " ";
+            i = sj;
+            break;
+          }
+        }
+      }
+    };
 
     while (i < n) {
       let matched = false;
-      // Thử tìm từ dài nhất bắt đầu từ vị trí i
-      const limit = Math.min(n, i + globalMaxLen);
-      
-      for (let j = limit; j > i; j--) {
-        const sub = text.substring(i, j);
-        
-        // ƯU TIÊN 1: Kiểm tra Custom Dictionary trước
-        if (customMap.has(sub)) {
-             result += " " + customMap.get(sub) + " ";
-             i = j;
-             matched = true;
-             break;
-        }
 
-        // ƯU TIÊN 2: Kiểm tra Vietphrase Dictionary
-        if (this.dictionary.has(sub)) {
-          // Tìm thấy cụm từ trong từ điển
-          let meaning = this.dictionary.get(sub) || sub;
-          // Xử lý nếu nghĩa có nhiều lựa chọn (VD: Nghĩa1/Nghĩa2) -> lấy nghĩa đầu
-          if (meaning.includes('/')) {
-              meaning = meaning.split('/')[0];
+      // TẦNG 1: Kho từ riêng của truyện (Ưu tiên tuyệt đối)
+      if (maxCustomLength > 0) {
+        const limit = Math.min(n, i + maxCustomLength);
+        for (let j = limit; j > i; j--) {
+          const sub = text.substring(i, j);
+          if (customMap.has(sub)) {
+            result += " " + customMap.get(sub) + " ";
+            i = j;
+            matched = true;
+            tryConsumeSuffix();
+            break;
           }
-          result += " " + meaning + " ";
-          i = j;
-          matched = true;
-          break;
+        }
+      }
+
+      // TẦNG 2: Names (Tên người, địa danh, bảo vật, công pháp)
+      if (!matched && this.maxNamesLength > 0) {
+        const limit = Math.min(n, i + this.maxNamesLength);
+        for (let j = limit; j > i; j--) {
+          const sub = text.substring(i, j);
+          if (this.namesMap.has(sub)) {
+            let meaning = this.namesMap.get(sub) || sub;
+            if (meaning.includes('/')) meaning = meaning.split('/')[0];
+            result += " " + meaning + " ";
+            i = j;
+            matched = true;
+            // Tự động kiểm tra và ghép Hậu từ (ví dụ Tiêu Viêm + ca -> Tiêu Viêm ca)
+            tryConsumeSuffix();
+            break;
+          }
+        }
+      }
+
+      // TẦNG 3: Vietphrase (Từ vựng chung - ưu tiên cụm dài nhất)
+      if (!matched && this.maxVietphraseLength > 0) {
+        const limit = Math.min(n, i + this.maxVietphraseLength);
+        for (let j = limit; j > i; j--) {
+          const sub = text.substring(i, j);
+          if (this.vietphraseMap.has(sub)) {
+            let meaning = this.vietphraseMap.get(sub) || sub;
+            if (meaning.includes('/')) meaning = meaning.split('/')[0];
+            result += " " + meaning + " ";
+            i = j;
+            matched = true;
+            break;
+          }
+        }
+      }
+
+      // TẦNG 4: Danh từ (Nouns - Danh từ chung, thuật ngữ, tước vị)
+      if (!matched && this.maxNounsLength > 0) {
+        const limit = Math.min(n, i + this.maxNounsLength);
+        for (let j = limit; j > i; j--) {
+          const sub = text.substring(i, j);
+          if (this.nounsMap.has(sub)) {
+            let meaning = this.nounsMap.get(sub) || sub;
+            if (meaning.includes('/')) meaning = meaning.split('/')[0];
+            result += " " + meaning + " ";
+            i = j;
+            matched = true;
+            // Tự động kiểm tra và ghép Hậu từ sau danh từ (ví dụ: thành chủ + phủ, tông chủ + điện)
+            tryConsumeSuffix();
+            break;
+          }
+        }
+      }
+
+      // TẦNG 5: Hậu từ (Suffixes - Danh từ hậu từ đứng độc lập hoặc sau các từ khác)
+      if (!matched && this.maxSuffixesLength > 0) {
+        const limit = Math.min(n, i + this.maxSuffixesLength);
+        for (let j = limit; j > i; j--) {
+          const sub = text.substring(i, j);
+          if (this.suffixesMap.has(sub)) {
+            let meaning = this.suffixesMap.get(sub) || sub;
+            if (meaning.includes('/')) meaning = meaning.split('/')[0];
+            result += " " + meaning + " ";
+            i = j;
+            matched = true;
+            break;
+          }
+        }
+      }
+
+      // TẦNG 6: Pronouns (Đại từ nhân xưng)
+      if (!matched && this.maxPronounsLength > 0) {
+        const limit = Math.min(n, i + this.maxPronounsLength);
+        for (let j = limit; j > i; j--) {
+          const sub = text.substring(i, j);
+          if (this.pronounsMap.has(sub)) {
+            let meaning = this.pronounsMap.get(sub) || sub;
+            if (meaning.includes('/')) meaning = meaning.split('/')[0];
+            result += " " + meaning + " ";
+            i = j;
+            matched = true;
+            break;
+          }
+        }
+      }
+
+      // TẦNG 7: LacViet (Từ điển Lạc Việt / Hán Việt dự phòng - đã được trích xuất âm ngắn gọn sạch bóng)
+      if (!matched && this.maxLacvietLength > 0) {
+        const limit = Math.min(n, i + this.maxLacvietLength);
+        for (let j = limit; j > i; j--) {
+          const sub = text.substring(i, j);
+          if (this.lacvietMap.has(sub)) {
+            let meaning = this.lacvietMap.get(sub) || sub;
+            if (meaning.includes('/')) meaning = meaning.split('/')[0];
+            result += " " + meaning + " ";
+            i = j;
+            matched = true;
+            break;
+          }
+        }
+      }
+
+      // TẦNG 8: Khác (Bổ trợ)
+      if (!matched && this.maxOtherLength > 0) {
+        const limit = Math.min(n, i + this.maxOtherLength);
+        for (let j = limit; j > i; j--) {
+          const sub = text.substring(i, j);
+          if (this.otherMap.has(sub)) {
+            let meaning = this.otherMap.get(sub) || sub;
+            if (meaning.includes('/')) meaning = meaning.split('/')[0];
+            result += " " + meaning + " ";
+            i = j;
+            matched = true;
+            break;
+          }
         }
       }
 
       if (!matched) {
-        // Không tìm thấy, giữ nguyên ký tự hiện tại
         result += text[i];
         i++;
       }
     }
 
-    // Chuẩn hóa khoảng trắng thừa
     return result.replace(/\s+/g, ' ').trim();
   }
 }

@@ -492,7 +492,7 @@ const EditableQuick = ({
           onBlur={handleBlur}
           onKeyDown={handleKeyDown}
           placeholder="Nhập Vietphrase..."
-          className={`w-full bg-transparent border-none outline-none resize-none overflow-hidden p-0 text-[#8D6E63] italic leading-[1.1] ${isFocusMode ? 'text-[10px] sm:text-[13px]' : 'text-[10px]'} focus:ring-0 m-0 block whitespace-normal min-h-[1.1em]`}
+          className={`w-full bg-transparent border-none outline-none resize-none overflow-hidden p-0 text-[#8D6E63] leading-[1.1] ${isFocusMode ? 'text-[10px] sm:text-[13px]' : 'text-[10px]'} focus:ring-0 m-0 block whitespace-normal min-h-[1.1em]`}
           style={{ fontWeight: 400, display: 'block', margin: 0 }}
           rows={1}
           spellCheck={false}
@@ -501,7 +501,7 @@ const EditableQuick = ({
         <div 
           onMouseDown={handleMouseDown}
           onClick={handleClick}
-          className={`${isFocusMode ? 'text-[10px] sm:text-[13px]' : 'text-[10px]'} text-[#8D6E63] leading-[1.1] opacity-70 italic break-words cursor-text hover:opacity-100 transition-opacity min-h-[1.1em]`}
+          className={`${isFocusMode ? 'text-[10px] sm:text-[13px]' : 'text-[10px]'} text-[#8D6E63] leading-[1.1] opacity-70 break-words cursor-text hover:opacity-100 transition-opacity min-h-[1.1em]`}
           title="Bấm vào để sửa Vietphrase trực tiếp"
         >
           {localText || <span className="opacity-40 not-italic text-[9px]">[+ Thêm Vietphrase]</span>}
@@ -599,7 +599,7 @@ const EditableDeepl = ({
           onBlur={handleBlur}
           onKeyDown={handleKeyDown}
           placeholder="Nhập GG/DeepL..."
-          className={`w-full bg-transparent border-none outline-none resize-none overflow-hidden p-0 text-[#A1887F] italic leading-[1.1] ${isFocusMode ? 'text-[8.5px] sm:text-[11.5px]' : 'text-[8.5px]'} focus:ring-0 m-0 block whitespace-normal min-h-[1.1em]`}
+          className={`w-full bg-transparent border-none outline-none resize-none overflow-hidden p-0 text-[#A1887F] leading-[1.1] ${isFocusMode ? 'text-[8.5px] sm:text-[11.5px]' : 'text-[8.5px]'} focus:ring-0 m-0 block whitespace-normal min-h-[1.1em]`}
           style={{ fontWeight: 400, display: 'block', margin: 0 }}
           rows={1}
           spellCheck={false}
@@ -608,7 +608,7 @@ const EditableDeepl = ({
         <div 
           onMouseDown={handleMouseDown}
           onClick={handleClick}
-          className={`${isFocusMode ? 'text-[8.5px] sm:text-[11.5px]' : 'text-[8.5px]'} text-[#A1887F] leading-[1.1] italic opacity-60 break-words cursor-text hover:opacity-90 transition-opacity min-h-[1.1em]`}
+          className={`${isFocusMode ? 'text-[8.5px] sm:text-[11.5px]' : 'text-[8.5px]'} text-[#A1887F] leading-[1.1] opacity-60 break-words cursor-text hover:opacity-90 transition-opacity min-h-[1.1em]`}
           title="Bấm vào để sửa GG/DeepL trực tiếp"
         >
           {localText || <span className="opacity-40 not-italic text-[8px] hover:opacity-100">[+ Thêm GG/DeepL]</span>}
@@ -1927,6 +1927,18 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
                             </div>
                         )}
 
+                        {/* Chi tiết từ điển Lạc Việt nếu có */}
+                        {vietphraseEngine.getLacVietDetails(activeVocab.item.term) && (
+                            <div className="p-1.5 bg-[#FAF8F5] rounded border border-[#D7CCC8]/80 text-[10px]">
+                                <div className="text-[8px] font-bold text-[#5D4037] uppercase tracking-wider mb-1 flex items-center gap-1">
+                                    Giải nghĩa Lạc Việt
+                                </div>
+                                <div className="text-[10px] text-[#4E342E] max-h-32 overflow-y-auto whitespace-pre-line leading-relaxed font-sans bg-white p-1.5 rounded border border-[#EFEBE9]">
+                                    {vietphraseEngine.getLacVietDetails(activeVocab.item.term)?.replace(/\\n/g, '\n').replace(/\\t/g, '  ')}
+                                </div>
+                            </div>
+                        )}
+
                         {/* Nút Thêm Nhanh dành cho Từ vựng (Chưa có trong kho từ vựng) */}
                         {activeVocab.type === 'vocab' && (
                             <div className="pt-2 border-t border-[#EFEBE9] space-y-1">
@@ -2112,8 +2124,8 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
           style={{ 
             left: `${popupCoords.left}px`, 
             top: `${popupCoords.top}px`, 
-            width: `${popupCoords.width}px`,
-            maxHeight: '380px'
+            width: `${Math.max(popupCoords.width, 320)}px`,
+            maxHeight: '480px'
           }}
         >
           {/* Header */}
@@ -2130,7 +2142,7 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
             </button>
           </div>
 
-          <div className="p-3.5 space-y-3 overflow-y-auto scrollbar-thin max-h-[300px]">
+          <div className="p-3.5 space-y-3 overflow-y-auto scrollbar-thin max-h-[410px]">
             {selectionPopup.type === 'idle' && (
               <>
                 <div className="space-y-2">
@@ -2146,6 +2158,31 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
                       {selectionPopup.vietphrase || <span className="opacity-40 italic font-normal text-[10px]">Không có trong từ điển thô</span>}
                     </div>
                   </div>
+
+                  {/* Giải nghĩa chi tiết từ điển Lạc Việt */}
+                  {(() => {
+                    const lvDetails = vietphraseEngine.getLacVietDetails(selectionPopup.text);
+                    if (lvDetails) {
+                      return (
+                        <div className="bg-[#FAF8F5] p-2 rounded border border-[#D7CCC8]/80 text-[10px] space-y-1">
+                          <div className="text-[8.5px] font-bold text-[#5D4037] uppercase tracking-wider flex items-center gap-1">
+                            Giải nghĩa Lạc Việt:
+                          </div>
+                          <div className="text-[10px] text-[#4E342E] max-h-40 overflow-y-auto whitespace-pre-line leading-relaxed font-sans bg-white p-2 rounded border border-[#EFEBE9] select-text">
+                            {lvDetails.replace(/\\n/g, '\n').replace(/\\t/g, '  ')}
+                          </div>
+                        </div>
+                      );
+                    }
+                    if (vietphraseEngine.hasLacViet()) {
+                      return (
+                        <div className="text-[9px] text-[#A1887F] italic bg-[#FAF8F5] px-2 py-1 rounded border border-[#EFEBE9]">
+                          (Không có mục từ này trong từ điển Lạc Việt đã nạp)
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
                 </div>
 
                 <div className="grid grid-cols-2 gap-2 pt-1 border-t border-[#EFEBE9]">
