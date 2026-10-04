@@ -6,6 +6,7 @@ import { getNovels, getChaptersFromCloud, saveChapterToCloud, bulkSaveChaptersTo
 import { auth } from './services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { vietphraseEngine } from './services/vietphraseService';
+import { extractBracketsOnly } from './services/bracketUtils';
 import { db } from './services/db'; // Import db service
 import { TranslationOutput } from './components/TranslationOutput';
 import { DictionarySidebar } from './components/DictionarySidebar';
@@ -1234,19 +1235,22 @@ useEffect(() => {
                  refDeepl = deeplLines[i] || "";
              }
 
+             const preEdit = preEditedLines[i] || "";
+             const brackets = extractBracketsOnly(line);
+
              return {
                  source: line,
-                 natural: preEditedLines[i] || "",
+                 natural: preEdit ? preEdit : brackets,
                  quick: vpSegments[i]?.quick || "",
                  deepl: refDeepl
               };
          });
       } else {
-         // Standard Edit Mode: Căn lề GG/DeepL làm tài liệu tham khảo, ô dịch để trống để người dùng tự điền
+         // Standard Edit Mode: Can le GG/DeepL lam tai lieu tham khao, o dich tu fill dau neu raw co 【】, 《》, …… hoac ——
          const deeplLines = alignTranslation(inputLines, session.deeplText || "");
          mergedSegments = inputLines.map((line, i) => ({
             source: line,
-            natural: "", // Để trống để người dùng tự điền
+            natural: extractBracketsOnly(line), // Tu fill dau 【】, 《》, ……, —— (chi dau), con lai de trong de nguoi dung tu dien
             quick: vpSegments[i]?.quick || "",
             deepl: deeplLines[i] || ""
          }));

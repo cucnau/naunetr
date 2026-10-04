@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import { TranslationResponse, VocabItem, CustomTerm, Character, TextShortcut } from '../types';
 import { Copy, Check, Info, X, Users, ClipboardList, CheckCircle2, FileDown, BookOpen, Undo2, Redo2, Search, Maximize2, Minimize2, ChevronLeft, ChevronRight, Loader2, Pencil, Trash2, Plus, UserPlus, BookA } from 'lucide-react';
 import { vietphraseEngine } from '../services/vietphraseService';
+import { extractBracketsOnly, shouldUpgradeBrackets } from '../services/bracketUtils';
 import { checkAndApplyShortcut, getStoredShortcuts } from '../services/shortcutService';
 // Deleted smartClassify import
 
@@ -102,6 +103,7 @@ const buildSearchRegex = (findText: string, matchCase: boolean, matchDiacritics:
 
 const EditableSegment = ({ 
     text, 
+    sourceText,
     onUpdate,
     isFocusMode,
     findText,
@@ -111,6 +113,7 @@ const EditableSegment = ({
     onEnterPress
 }: { 
     text: string; 
+    sourceText?: string;
     onUpdate: (val: string) => void;
     isFocusMode?: boolean;
     findText?: string;
@@ -119,7 +122,15 @@ const EditableSegment = ({
     novelId?: string;
     onEnterPress?: () => void;
 }) => {
-    const [localText, setLocalText] = useState(text);
+    const [localText, setLocalText] = useState(() => {
+        if (text) {
+            if (sourceText && shouldUpgradeBrackets(text, sourceText)) {
+                return extractBracketsOnly(sourceText);
+            }
+            return text;
+        }
+        return sourceText ? extractBracketsOnly(sourceText) : '';
+    });
     const [isFocused, setIsFocused] = useState(false);
     const [shortcuts, setShortcuts] = useState<TextShortcut[]>(() => getStoredShortcuts(novelId));
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -127,9 +138,19 @@ const EditableSegment = ({
     
     useEffect(() => {
         if (!isFocused) {
+            if (sourceText && shouldUpgradeBrackets(text, sourceText)) {
+                const brackets = extractBracketsOnly(sourceText);
+                if (brackets) {
+                    setLocalText(brackets);
+                    if (text !== brackets) {
+                        onUpdate(brackets);
+                    }
+                    return;
+                }
+            }
             setLocalText(text);
         }
-    }, [text, isFocused]);
+    }, [text, isFocused, sourceText, onUpdate]);
 
     useEffect(() => {
         setShortcuts(getStoredShortcuts(novelId));
@@ -214,8 +235,34 @@ const EditableSegment = ({
         onUpdate(e.target.value);
     };
 
-    const handleFocus = () => {
+    const handleFocus = (e: React.FocusEvent<HTMLTextAreaElement>) => {
         setIsFocused(true);
+        const val = e.target.value;
+        if (val === '【】' || val === '《》' || val === '【……】' || val === '【——】' || val === '《……》') {
+            setTimeout(() => {
+                if (textareaRef.current) {
+                    textareaRef.current.setSelectionRange(1, 1);
+                }
+            }, 10);
+        } else if (val.startsWith('【') && val.includes('】')) {
+            setTimeout(() => {
+                if (textareaRef.current) {
+                    textareaRef.current.setSelectionRange(1, 1);
+                }
+            }, 10);
+        } else if (val.startsWith('《') && val.includes('》')) {
+            setTimeout(() => {
+                if (textareaRef.current) {
+                    textareaRef.current.setSelectionRange(1, 1);
+                }
+            }, 10);
+        } else if (val === '……' || val === '——') {
+            setTimeout(() => {
+                if (textareaRef.current) {
+                    textareaRef.current.setSelectionRange(0, 0);
+                }
+            }, 10);
+        }
     };
 
     const regex = findText ? buildSearchRegex(findText, matchCase ?? false, matchDiacritics ?? true) : null;
@@ -747,6 +794,28 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
       console.error(e);
     }
   };
+
+  // Tu dong dien dau 【】, 《》, …… hoac —— vao o edit neu doan raw co chua cac dau nay va o edit dang trong hoac chi chua dau cu
+  useEffect(() => {
+    if (!data.segments || data.segments.length === 0 || !onUpdateAllSegments) return;
+
+    let hasChanges = false;
+    const newNaturals = data.segments.map(seg => {
+      const currentNat = seg.natural ?? '';
+      if (shouldUpgradeBrackets(currentNat, seg.source || '')) {
+        const brackets = extractBracketsOnly(seg.source || '');
+        if (brackets && brackets !== currentNat) {
+          hasChanges = true;
+          return brackets;
+        }
+      }
+      return currentNat;
+    });
+
+    if (hasChanges) {
+      onUpdateAllSegments(newNaturals);
+    }
+  }, [data.segments, onUpdateAllSegments]);
 
   // Subscribe to vietphrase changes to trigger re-renders
   useEffect(() => {
@@ -1705,6 +1774,7 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
                                       {/* Bản edit - Bấm chuột vào để sửa trực tiếp */}
                                       <EditableSegment 
                                         text={cleanNatural} 
+                                        sourceText={cleanSource}
                                         onUpdate={(val) => onUpdateSegment?.(idx, val)} 
                                         isFocusMode={isFocusMode} 
                                         findText={findText}
