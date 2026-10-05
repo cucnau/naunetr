@@ -20,6 +20,7 @@ import { FontSelectorModal } from './components/FontSelectorModal';
 import { initFont } from './services/fontService';
 import { BookOpen, Loader2, Eraser, Quote, Layout, History, AlertTriangle, Layers, FolderOpen, Keyboard, BookA, Users, X, Wifi, Scissors, CheckSquare, Square, Type } from 'lucide-react';
 import { checkAndApplyShortcut, getStoredShortcuts, isShortcutsEnabled, syncShortcutsFromCloud } from './services/shortcutService';
+import { handleSmartQuotesKeyDown, convertStraightToSmartQuotes } from './services/quoteUtils';
 
 const EXAMPLE_TEXT = "路遥知马力，日久见人心。";
 
@@ -1462,7 +1463,17 @@ useEffect(() => {
 
   const handleInputChange = (updates: Partial<TranslationSession>) => {
     lastLocalEditTimeRef.current = Date.now();
-    updateSession(updates);
+    const cleanUpdates = { ...updates };
+    if (cleanUpdates.inputText && cleanUpdates.inputText.includes('"')) {
+      cleanUpdates.inputText = convertStraightToSmartQuotes(cleanUpdates.inputText);
+    }
+    if (cleanUpdates.deeplText && cleanUpdates.deeplText.includes('"')) {
+      cleanUpdates.deeplText = convertStraightToSmartQuotes(cleanUpdates.deeplText);
+    }
+    if (cleanUpdates.preEditedText && cleanUpdates.preEditedText.includes('"')) {
+      cleanUpdates.preEditedText = convertStraightToSmartQuotes(cleanUpdates.preEditedText);
+    }
+    updateSession(cleanUpdates);
 
     saveUserLiveWorkspaceToCloud({
       novelId: session.currentNovelId,
@@ -1470,9 +1481,9 @@ useEffect(() => {
       status: session.status,
       result: session.result,
       completedSegments: session.completedSegments,
-      inputText: updates.inputText !== undefined ? updates.inputText : session.inputText,
-      deeplText: updates.deeplText !== undefined ? updates.deeplText : session.deeplText,
-      preEditedText: updates.preEditedText !== undefined ? updates.preEditedText : session.preEditedText,
+      inputText: cleanUpdates.inputText !== undefined ? cleanUpdates.inputText : session.inputText,
+      deeplText: cleanUpdates.deeplText !== undefined ? cleanUpdates.deeplText : session.deeplText,
+      preEditedText: cleanUpdates.preEditedText !== undefined ? cleanUpdates.preEditedText : session.preEditedText,
       updatedAt: Date.now()
     }, false);
   };
@@ -1756,6 +1767,9 @@ useEffect(() => {
                                   value={session.inputText}
                                   onChange={(e) => handleInputChange({ inputText: e.target.value })}
                                   onPaste={(e) => handlePasteWithClean(e, 'inputText')}
+                                  onKeyDown={(e) => {
+                                      handleSmartQuotesKeyDown(e, (newVal) => handleInputChange({ inputText: newVal }));
+                                  }}
                                   placeholder="Nhập Raw..."
                                   className="flex-1 p-3 text-lg font-serif-sc bg-transparent border-none outline-none resize-none placeholder:text-[#BCAAA4] leading-relaxed"
                                   spellCheck="false"
@@ -1779,6 +1793,9 @@ useEffect(() => {
                                   onChange={(e) => handleInputChange({ deeplText: e.target.value })}
                                   onPaste={(e) => handlePasteWithClean(e, 'deeplText')}
                                   onKeyDown={(e) => {
+                                      if (handleSmartQuotesKeyDown(e, (newVal) => handleInputChange({ deeplText: newVal }))) {
+                                          return;
+                                      }
                                       const triggerKeys = [' ', 'Enter', 'Tab', ',', '.', '?', '!', ';', ':'];
                                       if (triggerKeys.includes(e.key)) {
                                           const triggerChar = e.key === 'Tab' ? '\t' : (e.key === 'Enter' ? '\n' : e.key);
@@ -1813,6 +1830,9 @@ useEffect(() => {
                                       onChange={(e) => handleInputChange({ preEditedText: e.target.value })}
                                       onPaste={(e) => handlePasteWithClean(e, 'preEditedText')}
                                       onKeyDown={(e) => {
+                                          if (handleSmartQuotesKeyDown(e, (newVal) => handleInputChange({ preEditedText: newVal }))) {
+                                              return;
+                                          }
                                           const triggerKeys = [' ', 'Enter', 'Tab', ',', '.', '?', '!', ';', ':'];
                                           if (triggerKeys.includes(e.key)) {
                                               const triggerChar = e.key === 'Tab' ? '\t' : (e.key === 'Enter' ? '\n' : e.key);

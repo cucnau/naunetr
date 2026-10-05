@@ -6,6 +6,7 @@ import { Copy, Check, Info, X, Users, ClipboardList, CheckCircle2, FileDown, Boo
 import { vietphraseEngine } from '../services/vietphraseService';
 import { extractBracketsOnly, shouldUpgradeBrackets } from '../services/bracketUtils';
 import { checkAndApplyShortcut, getStoredShortcuts } from '../services/shortcutService';
+import { handleSmartQuotesKeyDown, convertStraightToSmartQuotes } from '../services/quoteUtils';
 // Deleted smartClassify import
 
 interface TranslationOutputProps {
@@ -187,6 +188,16 @@ const EditableSegment = ({
     }, [localText, isFocusMode, isFocused]);
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        // Tu dong xu ly dau ngoac kep cong thong minh “” khi go phim "
+        if (handleSmartQuotesKeyDown(e, (newVal) => {
+            setLocalText(newVal);
+            adjustHeight();
+            if (debounceTimeout.current) clearTimeout(debounceTimeout.current);
+            debounceTimeout.current = setTimeout(() => onUpdate(newVal), 300);
+        })) {
+            return;
+        }
+
         if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
             e.preventDefault();
             if (debounceTimeout.current) {
@@ -216,7 +227,10 @@ const EditableSegment = ({
     };
 
     const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-        const val = e.target.value;
+        let val = e.target.value;
+        if (val.includes('"')) {
+            val = convertStraightToSmartQuotes(val);
+        }
         setLocalText(val);
 
         if (debounceTimeout.current) {
@@ -372,7 +386,10 @@ const EditableSource = ({
   }, [isFocused, localText, isFocusMode]);
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const val = e.target.value;
+    let val = e.target.value;
+    if (val.includes('"')) {
+      val = convertStraightToSmartQuotes(val);
+    }
     setLocalText(val);
     if (debounceTimeout.current) clearTimeout(debounceTimeout.current);
     debounceTimeout.current = setTimeout(() => {
@@ -387,6 +404,15 @@ const EditableSource = ({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (handleSmartQuotesKeyDown(e, (newVal) => {
+      setLocalText(newVal);
+      adjustHeight();
+      if (debounceTimeout.current) clearTimeout(debounceTimeout.current);
+      debounceTimeout.current = setTimeout(() => onUpdate(newVal), 300);
+    })) {
+      return;
+    }
+
     if (e.key === 'Escape') {
       e.preventDefault();
       setIsFocused(false);
@@ -489,7 +515,10 @@ const EditableQuick = ({
   }, [isFocused, localText, isFocusMode]);
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const val = e.target.value;
+    let val = e.target.value;
+    if (val.includes('"')) {
+      val = convertStraightToSmartQuotes(val);
+    }
     setLocalText(val);
     if (debounceTimeout.current) clearTimeout(debounceTimeout.current);
     debounceTimeout.current = setTimeout(() => {
@@ -504,6 +533,15 @@ const EditableQuick = ({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (handleSmartQuotesKeyDown(e, (newVal) => {
+      setLocalText(newVal);
+      adjustHeight();
+      if (debounceTimeout.current) clearTimeout(debounceTimeout.current);
+      debounceTimeout.current = setTimeout(() => onUpdate(newVal), 300);
+    })) {
+      return;
+    }
+
     if (e.key === 'Escape') {
       e.preventDefault();
       setIsFocused(false);
@@ -596,7 +634,10 @@ const EditableDeepl = ({
   }, [isFocused, localText, isFocusMode]);
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const val = e.target.value;
+    let val = e.target.value;
+    if (val.includes('"')) {
+      val = convertStraightToSmartQuotes(val);
+    }
     setLocalText(val);
     if (debounceTimeout.current) clearTimeout(debounceTimeout.current);
     debounceTimeout.current = setTimeout(() => {
@@ -611,6 +652,15 @@ const EditableDeepl = ({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (handleSmartQuotesKeyDown(e, (newVal) => {
+      setLocalText(newVal);
+      adjustHeight();
+      if (debounceTimeout.current) clearTimeout(debounceTimeout.current);
+      debounceTimeout.current = setTimeout(() => onUpdate(newVal), 300);
+    })) {
+      return;
+    }
+
     if (e.key === 'Escape') {
       e.preventDefault();
       setIsFocused(false);
