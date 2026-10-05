@@ -1038,6 +1038,12 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
     }
   };
 
+// Kiem tra chuoi co chua ky tu tieng Trung (chu Han) hay khong
+const containsChineseText = (str: string): boolean => {
+  if (!str) return false;
+  return /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(str) || /[\uD840-\uD87A][\uDC00-\uDFFF]/.test(str);
+};
+
   // Selection change or mouseup listener
   useEffect(() => {
     const handleMouseUp = (e: MouseEvent) => {
@@ -1053,38 +1059,39 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
       }
 
       const selectedText = selection.toString().trim();
-      // Only trigger if selection is Chinese text or general text of reasonable length
-      if (selectedText.length > 0 && selectedText.length < 150) {
-        try {
-          const range = selection.getRangeAt(0);
-          const rect = range.getBoundingClientRect();
-
-          // Compute Vietphrase
-          const vpText = vietphraseEngine.translate(selectedText, customMap);
-
-          setSelectionPopup({
-            text: selectedText,
-            vietphrase: vpText || '',
-            rect: {
-              left: rect.left,
-              right: rect.right,
-              top: rect.top,
-              bottom: rect.bottom,
-              width: rect.width,
-              height: rect.height
-            },
-            type: 'idle'
-          });
-
-          setVocabMeaning(vpText || '');
-          setCharVietName(vpText || '');
-          setCharPronoun('Hắn');
-          setCharDescription('');
-        } catch (err) {
-          console.warn("Failed to capture range bounding rect:", err);
-        }
-      } else {
+      // Chi hien popup neu doan duoc to xanh co chua ky tu tieng Trung (raw), khong phai tieng Viet hay cac vung khac
+      if (!selectedText || !containsChineseText(selectedText) || selectedText.length >= 150) {
         setSelectionPopup(null);
+        return;
+      }
+
+      try {
+        const range = selection.getRangeAt(0);
+        const rect = range.getBoundingClientRect();
+
+        // Compute Vietphrase
+        const vpText = vietphraseEngine.translate(selectedText, customMap);
+
+        setSelectionPopup({
+          text: selectedText,
+          vietphrase: vpText || '',
+          rect: {
+            left: rect.left,
+            right: rect.right,
+            top: rect.top,
+            bottom: rect.bottom,
+            width: rect.width,
+            height: rect.height
+          },
+          type: 'idle'
+        });
+
+        setVocabMeaning(vpText || '');
+        setCharVietName(vpText || '');
+        setCharPronoun('Hắn');
+        setCharDescription('');
+      } catch (err) {
+        console.warn("Failed to capture range bounding rect:", err);
       }
     };
 
