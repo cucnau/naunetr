@@ -112,6 +112,7 @@ class VietphraseEngine {
 
   private isLoaded: boolean = false;
   private listeners: Set<() => void> = new Set();
+  private globalCustomMap: Map<string, string> = new Map();
 
   constructor() {}
 
@@ -131,6 +132,15 @@ class VietphraseEngine {
         console.error("Error invoking Vietphrase listener", e);
       }
     });
+  }
+
+  setGlobalCustomMap(map: Map<string, string>) {
+    this.globalCustomMap = new Map(map);
+    this.notify();
+  }
+
+  getGlobalCustomMap(): Map<string, string> {
+    return this.globalCustomMap;
   }
 
   // Khởi tạo: Load danh sách file từ DB
@@ -239,17 +249,18 @@ class VietphraseEngine {
   }
 
   // Tra cứu toàn diện một từ bất kỳ qua tất cả các tầng từ điển
-  lookupComprehensive(term: string): {
+  lookupComprehensive(term: string, customTerms?: CustomTerm[] | Map<string, string>): {
     term: string;
     vietphrase: string;
     lacvietDetails: string | null;
     layers: string[];
   } {
     const clean = (term || '').trim();
-    const vp = this.translate(clean);
+    const vp = this.translate(clean, customTerms);
     const lacviet = this.getLacVietDetails(clean);
 
     const layers: string[] = [];
+    if (this.globalCustomMap.has(clean)) layers.push('Từ riêng truyện');
     if (this.namesMap.has(clean)) layers.push('Names (Tên riêng)');
     if (this.vietphraseMap.has(clean)) layers.push('Vietphrase (Chung)');
     if (this.nounsMap.has(clean)) layers.push('Danh từ');
@@ -516,42 +527,13 @@ class VietphraseEngine {
   // Thuật toán Phân Tầng Ưu Tiên (Multi-Tier Priority Forward Maximum Matching)
   // Tầng 1: Custom Map (Từ điển riêng của truyện)
   // Tầng 2: Names Map (Tên người, địa danh - Names.txt)
-  // Tầng 3: Vietphrase Map (Từ vựng chung cụm dài đến ngắn - Vietphrase.txt)
-  // Tầng 4: Nouns Map (Danh từ - DanhTu.txt)
-  // Tầng 5: Suffixes Map (Hậu từ / Danh từ hậu từ - HauTu.txt / ca, tỷ, môn, phái, thành, sơn...)
-  // Tầng 6: Pronouns Map (Đại từ xưng hô - Pronouns.txt)
-  // Tầng 7: LacViet Map (Từ điển Hán Việt / Lạc Việt đã được lọc sạch)
-  // Tầng 8: Other Map (Các file bổ trợ khác)
-  translate(text: string, customTerms: CustomTerm[] | Map<string, string> = []): string {
+  // Dịch một đoạn văn bản chỉ sử dụng các từ điển có sẵn của hệ thống (Names, Vietphrase, Nouns, Suffixes, Pronouns, Lacviet, Other)
+  private translateBuiltinDictionaries(text: string): string {
     if (!text) return "";
-
-    // 1. Chuẩn bị Custom Map của truyện
-    let customMap: Map<string, string>;
-    let maxCustomLength = 0;
-
-    if (customTerms instanceof Map) {
-      customMap = customTerms;
-      for (const key of customMap.keys()) {
-        if (key.length > maxCustomLength) maxCustomLength = key.length;
-      }
-    } else {
-      customMap = new Map<string, string>();
-      for (const t of customTerms) {
-        if (t.term && t.meaning) {
-          const k = t.term.trim();
-          customMap.set(k, t.meaning.trim());
-          if (k.length > maxCustomLength) maxCustomLength = k.length;
-        }
-      }
-    }
-
-    if (this.getSize() === 0 && customMap.size === 0) return text;
-
     let result = "";
     let i = 0;
     const n = text.length;
 
-    // Hàm phụ trợ kiểm tra và tiêu thụ Hậu từ (Suffixes) ngay sau Tên người hoặc Danh từ
     const tryConsumeSuffix = () => {
       if (this.maxSuffixesLength > 0 && i < n) {
         const sLimit = Math.min(n, i + this.maxSuffixesLength);
@@ -571,23 +553,8 @@ class VietphraseEngine {
     while (i < n) {
       let matched = false;
 
-      // TẦNG 1: Kho từ riêng của truyện (Ưu tiên tuyệt đối)
-      if (maxCustomLength > 0) {
-        const limit = Math.min(n, i + maxCustomLength);
-        for (let j = limit; j > i; j--) {
-          const sub = text.substring(i, j);
-          if (customMap.has(sub)) {
-            result += " " + customMap.get(sub) + " ";
-            i = j;
-            matched = true;
-            tryConsumeSuffix();
-            break;
-          }
-        }
-      }
-
       // TẦNG 2: Names (Tên người, địa danh, bảo vật, công pháp)
-      if (!matched && this.maxNamesLength > 0) {
+      if (this.maxNamesLength > 0) {
         const limit = Math.min(n, i + this.maxNamesLength);
         for (let j = limit; j > i; j--) {
           const sub = text.substring(i, j);
@@ -597,7 +564,6 @@ class VietphraseEngine {
             result += " " + meaning + " ";
             i = j;
             matched = true;
-            // Tự động kiểm tra và ghép Hậu từ (ví dụ Tiêu Viêm + ca -> Tiêu Viêm ca)
             tryConsumeSuffix();
             break;
           }
@@ -631,14 +597,13 @@ class VietphraseEngine {
             result += " " + meaning + " ";
             i = j;
             matched = true;
-            // Tự động kiểm tra và ghép Hậu từ sau danh từ (ví dụ: thành chủ + phủ, tông chủ + điện)
             tryConsumeSuffix();
             break;
           }
         }
       }
 
-      // TẦNG 5: Hậu từ (Suffixes - Danh từ hậu từ đứng độc lập hoặc sau các từ khác)
+      // TẦNG 5: Hậu từ (Suffixes)
       if (!matched && this.maxSuffixesLength > 0) {
         const limit = Math.min(n, i + this.maxSuffixesLength);
         for (let j = limit; j > i; j--) {
@@ -670,7 +635,7 @@ class VietphraseEngine {
         }
       }
 
-      // TẦNG 7: LacViet (Từ điển Lạc Việt / Hán Việt dự phòng - đã được trích xuất âm ngắn gọn sạch bóng)
+      // TẦNG 7: LacViet (Từ điển Lạc Việt / Hán Việt dự phòng)
       if (!matched && this.maxLacvietLength > 0) {
         const limit = Math.min(n, i + this.maxLacvietLength);
         for (let j = limit; j > i; j--) {
@@ -706,6 +671,123 @@ class VietphraseEngine {
         result += text[i];
         i++;
       }
+    }
+
+    return result;
+  }
+
+  // Thuật toán Dịch Vietphrase đa tầng kết hợp Khóa khoảng từ riêng (Interval Locking)
+  // Đảm bảo: Khi người dùng thêm từ / nhân vật, từ đó CHẮC CHẮN GHI ĐÈ 100% lên bản dịch,
+  // không bị các cụm từ trong Vietphrase cắt đôi hoặc nuốt mất.
+  translate(text: string, customTerms: CustomTerm[] | Map<string, string> = []): string {
+    if (!text) return "";
+
+    // 1. Chuẩn bị Custom Map kết hợp (từ tham số hoặc từ globalCustomMap)
+    const effectiveCustomMap = new Map<string, string>(this.globalCustomMap);
+
+    if (customTerms instanceof Map) {
+      customTerms.forEach((val, key) => {
+        if (key && val) effectiveCustomMap.set(key.trim(), val.trim());
+      });
+    } else if (Array.isArray(customTerms)) {
+      for (const t of customTerms) {
+        if (t.term && t.meaning) {
+          effectiveCustomMap.set(t.term.trim(), t.meaning.trim());
+        }
+      }
+    }
+
+    // Nếu không có từ điển nào và không có custom terms
+    if (this.getSize() === 0 && effectiveCustomMap.size === 0) return text;
+
+    // Nếu không có custom terms, chạy trực tiếp từ điển hệ thống
+    if (effectiveCustomMap.size === 0) {
+      return this.translateBuiltinDictionaries(text).replace(/\s+/g, ' ').trim();
+    }
+
+    // THUẬT TOÁN INTERVAL LOCKING:
+    // Sắp xếp các từ riêng theo độ dài giảm dần để ưu tiên cụm dài nhất của người dùng
+    const sortedEntries = Array.from(effectiveCustomMap.entries())
+      .filter(([k, v]) => k && v && k.trim())
+      .map(([k, v]) => [k.trim(), v.trim()])
+      .sort((a, b) => b[0].length - a[0].length);
+
+    if (sortedEntries.length === 0) {
+      return this.translateBuiltinDictionaries(text).replace(/\s+/g, ' ').trim();
+    }
+
+    const n = text.length;
+    const occupied = new Uint8Array(n);
+    const intervals: Array<{ start: number; end: number; meaning: string; term: string }> = [];
+
+    for (const [term, meaning] of sortedEntries) {
+      let startPos = 0;
+      while (startPos < n) {
+        const idx = text.indexOf(term, startPos);
+        if (idx === -1) break;
+        const end = idx + term.length;
+
+        let isFree = true;
+        for (let p = idx; p < end; p++) {
+          if (occupied[p] === 1) {
+            isFree = false;
+            break;
+          }
+        }
+
+        if (isFree) {
+          for (let p = idx; p < end; p++) {
+            occupied[p] = 1;
+          }
+          intervals.push({ start: idx, end, meaning, term });
+        }
+
+        startPos = idx + 1;
+      }
+    }
+
+    // Nếu văn bản không chứa từ riêng nào của người dùng
+    if (intervals.length === 0) {
+      return this.translateBuiltinDictionaries(text).replace(/\s+/g, ' ').trim();
+    }
+
+    // Sắp xếp các khoảng từ trái sang phải
+    intervals.sort((a, b) => a.start - b.start);
+
+    // Ghép kết quả: các khoảng trống dịch bằng từ điển hệ thống, các khoảng đã khóa lấy nghĩa từ riêng
+    let result = "";
+    let cursor = 0;
+
+    for (const item of intervals) {
+      if (item.start > cursor) {
+        const gap = text.substring(cursor, item.start);
+        result += " " + this.translateBuiltinDictionaries(gap) + " ";
+      }
+
+      let termMeaning = item.meaning;
+      if (termMeaning.includes('/')) termMeaning = termMeaning.split('/')[0];
+      result += " " + termMeaning + " ";
+      cursor = item.end;
+
+      // Kiểm tra hậu từ (suffixes) ngay sau từ riêng này nếu có
+      if (this.maxSuffixesLength > 0 && cursor < n) {
+        const sLimit = Math.min(n, cursor + this.maxSuffixesLength);
+        for (let sj = sLimit; sj > cursor; sj--) {
+          const sSub = text.substring(cursor, sj);
+          if (this.suffixesMap.has(sSub)) {
+            let sMeaning = this.suffixesMap.get(sSub) || sSub;
+            if (sMeaning.includes('/')) sMeaning = sMeaning.split('/')[0];
+            result += sMeaning + " ";
+            cursor = sj;
+            break;
+          }
+        }
+      }
+    }
+
+    if (cursor < n) {
+      const gap = text.substring(cursor);
+      result += " " + this.translateBuiltinDictionaries(gap) + " ";
     }
 
     return result.replace(/\s+/g, ' ').trim();

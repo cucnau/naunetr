@@ -276,18 +276,18 @@ function AppContent() {
   }, [chapters, session.currentNovelId]);
 
   const currentNovelCharacters = useMemo(() => {
-    if (!session.currentNovelId) return [];
-    return (session.characters || []).filter(c => c.novelId === session.currentNovelId);
+    if (!session.currentNovelId) return session.characters || [];
+    return (session.characters || []).filter(c => !c.novelId || c.novelId === session.currentNovelId || c.novelId === 'default');
   }, [session.characters, session.currentNovelId]);
 
   const currentNovelRelationships = useMemo(() => {
-    if (!session.currentNovelId) return [];
-    return (session.relationships || []).filter(r => r.novelId === session.currentNovelId);
+    if (!session.currentNovelId) return session.relationships || [];
+    return (session.relationships || []).filter(r => !r.novelId || r.novelId === session.currentNovelId || r.novelId === 'default');
   }, [session.relationships, session.currentNovelId]);
 
   const currentNovelTerms = useMemo(() => {
-    if (!session.currentNovelId) return [];
-    return (session.customTerms || []).filter(t => t.novelId === session.currentNovelId);
+    if (!session.currentNovelId) return session.customTerms || [];
+    return (session.customTerms || []).filter(t => !t.novelId || t.novelId === session.currentNovelId || t.novelId === 'default');
   }, [session.customTerms, session.currentNovelId]);
 
   // Migration: Tự động gán novelId cho từ vựng / nhân vật / quan hệ cũ nếu chưa có novelId (chỉ gắn vào truyện ban đầu)
@@ -351,7 +351,19 @@ useEffect(() => {
              setSession(prev => prev.currentNovelId ? prev : ({ ...prev, currentNovelId: savedNovelId }));
          }
      });
-}, []);
+  }, []);
+
+  // Dong bo Custom Map vao Vietphrase Engine de chac chan ghi de len ban dich Vietphrase o moi noi
+  useEffect(() => {
+    const map = new Map<string, string>();
+    currentNovelCharacters.forEach(c => {
+      if (c.chineseName && c.vietName) map.set(c.chineseName.trim(), c.vietName.trim());
+    });
+    currentNovelTerms.forEach(t => {
+      if (t.term && t.meaning) map.set(t.term.trim(), t.meaning.trim());
+    });
+    vietphraseEngine.setGlobalCustomMap(map);
+  }, [currentNovelCharacters, currentNovelTerms]);
 
   // Tự động tải và ĐỒNG BỘ THỜI GIAN THỰC (Real-time) Toàn bộ Không gian làm việc (Truyện đang chọn, Bảng edit chương kể cả chưa lưu kho)
   useEffect(() => {
@@ -628,9 +640,8 @@ useEffect(() => {
 
   const handleUpdateCharacters = (novelChars: Character[]) => {
     try {
-      const currentId = session.currentNovelId;
-      if (!currentId) return;
-      const novelCharsWithId = novelChars.map(c => ({ ...c, novelId: currentId }));
+      const currentId = session.currentNovelId || 'default';
+      const novelCharsWithId = novelChars.map(c => ({ ...c, novelId: c.novelId || currentId }));
       const otherChars = (session.characters || []).filter(c => c.novelId && c.novelId !== currentId);
       const merged = [...novelCharsWithId, ...otherChars];
       updateSession({ characters: merged });
@@ -644,9 +655,8 @@ useEffect(() => {
 
   const handleUpdateRelationships = (novelRels: Relationship[]) => {
     try {
-      const currentId = session.currentNovelId;
-      if (!currentId) return;
-      const novelRelsWithId = novelRels.map(r => ({ ...r, novelId: currentId }));
+      const currentId = session.currentNovelId || 'default';
+      const novelRelsWithId = novelRels.map(r => ({ ...r, novelId: r.novelId || currentId }));
       const otherRels = (session.relationships || []).filter(r => r.novelId && r.novelId !== currentId);
       const merged = [...novelRelsWithId, ...otherRels];
       updateSession({ relationships: merged });
@@ -657,9 +667,8 @@ useEffect(() => {
 
   const handleUpdateTerms = (novelTerms: CustomTerm[]) => {
     try {
-      const currentId = session.currentNovelId;
-      if (!currentId) return;
-      const novelTermsWithId = novelTerms.map(t => ({ ...t, novelId: currentId }));
+      const currentId = session.currentNovelId || 'default';
+      const novelTermsWithId = novelTerms.map(t => ({ ...t, novelId: t.novelId || currentId }));
       const otherTerms = (session.customTerms || []).filter(t => t.novelId && t.novelId !== currentId);
       const merged = [...novelTermsWithId, ...otherTerms];
       updateSession({ customTerms: merged });

@@ -827,14 +827,14 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
   // Filter terms and characters strictly for current novel
   const currentCustomTerms = useMemo(() => {
     const list = Array.isArray(customTerms) ? customTerms : [];
-    if (!currentNovelId) return [];
-    return list.filter(t => t.novelId === currentNovelId);
+    if (!currentNovelId) return list;
+    return list.filter(t => !t.novelId || t.novelId === currentNovelId || t.novelId === 'default');
   }, [customTerms, currentNovelId]);
 
   const currentCharacters = useMemo(() => {
     const list = Array.isArray(characters) ? characters : [];
-    if (!currentNovelId) return [];
-    return list.filter(c => c.novelId === currentNovelId);
+    if (!currentNovelId) return list;
+    return list.filter(c => !c.novelId || c.novelId === currentNovelId || c.novelId === 'default');
   }, [characters, currentNovelId]);
 
   // Combined terms map for Vietphrase translate (customTerms take priority over characters)
@@ -852,6 +852,11 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
     });
     return map;
   }, [currentCustomTerms, currentCharacters]);
+
+  // Dong bo customMap vao Vietphrase Engine de luon uu tien tuyet doi
+  useEffect(() => {
+    vietphraseEngine.setGlobalCustomMap(customMap);
+  }, [customMap]);
 
   // --- SELECTION POPUP STATE ---
   const [selectionPopup, setSelectionPopup] = useState<{
@@ -948,22 +953,21 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
 
       const safeTerms = currentCustomTerms;
       
-      // Duplicate check
-      const duplicateExists = safeTerms.some(t => t.term === cleanTerm && t.meaning === cleanMeaning);
-      if (duplicateExists) {
-        setSaveStatus({ type: 'success', message: 'Từ vựng này đã có sẵn!' });
-        setTimeout(() => {
-          setSelectionPopup(null);
-          setSaveStatus(null);
-          setVocabCategory('');
-          setIsCreatingCategory(false);
-          setNewCategoryInput('');
-        }, 800);
-        return;
+      // Kiem tra neu tu nay da ton tai (cung chu Han), ta ghi de nghia moi len de chac chan cap nhat
+      const existingIndex = safeTerms.findIndex(t => t.term.trim().toLowerCase() === cleanTerm.toLowerCase());
+      let updatedTerms: CustomTerm[];
+      if (existingIndex >= 0) {
+        updatedTerms = safeTerms.map((t, idx) => idx === existingIndex ? {
+          ...t,
+          meaning: cleanMeaning,
+          category: vocabCategory.trim() || t.category
+        } : t);
+      } else {
+        updatedTerms = [...safeTerms, newTerm];
       }
 
-      onUpdateTerms([...safeTerms, newTerm]);
-      setSaveStatus({ type: 'success', message: 'Đã thêm từ vựng thành công!' });
+      onUpdateTerms(updatedTerms);
+      setSaveStatus({ type: 'success', message: 'Đã lưu và ghi đè từ vựng thành công!' });
       setTimeout(() => {
         setSelectionPopup(null);
         setSaveStatus(null);
@@ -1008,19 +1012,22 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
 
       const safeCharacters = currentCharacters;
       
-      // Duplicate check
-      const duplicateExists = safeCharacters.some(c => c.chineseName === cleanChinese && c.vietName === cleanViet);
-      if (duplicateExists) {
-        setSaveStatus({ type: 'success', message: 'Nhân vật này đã có sẵn!' });
-        setTimeout(() => {
-          setSelectionPopup(null);
-          setSaveStatus(null);
-        }, 800);
-        return;
+      // Kiem tra neu nhan vat nay da ton tai (cung ten chu Han), ta ghi de ten tieng Viet moi len
+      const existingIndex = safeCharacters.findIndex(c => c.chineseName.trim().toLowerCase() === cleanChinese.toLowerCase());
+      let updatedChars: Character[];
+      if (existingIndex >= 0) {
+        updatedChars = safeCharacters.map((c, idx) => idx === existingIndex ? {
+          ...c,
+          vietName: cleanViet,
+          pronouns: charPronoun.trim() || c.pronouns,
+          description: charDescription.trim() || c.description
+        } : c);
+      } else {
+        updatedChars = [...safeCharacters, newChar];
       }
 
-      onUpdateCharacters([...safeCharacters, newChar]);
-      setSaveStatus({ type: 'success', message: 'Đã thêm nhân vật thành công!' });
+      onUpdateCharacters(updatedChars);
+      setSaveStatus({ type: 'success', message: 'Đã lưu và ghi đè nhân vật thành công!' });
       setTimeout(() => {
         setSelectionPopup(null);
         setSaveStatus(null);
@@ -1134,7 +1141,7 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
       const cleanNatural = (seg.natural || '').trim();
       const cleanDeepl = (seg.deepl || '').trim();
       const autoVp = vietphraseEngine.translate(cleanSource, customMap) || '';
-      const cleanQuick = ((seg as any).isManualQuick && seg.quick ? seg.quick : (autoVp || seg.quick || '')).trim();
+      const cleanQuick = (autoVp || seg.quick || '').trim();
 
       if (!cleanSource && !cleanNatural) return;
 
@@ -1693,7 +1700,7 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
                       const cleanNatural = seg.natural ?? '';
                       const cleanDeepl = seg.deepl ?? '';
                       const autoVp = vietphraseEngine.translate(cleanSource, customMap) || '';
-                      const cleanQuick = (seg as any).isManualQuick && seg.quick ? seg.quick : (autoVp || seg.quick || '');
+                      const cleanQuick = autoVp || seg.quick || '';
 
                       return (
                         <div 
