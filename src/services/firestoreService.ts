@@ -587,15 +587,62 @@ export interface LiveSessionData {
 export const getDeviceId = (): string => {
   if (typeof window === 'undefined') return 'server';
   try {
-    let id = localStorage.getItem('chiVietDeviceId');
+    let id = localStorage.getItem('app_device_id') || localStorage.getItem('chiVietDeviceId');
     if (!id) {
       id = 'dev_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now();
-      localStorage.setItem('chiVietDeviceId', id);
+      localStorage.setItem('app_device_id', id);
     }
     return id;
   } catch (e) {
     return 'dev_' + Math.random().toString(36).substring(2, 9);
   }
+};
+
+/**
+ * Xac dinh phan vung khong gian lam viec (App Scope / Instance Key)
+ * Giup tach biet hoan toan cac ban web chay o repo khac nhau (Vercel vs GitHub vs Localhost)
+ * tranh viec bi sync de len bang dang edit do cua nhau.
+ */
+export const getAppScope = (): string => {
+  if (import.meta.env.VITE_APP_INSTANCE) {
+    return String(import.meta.env.VITE_APP_INSTANCE).trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+  }
+
+  if (typeof window !== 'undefined') {
+    try {
+      const custom = localStorage.getItem('app_workspace_scope') || localStorage.getItem('chiVietAppScope');
+      if (custom && custom.trim()) {
+        return custom.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+      }
+    } catch (_) {}
+  }
+
+  if (typeof window !== 'undefined' && window.location) {
+    const host = (window.location.hostname || '').toLowerCase();
+    if (host.includes('github.io')) return 'github';
+    if (host.includes('vercel.app')) return 'vercel';
+    if (host.includes('localhost') || host.includes('127.0.0.1')) return 'local';
+    if (host.includes('run.app')) return 'aistudio';
+    const cleanHost = host.replace(/[^a-z0-9]/g, '_').slice(0, 20);
+    if (cleanHost) return cleanHost;
+  }
+
+  return 'default';
+};
+
+export const setAppScope = (scope: string): void => {
+  if (typeof window === 'undefined') return;
+  try {
+    if (!scope || !scope.trim()) {
+      localStorage.removeItem('app_workspace_scope');
+      localStorage.removeItem('chiVietAppScope');
+    } else {
+      const clean = scope.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+      localStorage.setItem('app_workspace_scope', clean);
+      localStorage.setItem('chiVietAppScope', clean);
+    }
+    window.location.reload();
+  } catch (_) {}
 };
 
 /**
@@ -650,7 +697,8 @@ export const subscribeToUserLiveWorkspace = (
     return () => {};
   }
 
-  const docRef = doc(db, 'activeSessions', `ws_${user.uid}`);
+  const scope = getAppScope();
+  const docRef = doc(db, 'activeSessions', `ws_${user.uid}_${scope}`);
 
   return onSnapshot(
     docRef,
@@ -693,7 +741,8 @@ export const saveUserLiveWorkspaceToCloud = async (
   const executeSave = async (payloadData: Partial<LiveSessionData>) => {
     isLiveWorkspaceInFlight = true;
     try {
-      const docRef = doc(db, 'activeSessions', `ws_${user.uid}`);
+      const scope = getAppScope();
+      const docRef = doc(db, 'activeSessions', `ws_${user.uid}_${scope}`);
       const payload: any = {
         novelId: payloadData.novelId || '',
         chapterId: payloadData.chapterId || '',

@@ -4,6 +4,7 @@ import { Novel } from '../types';
 import { Book, Plus, Loader2 } from 'lucide-react';
 import { auth } from '../services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
+import { getScopedStorageItem, setScopedStorageItem } from '../services/storageNamespace';
 
 interface NovelSelectorProps {
   currentNovelId: string;
@@ -13,7 +14,7 @@ interface NovelSelectorProps {
 export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, onSelectNovel }) => {
   const [novels, setNovels] = useState<Novel[]>(() => {
     try {
-      const saved = localStorage.getItem('cached_novels_list');
+      const saved = getScopedStorageItem('cached_novels_list');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
@@ -33,7 +34,7 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, on
       if (user) {
         // Load local cache if available for this user
         try {
-          const userCache = localStorage.getItem(`cached_novels_${user.uid}`);
+          const userCache = getScopedStorageItem(`cached_novels_${user.uid}`);
           if (userCache) {
             const parsed = JSON.parse(userCache);
             if (Array.isArray(parsed) && parsed.length > 0) {
@@ -46,7 +47,7 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, on
       } else {
         // When not logged in, maintain local novels instead of wiping out
         try {
-          const saved = localStorage.getItem('cached_novels_list');
+          const saved = getScopedStorageItem('cached_novels_list');
           if (saved) {
             const parsed = JSON.parse(saved);
             if (Array.isArray(parsed) && parsed.length > 0) {
@@ -79,9 +80,9 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, on
         setNovels(data);
         const currentUid = uid || auth.currentUser?.uid;
         if (currentUid) {
-          localStorage.setItem(`cached_novels_${currentUid}`, JSON.stringify(data));
+          setScopedStorageItem(`cached_novels_${currentUid}`, JSON.stringify(data));
         }
-        localStorage.setItem('cached_novels_list', JSON.stringify(data));
+        setScopedStorageItem('cached_novels_list', JSON.stringify(data));
         if (!currentNovelId || !data.some(n => n.id === currentNovelId)) {
           onSelectNovel(data[0].id);
         }
@@ -109,9 +110,9 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, on
     
     const uid = auth.currentUser?.uid;
     if (uid) {
-      localStorage.setItem(`cached_novels_${uid}`, JSON.stringify(updatedNovels));
+      setScopedStorageItem(`cached_novels_${uid}`, JSON.stringify(updatedNovels));
     }
-    localStorage.setItem('cached_novels_list', JSON.stringify(updatedNovels));
+    setScopedStorageItem('cached_novels_list', JSON.stringify(updatedNovels));
 
     // 2. Đồng bộ lên Firestore ở chế độ nền nếu đã đăng nhập
     if (auth.currentUser) {

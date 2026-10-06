@@ -1,6 +1,7 @@
 import { TextShortcut } from '../types';
 import { auth } from './firebase';
 import { getShortcutsFromCloud, saveShortcutsToCloud } from './firestoreService';
+import { getScopedStorageItem, setScopedStorageItem } from './storageNamespace';
 
 const STORAGE_KEY = 'edit_shortcuts_v1';
 const ENABLED_STORAGE_KEY = 'edit_shortcuts_enabled';
@@ -11,9 +12,9 @@ let syncDebounceTimer: NodeJS.Timeout | null = null;
 
 export const getAllStoredShortcuts = (): TextShortcut[] => {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = getScopedStorageItem(STORAGE_KEY);
     if (!raw) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify([]));
+      setScopedStorageItem(STORAGE_KEY, JSON.stringify([]));
       return [];
     }
     const parsed = JSON.parse(raw);
@@ -41,7 +42,7 @@ export const saveStoredShortcuts = (novelShortcuts: TextShortcut[], novelId?: st
       novelId: targetId
     }));
     const fullList = [...remaining, ...updated];
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(fullList));
+    setScopedStorageItem(STORAGE_KEY, JSON.stringify(fullList));
     window.dispatchEvent(new CustomEvent('shortcuts_updated', { detail: { novelId: targetId, shortcuts: updated } }));
 
     // Tự động lưu lên Firestore nếu đã đăng nhập và có novelId
@@ -94,7 +95,7 @@ export const syncShortcutsFromCloud = async (novelId?: string): Promise<TextShor
 
 export const isShortcutsEnabled = (): boolean => {
   try {
-    const val = localStorage.getItem(ENABLED_STORAGE_KEY);
+    const val = getScopedStorageItem(ENABLED_STORAGE_KEY);
     return val !== 'false'; // default is true
   } catch {
     return true;
@@ -103,7 +104,7 @@ export const isShortcutsEnabled = (): boolean => {
 
 export const setShortcutsEnabled = (enabled: boolean): void => {
   try {
-    localStorage.setItem(ENABLED_STORAGE_KEY, enabled ? 'true' : 'false');
+    setScopedStorageItem(ENABLED_STORAGE_KEY, enabled ? 'true' : 'false');
     window.dispatchEvent(new CustomEvent('shortcuts_toggle', { detail: enabled }));
   } catch (err) {
     console.error("Could not save shortcut enabled state", err);

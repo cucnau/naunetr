@@ -1,8 +1,9 @@
 
 import { CustomTerm, Chapter, VietphraseFileItem, Character } from '../types';
+import { getScopedDbName } from './storageNamespace';
 
-// IndexedDB Service
-const DB_NAME = 'ChiVietDB';
+// IndexedDB Service duoc cach ly rieng cho tung repo / web
+const DB_NAME = getScopedDbName();
 const DB_VERSION = 5;
 const STORE_SETTINGS = 'settings';
 const STORE_CUSTOM_TERMS = 'custom_terms';

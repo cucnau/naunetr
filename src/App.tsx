@@ -21,6 +21,7 @@ import { initFont } from './services/fontService';
 import { BookOpen, Loader2, Eraser, Quote, Layout, History, AlertTriangle, Layers, FolderOpen, Keyboard, BookA, Users, X, Wifi, Scissors, CheckSquare, Square, Type } from 'lucide-react';
 import { checkAndApplyShortcut, getStoredShortcuts, isShortcutsEnabled, syncShortcutsFromCloud } from './services/shortcutService';
 import { handleSmartQuotesKeyDown, convertStraightToSmartQuotes } from './services/quoteUtils';
+import { getScopedStorageItem, setScopedStorageItem } from './services/storageNamespace';
 
 const EXAMPLE_TEXT = "路遥知马力，日久见人心。";
 
@@ -176,7 +177,7 @@ function AppContent() {
   // --- STATE ---
   const [mode, setMode] = useState<'edit' | 'beta'>(() => {
     try {
-      const savedMode = localStorage.getItem('app_mode');
+      const savedMode = getScopedStorageItem('app_mode');
       return (savedMode === 'beta' || savedMode === 'edit') ? savedMode : 'edit';
     } catch (e) {
       return 'edit';
@@ -185,13 +186,13 @@ function AppContent() {
 
   useEffect(() => {
     try {
-      localStorage.setItem('app_mode', mode);
+      setScopedStorageItem('app_mode', mode);
     } catch (e) {}
   }, [mode]);
 
   const [session, setSession] = useState<TranslationSession>(() => {
     try {
-      const savedSingle = localStorage.getItem('chiVietSingleSession');
+      const savedSingle = getScopedStorageItem('app_single_session', 'chiVietSingleSession');
       if (savedSingle) {
           const parsed = JSON.parse(savedSingle);
           // Force customTerms empty to load from DB instead (avoid localStorage quota)
@@ -206,7 +207,7 @@ function AppContent() {
 
   const [history, setHistory] = useState<HistoryItem[]>(() => {
     try {
-      const saved = localStorage.getItem('chiVietHistory');
+      const saved = getScopedStorageItem('app_history', 'chiVietHistory');
       const parsed = saved ? JSON.parse(saved) : [];
       return Array.isArray(parsed) ? parsed : [];
     } catch (e) {
@@ -546,19 +547,19 @@ useEffect(() => {
     try {
         // Exclude customTerms from localStorage to save space
         const sessionToSave = { ...session, customTerms: [] };
-        localStorage.setItem('chiVietSingleSession', JSON.stringify(sessionToSave));
+        setScopedStorageItem('app_single_session', JSON.stringify(sessionToSave));
     } catch (e) {
         if (session.result) {
             try {
                 // Thử lưu bản rút gọn (bỏ bớt segments nặng)
                 const leanResult = { ...session.result, segments: [] };
                 const leanSession = { ...session, customTerms: [], result: leanResult };
-                localStorage.setItem('chiVietSingleSession', JSON.stringify(leanSession));
+                setScopedStorageItem('app_single_session', JSON.stringify(leanSession));
             } catch (innerE) {
                 try {
                     // Thử lưu không có result để cứu inputText
                     const ultraLeanSession = { ...session, customTerms: [], result: null };
-                    localStorage.setItem('chiVietSingleSession', JSON.stringify(ultraLeanSession));
+                    setScopedStorageItem('app_single_session', JSON.stringify(ultraLeanSession));
                 } catch (lastE) {
                     console.warn("Storage Quota Exceeded for Session");
                 }
@@ -570,7 +571,7 @@ useEffect(() => {
   // Fix lỗi QuotaExceededError khi lưu History
   useEffect(() => {
     try {
-        localStorage.setItem('chiVietHistory', JSON.stringify(history));
+        setScopedStorageItem('app_history', JSON.stringify(history));
     } catch (e) {
         // Nếu bộ nhớ đầy, nén bớt history bằng cách lược bỏ segments của các bản ghi cũ
         try {
@@ -586,7 +587,7 @@ useEffect(() => {
                 }
                 return item;
             });
-            localStorage.setItem('chiVietHistory', JSON.stringify(leanHistory));
+            setScopedStorageItem('app_history', JSON.stringify(leanHistory));
         } catch (innerE) {
             try {
                 // Nếu vẫn đầy, chỉ giữ 5 bản ghi và bỏ hết segments
@@ -597,7 +598,7 @@ useEffect(() => {
                         segments: []
                     } : null
                 }));
-                localStorage.setItem('chiVietHistory', JSON.stringify(superLeanHistory));
+                setScopedStorageItem('app_history', JSON.stringify(superLeanHistory));
             } catch (lastE) {
                 console.warn("Storage Quota Exceeded for History");
             }
