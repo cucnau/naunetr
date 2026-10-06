@@ -154,6 +154,52 @@ const sanitizeResult = (result: TranslationResponse | null): TranslationResponse
     }
 };
 
+/**
+ * Tu dong khoi phuc lai danh sach segments doi chieu neu bi rong
+ * do loi cat bo bo nho (QuotaExceededError) hoac phien bi luoc bot truoc do.
+ */
+const reconstructSegmentsIfEmpty = (sessionData: TranslationSession): TranslationSession => {
+    const result = sessionData.result;
+    if (!result) return sessionData;
+
+    if (!result.segments || result.segments.length === 0) {
+        const rawText = sessionData.inputText || '';
+        const natText = result.naturalTranslation || '';
+        const deeplText = sessionData.deeplText || result.deeplTranslation || '';
+
+        if (rawText.trim() || natText.trim()) {
+            const rawLines = rawText ? rawText.split('\n') : [];
+            const natLines = natText ? natText.split('\n') : [];
+            const dpLines = deeplText ? deeplText.split('\n') : [];
+
+            const lineCount = Math.max(rawLines.length, natLines.length);
+            if (lineCount > 0) {
+                const reconstructedSegments: TranslationSegment[] = [];
+                for (let i = 0; i < lineCount; i++) {
+                    const src = rawLines[i] ?? '';
+                    const nat = natLines[i] !== undefined ? natLines[i] : extractBracketsOnly(src);
+                    const dp = dpLines[i] ?? '';
+                    reconstructedSegments.push({
+                        source: src,
+                        natural: nat,
+                        quick: '',
+                        deepl: dp
+                    });
+                }
+                return {
+                    ...sessionData,
+                    result: {
+                        ...result,
+                        segments: reconstructedSegments,
+                        naturalTranslation: reconstructedSegments.map(s => s.natural).join('\n')
+                    }
+                };
+            }
+        }
+    }
+    return sessionData;
+};
+
 const createNewSession = (): TranslationSession => ({
   id: 'session_main',
   name: `Edit`,
@@ -196,7 +242,8 @@ function AppContent() {
       if (savedSingle) {
           const parsed = JSON.parse(savedSingle);
           // Force customTerms empty to load from DB instead (avoid localStorage quota)
-          return { ...createNewSession(), ...parsed, customTerms: [], result: sanitizeResult(parsed.result) };
+          const baseSession = { ...createNewSession(), ...parsed, customTerms: [], result: sanitizeResult(parsed.result) };
+          return reconstructSegmentsIfEmpty(baseSession);
       }
       return createNewSession();
     } catch (e) {
@@ -353,6 +400,22 @@ useEffect(() => {
              setSession(prev => prev.currentNovelId ? prev : ({ ...prev, currentNovelId: savedNovelId }));
          }
      });
+
+     db.getActiveSession().then(savedDbSession => {
+         if (savedDbSession && savedDbSession.result) {
+             setSession(prev => {
+                 if (!prev.result?.segments || prev.result.segments.length === 0) {
+                     const restored = reconstructSegmentsIfEmpty({
+                         ...prev,
+                         ...savedDbSession,
+                         result: sanitizeResult(savedDbSession.result)
+                     });
+                     return restored;
+                 }
+                 return prev;
+             });
+         }
+     }).catch(console.warn);
   }, []);
 
   // Dong bo Custom Map vao Vietphrase Engine de chac chan ghi de len ban dich Vietphrase o moi noi
@@ -542,29 +605,32 @@ useEffect(() => {
     };
   }, [session.currentNovelId]);
 
-  // Fix lỗi QuotaExceededError khi lưu Session
+  // Tu dong khoi phuc lai cac dong doi chieu neu dang o tinh trang rong segments
   useEffect(() => {
+    if (session.result && (!session.result.segments || session.result.segments.length === 0)) {
+      const nat = session.result.naturalTranslation || '';
+      const raw = session.inputText || '';
+      if (nat.trim() || raw.trim()) {
+        const fixed = reconstructSegmentsIfEmpty(session);
+        if (fixed.result?.segments && fixed.result.segments.length > 0) {
+          setSession(fixed);
+        }
+      }
+    }
+  }, [session.result, session.inputText]);
+
+  // Luu phien lam viec hien tai an toan: Luon luu day du vao IndexedDB (khong gioi han dung luong)
+  // va luu du phong vao localStorage (neu localStorage qua tai thi IndexedDB van bao ve 100% du lieu)
+  useEffect(() => {
+    const sessionToSave = { ...session, customTerms: [] };
+    // 1. Luon luu day du 100% vao IndexedDB
+    db.saveActiveSession(sessionToSave).catch(console.error);
+
+    // 2. Luu vao localStorage
     try {
-        // Exclude customTerms from localStorage to save space
-        const sessionToSave = { ...session, customTerms: [] };
         setScopedStorageItem('app_single_session', JSON.stringify(sessionToSave));
     } catch (e) {
-        if (session.result) {
-            try {
-                // Thử lưu bản rút gọn (bỏ bớt segments nặng)
-                const leanResult = { ...session.result, segments: [] };
-                const leanSession = { ...session, customTerms: [], result: leanResult };
-                setScopedStorageItem('app_single_session', JSON.stringify(leanSession));
-            } catch (innerE) {
-                try {
-                    // Thử lưu không có result để cứu inputText
-                    const ultraLeanSession = { ...session, customTerms: [], result: null };
-                    setScopedStorageItem('app_single_session', JSON.stringify(ultraLeanSession));
-                } catch (lastE) {
-                    console.warn("Storage Quota Exceeded for Session");
-                }
-            }
-        }
+        console.warn("localStorage quota exceeded, session safely preserved in IndexedDB");
     }
   }, [session]);
 
@@ -1025,6 +1091,15 @@ useEffect(() => {
           ? { ...item, completedSegments: newCompleted, timestamp: Date.now() } 
           : item
       ));
+    }
+  };
+
+  const handleRestoreSegments = () => {
+    if (!session.result) return;
+    saveUndoSnapshot();
+    const fixed = reconstructSegmentsIfEmpty(session);
+    if (fixed.result?.segments && fixed.result.segments.length > 0) {
+      updateSession({ result: fixed.result });
     }
   };
 
@@ -1906,6 +1981,7 @@ useEffect(() => {
                                 onUpdateCharacters={handleUpdateCharacters}
                                 onOpenVocab={() => setShowMobileSidebar(true)}
                                 onOpenWorldInfo={() => setShowMobileWorldInfo(true)}
+                                onRestoreSegments={handleRestoreSegments}
                             />
                         </div>
                     </div>

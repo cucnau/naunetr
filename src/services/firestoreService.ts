@@ -1,6 +1,7 @@
 import { db, auth } from './firebase';
 import { collection, doc, setDoc, getDocs, deleteDoc, writeBatch, query, where, Timestamp, onSnapshot } from 'firebase/firestore';
 import { CustomTerm, Character, Relationship, Novel, Chapter, TextShortcut, TranslationSegment, TranslationResponse } from '../types';
+import { getAppNamespace } from './storageNamespace';
 
 export enum OperationType {
   CREATE = 'create',
@@ -587,7 +588,7 @@ export interface LiveSessionData {
 export const getDeviceId = (): string => {
   if (typeof window === 'undefined') return 'server';
   try {
-    let id = localStorage.getItem('app_device_id') || localStorage.getItem('chiVietDeviceId');
+    let id = localStorage.getItem('app_device_id');
     if (!id) {
       id = 'dev_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now();
       localStorage.setItem('app_device_id', id);
@@ -599,35 +600,12 @@ export const getDeviceId = (): string => {
 };
 
 /**
- * Xac dinh phan vung khong gian lam viec (App Scope / Instance Key)
- * Giup tach biet hoan toan cac ban web chay o repo khac nhau (Vercel vs GitHub vs Localhost)
- * tranh viec bi sync de len bang dang edit do cua nhau.
+ * Xác định phân vùng không gian làm việc (App Scope / Instance Key)
+ * Giúp tách biệt hoàn toàn các bản web chạy ở repo khác nhau trên GitHub Pages
+ * tránh việc bị sync đè lên bảng đang edit dở của nhau.
  */
 export const getAppScope = (): string => {
-  if (import.meta.env.VITE_APP_INSTANCE) {
-    return String(import.meta.env.VITE_APP_INSTANCE).trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
-  }
-
-  if (typeof window !== 'undefined') {
-    try {
-      const custom = localStorage.getItem('app_workspace_scope') || localStorage.getItem('chiVietAppScope');
-      if (custom && custom.trim()) {
-        return custom.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
-      }
-    } catch (_) {}
-  }
-
-  if (typeof window !== 'undefined' && window.location) {
-    const host = (window.location.hostname || '').toLowerCase();
-    if (host.includes('github.io')) return 'github';
-    if (host.includes('vercel.app')) return 'vercel';
-    if (host.includes('localhost') || host.includes('127.0.0.1')) return 'local';
-    if (host.includes('run.app')) return 'aistudio';
-    const cleanHost = host.replace(/[^a-z0-9]/g, '_').slice(0, 20);
-    if (cleanHost) return cleanHost;
-  }
-
-  return 'default';
+  return getAppNamespace();
 };
 
 export const setAppScope = (scope: string): void => {
@@ -635,11 +613,9 @@ export const setAppScope = (scope: string): void => {
   try {
     if (!scope || !scope.trim()) {
       localStorage.removeItem('app_workspace_scope');
-      localStorage.removeItem('chiVietAppScope');
     } else {
       const clean = scope.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
       localStorage.setItem('app_workspace_scope', clean);
-      localStorage.setItem('chiVietAppScope', clean);
     }
     window.location.reload();
   } catch (_) {}

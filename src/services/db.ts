@@ -13,6 +13,7 @@ export const KEY_VIETPHRASE = 'vietphrase_data';
 export const KEY_VIETPHRASE_FILES = 'vietphrase_files';
 export const KEY_CURRENT_NOVEL = 'current_novel_id';
 export const KEY_CHARACTERS = 'characters_data';
+export const KEY_ACTIVE_SESSION = 'active_session_data';
 
 const dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
     if (typeof window === 'undefined' || !window.indexedDB) {
@@ -315,6 +316,37 @@ export const db = {
             });
         } catch (e) {
             console.error("DB Save Characters Error", e);
+        }
+    },
+
+    async getActiveSession(): Promise<any | null> {
+        try {
+            const db = await dbPromise;
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(STORE_SETTINGS, 'readonly');
+                const store = tx.objectStore(STORE_SETTINGS);
+                const req = store.get(KEY_ACTIVE_SESSION);
+                req.onsuccess = () => resolve(req.result || null);
+                req.onerror = () => reject(req.error);
+            });
+        } catch (e) {
+            console.error("DB Get Active Session Error", e);
+            return null;
+        }
+    },
+
+    async saveActiveSession(sessionData: any): Promise<void> {
+        try {
+            const db = await dbPromise;
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(STORE_SETTINGS, 'readwrite');
+                const store = tx.objectStore(STORE_SETTINGS);
+                const req = store.put(sessionData, KEY_ACTIVE_SESSION);
+                req.onsuccess = () => resolve();
+                req.onerror = () => reject(req.error);
+            });
+        } catch (e) {
+            console.error("DB Save Active Session Error", e);
         }
     }
 };

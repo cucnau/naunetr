@@ -34,6 +34,7 @@ interface TranslationOutputProps {
   chaptersCount?: number;
   onOpenVocab?: () => void;
   onOpenWorldInfo?: () => void;
+  onRestoreSegments?: () => void;
 }
 
 const escapeRegExp = (string: string) => {
@@ -741,7 +742,8 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
     currentChapterName,
     chaptersCount = 0,
     onOpenVocab,
-    onOpenWorldInfo
+    onOpenWorldInfo,
+    onRestoreSegments
 }) => {
   const [showNamingModal, setShowNamingModal] = useState(false);
   const [exportFileName, setExportFileName] = useState('');
@@ -1885,7 +1887,22 @@ const containsChineseText = (str: string): boolean => {
                 </div>
              </div>
         ) : (
-             <div className="p-3"><p className="text-[15px] leading-[1.2] text-[#3E2723] whitespace-normal">{data.naturalTranslation.trim()}</p></div>
+             <div className="p-4 flex flex-col gap-3">
+               <div className="bg-[#FFF8E1] border border-[#FFE082] text-[#5D4037] p-3 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 shadow-sm">
+                 <div className="text-xs font-medium">
+                   Đoạn dịch đang hiển thị dạng văn bản gộp. Bấm nút bên cạnh để khôi phục lại bảng đối chiếu từng dòng:
+                 </div>
+                 {onRestoreSegments && (
+                   <button
+                     onClick={onRestoreSegments}
+                     className="px-3.5 py-1.5 bg-[#5D4037] hover:bg-[#3E2723] text-white rounded-lg text-xs font-bold transition-all shadow shrink-0 cursor-pointer"
+                   >
+                     Khôi phục Bảng đối chiếu
+                   </button>
+                 )}
+               </div>
+               <p className="text-[15px] leading-[1.3] text-[#3E2723] whitespace-pre-wrap font-serif-sc p-1">{data.naturalTranslation.trim()}</p>
+             </div>
         )}
       </div>
 
