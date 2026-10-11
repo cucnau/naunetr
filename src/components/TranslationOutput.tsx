@@ -2120,7 +2120,7 @@ const containsChineseText = (str: string): boolean => {
       )}
 
       {showNamingModal && createPortal(
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 animate-in fade-in duration-200">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4 animate-in fade-in duration-200">
           <div className="bg-[#FFFDF7] border border-[#D7CCC8] rounded-xl shadow-[0_20px_50px_rgba(62,39,35,0.3)] w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="bg-[#EFEBE9] px-4 py-3 border-b border-[#D7CCC8] flex items-center justify-between">
               <span className="text-xs font-bold text-[#3E2723] uppercase tracking-wider flex items-center gap-1.5">
@@ -2177,7 +2177,7 @@ const containsChineseText = (str: string): boolean => {
       )}
 
       {showSaveArchiveModal && createPortal(
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#3E2723]/60 backdrop-blur-sm animate-in fade-in duration-200">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 animate-in fade-in duration-200">
           <div className="bg-[#FFFDF7] rounded-xl border border-[#D7CCC8] shadow-2xl w-full max-w-md overflow-hidden transform animate-in zoom-in-95 duration-150">
             <div className="px-5 py-4 border-b border-[#D7CCC8] bg-[#EFE5D9] flex justify-between items-center">
               <div className="flex items-center gap-2 text-[#3E2723] font-bold text-sm">

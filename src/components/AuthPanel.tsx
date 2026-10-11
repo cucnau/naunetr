@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { auth } from '../services/firebase';
 import { 
   signInWithPopup, 
@@ -240,7 +241,7 @@ export const AuthPanel: React.FC = () => {
       )}
 
       {/* LOGIN/REGISTER MODAL */}
-      {isAuthModalOpen && (
+      {isAuthModalOpen && createPortal(
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4">
           <div className="fixed inset-0 bg-black/50" onClick={() => setIsAuthModalOpen(false)} />
           <div className="relative bg-[#FAFAFA] border border-[#D7CCC8] rounded-xl shadow-2xl w-full max-w-md overflow-hidden z-10 animate-in zoom-in-95 duration-200 text-[#3E2723]">
@@ -399,11 +400,12 @@ export const AuthPanel: React.FC = () => {
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* ACCOUNT SETTINGS & LINKING MODAL */}
-      {isSettingsModalOpen && user && (
+      {isSettingsModalOpen && user && createPortal(
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4">
           <div className="fixed inset-0 bg-black/50" onClick={() => setIsSettingsModalOpen(false)} />
           <div className="relative bg-[#FAFAFA] border border-[#D7CCC8] rounded-xl shadow-2xl w-full max-w-md overflow-hidden z-10 animate-in zoom-in-95 duration-200 text-[#3E2723]">
@@ -560,7 +562,8 @@ export const AuthPanel: React.FC = () => {
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Check } from 'lucide-react';
 import { AVAILABLE_FONTS, FontOption, getStoredFontId, applyFont } from '../services/fontService';
 
@@ -23,7 +24,7 @@ export const FontSelectorModal: React.FC<FontSelectorModalProps> = ({ isOpen, on
     applyFont(font.id);
   };
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/50 animate-in fade-in duration-150">
       <div 
         className="fixed inset-0" 
@@ -96,6 +97,7 @@ export const FontSelectorModal: React.FC<FontSelectorModalProps> = ({ isOpen, on
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

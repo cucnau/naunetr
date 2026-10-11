@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { HistoryItem } from '../types';
 import { X, Search, Clock, Trash2, RotateCcw, Calendar } from 'lucide-react';
 
@@ -71,7 +72,7 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({
 
   if (!isOpen) return null;
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/50 animate-in fade-in duration-200">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh]">
         
@@ -179,6 +180,7 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

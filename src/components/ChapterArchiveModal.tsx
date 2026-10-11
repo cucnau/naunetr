@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Chapter, CustomTerm } from '../types';
 import { X, Search, BookOpen, Trash2, RotateCcw, Calendar, CheckSquare, Square, FolderDown, Edit2, Check, AlertCircle } from 'lucide-react';
 import { vietphraseEngine } from '../services/vietphraseService';
@@ -259,7 +260,7 @@ export const ChapterArchiveModal: React.FC<ChapterArchiveModalProps> = ({
   const visibleIds = filteredChapters.map(c => c.id);
   const allSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.has(id));
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/50 animate-in fade-in duration-200">
       <div className="bg-[#FFFDF7] rounded-xl shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[85vh] border border-[#D7CCC8]">
         
@@ -556,6 +557,7 @@ export const ChapterArchiveModal: React.FC<ChapterArchiveModalProps> = ({
           </div>
         </div>
       )}
-    </div>
+    </div>,
+    document.body
   );
 };

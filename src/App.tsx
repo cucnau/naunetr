@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { AppStatus, TranslationSession, HistoryItem, TranslationResponse, Chapter, TranslationSegment, Character, Relationship, CustomTerm } from './types';
 import { exportToExcel } from './services/excelService';
 import { getNovels, getChaptersFromCloud, saveChapterToCloud, bulkSaveChaptersToCloud, deleteChapterFromCloud, clearNovelChaptersFromCloud, syncFirestoreData, subscribeToChapters, subscribeToUserLiveWorkspace, saveUserLiveWorkspaceToCloud, getDeviceId } from './services/firestoreService';
@@ -1730,7 +1731,7 @@ useEffect(() => {
         </div>
 
         {/* MOBILE / TABLET SLIDE-OVER DRAWER FOR DICTIONARY */}
-        {showMobileSidebar && (
+        {showMobileSidebar && createPortal(
           <div className={`fixed inset-0 z-50 flex ${isFocusMode ? '' : 'lg:hidden'} animate-in fade-in duration-150`}>
             <div 
               className="fixed inset-0 bg-black/50 transition-opacity" 
@@ -1760,7 +1761,8 @@ useEffect(() => {
                 />
               </div>
             </div>
-          </div>
+          </div>,
+          document.body
         )}
 
         {/* CENTER MAIN CONTENT */}
@@ -2013,7 +2015,7 @@ useEffect(() => {
         </div>
 
         {/* MOBILE / TABLET SLIDE-OVER DRAWER FOR WORLD INFO & CHARACTERS */}
-        {showMobileWorldInfo && (
+        {showMobileWorldInfo && createPortal(
           <div className={`fixed inset-0 z-50 flex justify-end ${isFocusMode ? '' : 'xl:hidden'} animate-in fade-in duration-150`}>
             <div 
               className="fixed inset-0 bg-black/50 transition-opacity" 
@@ -2045,7 +2047,8 @@ useEffect(() => {
                 />
               </div>
             </div>
-          </div>
+          </div>,
+          document.body
         )}
       </div>
 
