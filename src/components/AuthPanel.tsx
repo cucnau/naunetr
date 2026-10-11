@@ -241,17 +241,17 @@ export const AuthPanel: React.FC = () => {
 
       {/* LOGIN/REGISTER MODAL */}
       {isAuthModalOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-xs" onClick={() => setIsAuthModalOpen(false)} />
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4">
+          <div className="fixed inset-0 bg-black/50" onClick={() => setIsAuthModalOpen(false)} />
           <div className="relative bg-[#FAFAFA] border border-[#D7CCC8] rounded-xl shadow-2xl w-full max-w-md overflow-hidden z-10 animate-in zoom-in-95 duration-200 text-[#3E2723]">
             {/* Header */}
-            <div className="bg-[#4E342E] text-white px-5 py-4 flex items-center justify-between border-b border-[#3E2723]">
-              <h3 className="text-sm font-bold tracking-wider text-[#FFECB3]">
+            <div className="bg-[#EFE5D9] text-[#3E2723] px-5 py-4 flex items-center justify-between border-b border-[#D7CCC8]">
+              <h3 className="text-sm font-bold tracking-wider text-[#3E2723]">
                 {authTab === 'login' ? 'ĐĂNG NHẬP HỆ THỐNG' : 'ĐĂNG KÝ TÀI KHOẢN'}
               </h3>
               <button 
                 onClick={() => setIsAuthModalOpen(false)}
-                className="text-[#D7CCC8] hover:text-white p-1 rounded-md transition-colors cursor-pointer"
+                className="text-[#5D4037] hover:text-[#3E2723] hover:bg-[#D7CCC8]/50 p-1 rounded-md transition-colors cursor-pointer"
               >
                 <X size={16} />
               </button>
@@ -404,15 +404,15 @@ export const AuthPanel: React.FC = () => {
 
       {/* ACCOUNT SETTINGS & LINKING MODAL */}
       {isSettingsModalOpen && user && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-xs" onClick={() => setIsSettingsModalOpen(false)} />
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4">
+          <div className="fixed inset-0 bg-black/50" onClick={() => setIsSettingsModalOpen(false)} />
           <div className="relative bg-[#FAFAFA] border border-[#D7CCC8] rounded-xl shadow-2xl w-full max-w-md overflow-hidden z-10 animate-in zoom-in-95 duration-200 text-[#3E2723]">
             {/* Header */}
-            <div className="bg-[#4E342E] text-white px-5 py-4 flex items-center justify-between border-b border-[#3E2723]">
-              <h3 className="text-sm font-bold tracking-wider text-[#FFECB3]">THIẾT LẬP TÀI KHOẢN</h3>
+            <div className="bg-[#EFE5D9] text-[#3E2723] px-5 py-4 flex items-center justify-between border-b border-[#D7CCC8]">
+              <h3 className="text-sm font-bold tracking-wider text-[#3E2723]">THIẾT LẬP TÀI KHOẢN</h3>
               <button 
                 onClick={() => setIsSettingsModalOpen(false)}
-                className="text-[#D7CCC8] hover:text-white p-1 rounded-md transition-colors cursor-pointer"
+                className="text-[#5D4037] hover:text-[#3E2723] hover:bg-[#D7CCC8]/50 p-1 rounded-md transition-colors cursor-pointer"
               >
                 <X size={16} />
               </button>

@@ -71,7 +71,9 @@
             ? window.location.pathname 
             : window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/') + 1);
           const swPath = basePath + 'sw.js';
-          navigator.serviceWorker.register(swPath, { scope: basePath }).catch(err => {
+          navigator.serviceWorker.register(swPath, { scope: basePath }).then(reg => {
+            reg.update();
+          }).catch(err => {
             console.log('ServiceWorker registration failed: ', err);
           });
         });

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'edit-translation-v5';
+const CACHE_NAME = 'edit-translation-v7';
 const ASSETS = [
   './',
   './index.html',
@@ -10,11 +10,8 @@ self.addEventListener('install', (event) => {
   self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE_NAME).then(async (cache) => {
-      // Dùng map để cache từng asset an toàn, không bị crash nếu có link bị lỗi
       await Promise.allSettled(
-        ASSETS.map((asset) => cache.add(asset).catch((err) => {
-          console.warn('Không thể cache asset:', asset, err);
-        }))
+        ASSETS.map((asset) => cache.add(asset).catch(() => {}))
       );
     })
   );
@@ -48,36 +45,21 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Đối với tài liệu HTML (index.html, trang chủ, điều hướng), áp dụng chiến lược Network-First
-  if (
-    event.request.mode === 'navigate' || 
-    url.pathname === '/' || 
-    url.pathname.endsWith('.html') ||
-    url.pathname === '/index.html'
-  ) {
-    event.respondWith(
-      fetch(event.request)
-        .then((response) => {
-          // Lưu bản HTML mới nhất vào cache để dự phòng lúc mất mạng
+  // Chiến lược Network-First toàn diện: Luôn tải từ mạng trước để nhận bản mới nhất,
+  // chỉ khi mất mạng offline mới fallback lấy từ cache
+  event.respondWith(
+    fetch(event.request)
+      .then((response) => {
+        if (response && response.status === 200 && response.type === 'basic') {
           const clone = response.clone();
           caches.open(CACHE_NAME).then((cache) => {
             cache.put(event.request, clone);
           });
-          return response;
-        })
-        .catch(() => {
-          // Khi mất mạng hoàn toàn, mới lấy bản index.html từ cache ra dùng
-          return caches.match(event.request);
-        })
-    );
-    return;
-  }
-
-  // Đối với các file asset JS/CSS do Vite build có chứa hash (ví dụ: index-XXXX.js),
-  // chúng là độc nhất nên nếu có trong cache thì trả về luôn, chưa có thì tải từ mạng
-  event.respondWith(
-    caches.match(event.request).then((response) => {
-      return response || fetch(event.request);
-    })
+        }
+        return response;
+      })
+      .catch(() => {
+        return caches.match(event.request);
+      })
   );
 });

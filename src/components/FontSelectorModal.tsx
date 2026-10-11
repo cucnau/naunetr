@@ -24,7 +24,7 @@ export const FontSelectorModal: React.FC<FontSelectorModalProps> = ({ isOpen, on
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/50 backdrop-blur-xs animate-in fade-in duration-150">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/50 animate-in fade-in duration-150">
       <div 
         className="fixed inset-0" 
         onClick={onClose} 
@@ -32,13 +32,13 @@ export const FontSelectorModal: React.FC<FontSelectorModalProps> = ({ isOpen, on
 
       <div className="relative w-full max-w-md bg-[#FFFDF7] rounded-xl shadow-2xl border border-[#D7CCC8] flex flex-col max-h-[85vh] z-10 animate-in zoom-in-95 duration-200 overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-2.5 bg-[#4E342E] text-white border-b border-[#3E2723] shrink-0">
-          <h2 className="text-sm sm:text-base font-bold text-[#FFECB3]">
+        <div className="flex items-center justify-between px-4 py-2.5 bg-[#EFE5D9] text-[#3E2723] border-b border-[#D7CCC8] shrink-0">
+          <h2 className="text-sm sm:text-base font-bold text-[#3E2723]">
             Phông chữ
           </h2>
           <button
             onClick={onClose}
-            className="p-1 rounded-md text-[#D7CCC8] hover:text-white hover:bg-[#5D4037] transition-colors"
+            className="p-1 rounded-md text-[#5D4037] hover:text-[#3E2723] hover:bg-[#D7CCC8]/50 transition-colors"
             title="Đóng (Esc)"
           >
             <X size={18} />
@@ -90,7 +90,7 @@ export const FontSelectorModal: React.FC<FontSelectorModalProps> = ({ isOpen, on
         <div className="px-3 py-2 bg-[#EFEBE9] border-t border-[#D7CCC8] flex justify-end shrink-0">
           <button
             onClick={onClose}
-            className="px-4 py-1.5 rounded-lg bg-[#4E342E] text-[#FFECB3] hover:text-white hover:bg-[#3E2723] text-xs font-bold shadow-xs transition-colors"
+            className="px-4 py-1.5 rounded-lg bg-[#5D4037] text-white hover:bg-[#3E2723] text-xs font-bold shadow-xs transition-colors"
           >
             Xong
           </button>

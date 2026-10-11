@@ -1733,17 +1733,17 @@ useEffect(() => {
         {showMobileSidebar && (
           <div className={`fixed inset-0 z-50 flex ${isFocusMode ? '' : 'lg:hidden'} animate-in fade-in duration-150`}>
             <div 
-              className="fixed inset-0 bg-black/40 backdrop-blur-xs transition-opacity" 
+              className="fixed inset-0 bg-black/50 transition-opacity" 
               onClick={() => setShowMobileSidebar(false)} 
             />
             <div className="relative w-80 max-w-[85vw] bg-[#EFE5D9] h-full shadow-2xl z-10 flex flex-col animate-in slide-in-from-left duration-200">
-              <div className="flex items-center justify-between p-2.5 bg-[#4E342E] text-white border-b border-[#3E2723]">
-                <span className="text-xs font-bold text-[#FFECB3] flex items-center gap-1.5">
-                  <BookA size={14} /> Kho từ vựng
+              <div className="flex items-center justify-between p-2.5 bg-[#EFE5D9] text-[#3E2723] border-b border-[#D7CCC8]">
+                <span className="text-xs font-bold text-[#3E2723] flex items-center gap-1.5">
+                  <BookA size={14} className="text-[#5D4037]" /> Kho từ vựng
                 </span>
                 <button 
                   onClick={() => setShowMobileSidebar(false)}
-                  className="p-1 rounded-md text-[#D7CCC8] hover:text-white hover:bg-[#5D4037]"
+                  className="p-1 rounded-md text-[#5D4037] hover:text-[#3E2723] hover:bg-[#D7CCC8]/50 transition-colors"
                 >
                   <X size={16} />
                 </button>
@@ -2016,17 +2016,17 @@ useEffect(() => {
         {showMobileWorldInfo && (
           <div className={`fixed inset-0 z-50 flex justify-end ${isFocusMode ? '' : 'xl:hidden'} animate-in fade-in duration-150`}>
             <div 
-              className="fixed inset-0 bg-black/40 backdrop-blur-xs transition-opacity" 
+              className="fixed inset-0 bg-black/50 transition-opacity" 
               onClick={() => setShowMobileWorldInfo(false)} 
             />
             <div className="relative w-96 max-w-[92vw] bg-[#EFE5D9] h-full shadow-2xl z-10 flex flex-col animate-in slide-in-from-right duration-200">
-              <div className="flex items-center justify-between p-2.5 bg-[#4E342E] text-white border-b border-[#3E2723]">
-                <span className="text-xs font-bold text-[#FFECB3] flex items-center gap-1.5">
-                  <Users size={14} /> Nhân vật & Thiết lập
+              <div className="flex items-center justify-between p-2.5 bg-[#EFE5D9] text-[#3E2723] border-b border-[#D7CCC8]">
+                <span className="text-xs font-bold text-[#3E2723] flex items-center gap-1.5">
+                  <Users size={14} className="text-[#5D4037]" /> Nhân vật & Thiết lập
                 </span>
                 <button 
                   onClick={() => setShowMobileWorldInfo(false)}
-                  className="p-1 rounded-md text-[#D7CCC8] hover:text-white hover:bg-[#5D4037]"
+                  className="p-1 rounded-md text-[#5D4037] hover:text-[#3E2723] hover:bg-[#D7CCC8]/50 transition-colors"
                 >
                   <X size={16} />
                 </button>

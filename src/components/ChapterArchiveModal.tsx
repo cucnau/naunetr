@@ -260,7 +260,7 @@ export const ChapterArchiveModal: React.FC<ChapterArchiveModalProps> = ({
   const allSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.has(id));
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#3E2723]/70 backdrop-blur-sm animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/50 animate-in fade-in duration-200">
       <div className="bg-[#FFFDF7] rounded-xl shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[85vh] border border-[#D7CCC8]">
         
         {/* Header */}
