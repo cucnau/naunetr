@@ -1612,13 +1612,13 @@ useEffect(() => {
     <div className="h-screen flex flex-col bg-[#F5E6D3] text-[#3E2723] font-sans overflow-hidden">
       
       {/* HEADER */}
-      <header className={`bg-[#4E342E] text-[#F5E6D3] border-b border-[#3E2723] h-14 items-center justify-between px-3 sm:px-4 shrink-0 z-20 shadow-md overflow-x-auto no-scrollbar ${isFocusMode ? 'hidden' : 'flex'}`}>
+      <header className={`bg-[#EFE5D9] text-[#3E2723] border-b border-[#D7CCC8] h-14 items-center justify-between px-3 sm:px-4 shrink-0 z-20 shadow-xs overflow-x-auto no-scrollbar ${isFocusMode ? 'hidden' : 'flex'}`}>
         <div className="flex items-center gap-1.5 sm:gap-4 shrink-0">
           {/* Segmented Mode Control */}
-          <div className="flex bg-[#3E2723] p-0.5 rounded-lg border border-[#5D4037]">
+          <div className="flex bg-[#E4D5C3] p-0.5 rounded-lg border border-[#D7CCC8]">
             <button
               onClick={() => setMode('edit')}
-              className={`px-2 sm:px-3 py-1 rounded-md text-[11px] font-bold transition-all ${mode === 'edit' ? 'bg-[#FFECB3] text-[#3E2723] shadow-sm' : 'text-[#D7CCC8] hover:text-[#FFECB3]'}`}
+              className={`px-2 sm:px-3 py-1 rounded-md text-[11px] font-bold transition-all ${mode === 'edit' ? 'bg-[#5D4037] text-white shadow-xs' : 'text-[#5D4037] hover:text-[#3E2723]'}`}
               title="Chế độ Edit"
             >
               <span className="sm:hidden">E</span>
@@ -1626,7 +1626,7 @@ useEffect(() => {
             </button>
             <button
               onClick={() => setMode('beta')}
-              className={`px-2 sm:px-3 py-1 rounded-md text-[11px] font-bold transition-all flex items-center gap-1 ${mode === 'beta' ? 'bg-[#FFECB3] text-[#3E2723] shadow-sm' : 'text-[#D7CCC8] hover:text-[#FFECB3]'}`}
+              className={`px-2 sm:px-3 py-1 rounded-md text-[11px] font-bold transition-all flex items-center gap-1 ${mode === 'beta' ? 'bg-[#5D4037] text-white shadow-xs' : 'text-[#5D4037] hover:text-[#3E2723]'}`}
               title="Chế độ Beta"
             >
               <span className="sm:hidden">B</span>
@@ -1640,7 +1640,7 @@ useEffect(() => {
             {/* Nút mở Từ vựng cho màn hình nhỏ / Tablet (Chỉ icon) */}
             <button
               onClick={() => setShowMobileSidebar(true)}
-              className="lg:hidden flex items-center justify-center text-[#FFECB3] hover:text-white bg-[#5D4037]/60 p-2 sm:px-2.5 sm:py-1 rounded-full border border-[#FFECB3]/20 transition-colors"
+              className="lg:hidden flex items-center justify-center text-[#5D4037] hover:text-[#3E2723] bg-white hover:bg-[#FAF6F0] p-2 sm:px-2.5 sm:py-1 rounded-full border border-[#D7CCC8] shadow-2xs transition-colors"
               title="Kho Từ vựng"
             >
                <BookA size={14} />
@@ -1649,7 +1649,7 @@ useEffect(() => {
             {/* Nút mở Nhân vật & Quan hệ cho màn hình nhỏ / Tablet (Chỉ icon) */}
             <button
               onClick={() => setShowMobileWorldInfo(true)}
-              className="xl:hidden flex items-center justify-center text-[#FFECB3] hover:text-white bg-[#5D4037]/60 p-2 sm:px-2.5 sm:py-1 rounded-full border border-[#FFECB3]/20 transition-colors"
+              className="xl:hidden flex items-center justify-center text-[#5D4037] hover:text-[#3E2723] bg-white hover:bg-[#FAF6F0] p-2 sm:px-2.5 sm:py-1 rounded-full border border-[#D7CCC8] shadow-2xs transition-colors"
               title="Bảng Nhân vật & Thiết lập"
             >
                <Users size={14} />
@@ -1661,35 +1661,35 @@ useEffect(() => {
             />
             <button 
               onClick={() => setShowShortcuts(true)} 
-              className={`flex items-center gap-1.5 text-[10px] font-medium px-2.5 py-1 rounded-full border transition-colors ${
+              className={`flex items-center gap-1.5 text-[10px] font-medium px-2.5 py-1 rounded-full border transition-colors shadow-2xs ${
                 shortcutsEnabled 
-                  ? 'text-[#FFECB3] hover:text-white hover:bg-[#5D4037] bg-[#5D4037]/40 border-[#FFECB3]/20' 
-                  : 'text-[#A1887F] hover:text-white hover:bg-[#5D4037] border-[#5D4037]'
+                  ? 'text-[#5D4037] hover:text-[#3E2723] bg-white hover:bg-[#FAF6F0] border-[#D7CCC8]' 
+                  : 'text-[#8D6E63] hover:text-[#3E2723] bg-white/60 border-[#D7CCC8]'
               }`}
               title="Bảng gõ tắt (Auto-replace)"
             >
                <Keyboard size={12} />
                <span className="hidden sm:inline">Gõ tắt</span>
                {shortcuts.length > 0 && (
-                 <span className={`text-[9px] px-1.5 py-0.2 rounded-full font-mono font-bold ${shortcutsEnabled ? 'bg-[#FFECB3]/20 text-[#FFECB3]' : 'bg-gray-600/40 text-gray-300'}`}>
+                 <span className={`text-[9px] px-1.5 py-0.2 rounded-full font-mono font-bold ${shortcutsEnabled ? 'bg-[#EFEBE9] text-[#5D4037]' : 'bg-gray-200 text-gray-500'}`}>
                    {shortcuts.filter(s => s.enabled).length}
                  </span>
                )}
             </button>
             <button 
               onClick={() => setShowFontModal(true)} 
-              className="flex items-center gap-1.5 text-[10px] font-medium text-[#FFECB3] hover:text-white hover:bg-[#5D4037] bg-[#5D4037]/30 px-2 sm:px-2.5 py-1 rounded-full border border-[#FFECB3]/20 transition-colors"
+              className="flex items-center gap-1.5 text-[10px] font-medium text-[#5D4037] hover:text-[#3E2723] bg-white hover:bg-[#FAF6F0] px-2 sm:px-2.5 py-1 rounded-full border border-[#D7CCC8] shadow-2xs transition-colors"
               title="Đổi phông chữ hiển thị toàn ứng dụng"
             >
                <Type size={12} />
                <span className="hidden sm:inline">Phông chữ</span>
             </button>
-            <button onClick={() => setShowChapters(true)} className="flex items-center gap-1.5 text-[10px] font-medium text-[#FFECB3] hover:text-white hover:bg-[#5D4037] bg-[#5D4037]/30 px-2 sm:px-2.5 py-1 rounded-full border border-[#FFECB3]/20 transition-colors">
+            <button onClick={() => setShowChapters(true)} className="flex items-center gap-1.5 text-[10px] font-medium text-[#5D4037] hover:text-[#3E2723] bg-white hover:bg-[#FAF6F0] px-2 sm:px-2.5 py-1 rounded-full border border-[#D7CCC8] shadow-2xs transition-colors">
                <FolderOpen size={12} />
                <span className="hidden sm:inline">Kho chương</span>
                <span>({currentNovelChapters.length})</span>
             </button>
-            <button onClick={() => setShowHistory(true)} className="flex items-center gap-1.5 text-[10px] font-medium text-[#D7CCC8] hover:text-white hover:bg-[#5D4037] px-2 py-1 rounded-full border border-[#5D4037] transition-colors">
+            <button onClick={() => setShowHistory(true)} className="flex items-center gap-1.5 text-[10px] font-medium text-[#5D4037] hover:text-[#3E2723] bg-white hover:bg-[#FAF6F0] px-2 py-1 rounded-full border border-[#D7CCC8] shadow-2xs transition-colors">
                <History size={12} />
                <span className="hidden sm:inline">Lịch sử</span>
             </button>
@@ -1698,12 +1698,12 @@ useEffect(() => {
               <div 
                 className={`flex items-center gap-1 text-[10px] px-2 py-1 rounded-full border transition-all ${
                   Date.now() - lastRemoteSyncTime < 4000
-                    ? 'bg-emerald-800/80 text-emerald-200 border-emerald-500 shadow-sm animate-pulse'
-                    : 'text-[#D7CCC8]/70 border-[#5D4037] bg-[#3E2723]/40'
+                    ? 'bg-emerald-100 text-emerald-800 border-emerald-400 shadow-sm animate-pulse'
+                    : 'text-[#5D4037] border-[#D7CCC8] bg-white shadow-2xs'
                 }`}
                 title={Date.now() - lastRemoteSyncTime < 4000 ? "Vừa đồng bộ tức thì từ thiết bị khác!" : "Đang kết nối đồng bộ thời gian thực (Laptop ⇄ Điện thoại)"}
               >
-                <Wifi size={11} className={Date.now() - lastRemoteSyncTime < 4000 ? "text-emerald-300" : "text-[#D7CCC8]/60"} />
+                <Wifi size={11} className={Date.now() - lastRemoteSyncTime < 4000 ? "text-emerald-600" : "text-[#8D6E63]"} />
                 <span className="hidden md:inline font-mono text-[9px]">
                   {Date.now() - lastRemoteSyncTime < 4000 ? "Đã đồng bộ" : "Live"}
                 </span>

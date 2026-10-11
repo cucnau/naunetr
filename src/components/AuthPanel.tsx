@@ -210,7 +210,7 @@ export const AuthPanel: React.FC = () => {
               resetForm();
               setIsSettingsModalOpen(true);
             }} 
-            className="flex items-center justify-center text-[#D7CCC8] hover:text-[#FFECB3] hover:bg-[#5D4037] p-2 rounded-full border border-[#5D4037] transition-all duration-200 cursor-pointer" 
+            className="flex items-center justify-center text-[#5D4037] hover:text-[#3E2723] bg-white hover:bg-[#FAF6F0] p-2 rounded-full border border-[#D7CCC8] shadow-2xs transition-all duration-200 cursor-pointer" 
             title="Thiết lập tài khoản & Liên kết"
           >
             <UserIcon size={13} />
@@ -219,7 +219,7 @@ export const AuthPanel: React.FC = () => {
           {/* Simple Logout Button */}
           <button 
             onClick={handleSignOut} 
-            className="flex items-center justify-center text-[#D7CCC8] hover:text-white hover:bg-[#5D4037] p-2 rounded-full border border-[#5D4037] transition-all duration-200 cursor-pointer" 
+            className="flex items-center justify-center text-[#5D4037] hover:text-[#3E2723] bg-white hover:bg-[#FAF6F0] p-2 rounded-full border border-[#D7CCC8] shadow-2xs transition-all duration-200 cursor-pointer" 
             title={`Đăng xuất (${user.displayName || user.email || 'User'})`}
           >
             <LogOut size={13} />
@@ -232,7 +232,7 @@ export const AuthPanel: React.FC = () => {
             setAuthTab('login');
             setIsAuthModalOpen(true);
           }} 
-          className="flex items-center justify-center text-[#D7CCC8] hover:text-white hover:bg-[#5D4037] p-2 rounded-full border border-[#5D4037] transition-all duration-200 cursor-pointer" 
+          className="flex items-center justify-center text-[#5D4037] hover:text-[#3E2723] bg-white hover:bg-[#FAF6F0] p-2 rounded-full border border-[#D7CCC8] shadow-2xs transition-all duration-200 cursor-pointer" 
           title="Đăng nhập (Email hoặc Google)"
         >
           <LogIn size={13} />

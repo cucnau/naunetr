@@ -130,12 +130,12 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, on
 
   return (
     <div className="flex items-center gap-1.5 shrink-0">
-      <div className="flex items-center gap-1 bg-[#5D4037] rounded-md border border-[#4E342E] px-2 py-1">
-        <Book size={12} className="text-[#D7CCC8]" />
+      <div className="flex items-center gap-1 bg-white hover:bg-[#FAF6F0] rounded-md border border-[#D7CCC8] px-2 py-1 shadow-2xs transition-colors">
+        <Book size={12} className="text-[#5D4037]" />
         <select 
           value={currentNovelId || (novels[0]?.id || '')} 
           onChange={(e) => onSelectNovel(e.target.value)}
-          className="bg-transparent text-[#D7CCC8] text-[10px] outline-none max-w-[120px] cursor-pointer"
+          className="bg-transparent text-[#3E2723] font-medium text-[10px] outline-none max-w-[120px] cursor-pointer"
         >
           {novels.length === 0 && <option value="" disabled>-- Chọn truyện --</option>}
           {novels.map(n => (
@@ -143,16 +143,16 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, on
           ))}
         </select>
         {loading ? (
-          <Loader2 size={12} className="animate-spin text-[#D7CCC8] ml-0.5" />
+          <Loader2 size={12} className="animate-spin text-[#8D6E63] ml-0.5" />
         ) : (
-          <button onClick={handleCreate} className="ml-1 text-[#D7CCC8] hover:text-white" title="Tạo truyện mới">
+          <button onClick={handleCreate} className="ml-1 text-[#8D6E63] hover:text-[#3E2723]" title="Tạo truyện mới">
             <Plus size={12} />
           </button>
         )}
       </div>
       {error && (
         <span 
-          className="text-[9px] text-[#D7CCC8] bg-[#4E342E] border border-[#3E2723] px-1.5 py-0.5 rounded cursor-pointer opacity-80 hover:opacity-100" 
+          className="text-[9px] text-[#C62828] bg-red-50 border border-red-200 px-1.5 py-0.5 rounded cursor-pointer opacity-90 hover:opacity-100" 
           title={`${error} - Bấm để tải lại từ Cloud`}
           onClick={() => fetchNovels()}
         >
