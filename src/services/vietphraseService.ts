@@ -1,5 +1,6 @@
 import { CustomTerm, VietphraseFileItem, VietphraseCategory } from "../types";
 import { db } from "./db";
+import { BASE_LACVIET_PHRASES, BASE_HANVIET_MAP } from "./lacvietData";
 
 export function detectVietphraseCategory(filename: string): VietphraseCategory {
   const lower = filename.toLowerCase();
@@ -47,7 +48,12 @@ export function detectVietphraseCategory(filename: string): VietphraseCategory {
 // Hàm lọc sạch ký tự xuống dòng / tab rác trong file từ điển thông thường
 export function cleanDictionaryValue(val: string): string {
   if (!val) return "";
-  return val.split(/[\r\n\t]|\\n|\\t/)[0].trim();
+  let clean = val.split(/[\r\n\t]|\\n|\\t/)[0].trim();
+  if (!clean || /^[\s+=*#\-_/\\|]+$/.test(clean)) return "";
+  // Loại bỏ các ký tự dấu cộng, dấu bằng hoặc ký tự điều khiển ở đầu
+  clean = clean.replace(/^[+=*#\-_/\\|\s]+/, '').trim();
+  if (!clean || /^[\s+=*#\-_/\\|]+$/.test(clean)) return "";
+  return clean;
 }
 
 // Hàm bóc tách âm Hán Việt / từ ngắn gọn sạch sẽ từ định nghĩa chi tiết của Lạc Việt
@@ -58,22 +64,37 @@ export function extractCleanLacVietWord(raw: string): string {
   const hanVietMatch = raw.match(/Hán\s*Việt\s*:\s*([^\\\r\n\t;/,+\[\]]+)/i);
   if (hanVietMatch && hanVietMatch[1] && hanVietMatch[1].trim()) {
     const hv = hanVietMatch[1].trim();
-    return hv.split(/[,;\s]+/)[0].toLowerCase();
+    const candidate = hv.split(/[,;\s]+/)[0].toLowerCase().trim();
+    if (candidate && !/^[\s+=*#\-_/\\|]+$/.test(candidate)) return candidate;
   }
 
-  // 2. Tách theo dấu gạch chéo / nếu có nhiều nghĩa
-  let firstPart = raw.split('/')[0].trim();
+  // 2. Làm sạch chuỗi raw: thay các ký tự xuống dòng bằng khoảng trắng
+  let text = raw.replace(/\\n|\\r|\\t|[\r\n\t]+/g, ' ').trim();
 
-  // 3. Cắt bỏ hoàn toàn các phần chú thích từ điển từ ký tự +, [, (, \, \n, \t, số thứ tự
-  firstPart = firstPart.split(/\+|\[|\{|\(|\n|\r|\t|\\n|\\t/)[0].trim();
+  // 3. Nếu chuỗi bắt đầu bằng dấu + hoặc nhiều dấu +: loại bỏ các ký tự điều khiển đầu dòng
+  text = text.replace(/^[+=*#\-_/\\|\s]+/, '').trim();
 
-  // 4. Cắt theo dấu phẩy hoặc chấm phẩy
-  firstPart = firstPart.split(/[,;]/)[0].trim();
+  // 4. Nếu có phiên âm pinyin trong ngoặc [...] hoặc {...} hoặc (...) ở đầu: loại bỏ
+  text = text.replace(/^(?:\[[^\]]*\]|\{[^}]*\}|\([^)]*\))\s*/, '').trim();
 
-  // 5. Nếu từ vẫn quá dài (> 15 ký tự) thì chỉ lấy 1 từ đầu tiên
-  if (firstPart.length > 15) {
+  // 5. Lại loại bỏ dấu + nếu sau pinyin có dấu + (như [zài] +ở, tại)
+  text = text.replace(/^[+=*#\-_/\\|\s]+/, '').trim();
+
+  // 6. Lấy nghĩa đầu tiên trước dấu gạch chéo, dấu chấm phẩy, dấu phẩy, dấu cộng tiếp theo
+  let firstPart = text.split(/[/;,\+\|]/)[0].trim();
+
+  // 7. Loại bỏ các ký tự chú thích loại từ như (d.), (đt.), [d.], v.v.
+  firstPart = firstPart.replace(/^(?:\([a-zA-Z0-9\s.]+\)|\[[a-zA-Z0-9\s.]+\])\s*/, '').trim();
+
+  // 8. Nếu chỉ toàn dấu ký hiệu hoặc rỗng thì loại bỏ hoàn toàn
+  if (!firstPart || /^[\s+=*#\-_/\\|]+$/.test(firstPart)) return "";
+
+  // 9. Nếu quá dài (> 20 ký tự), lấy từ đầu tiên
+  if (firstPart.length > 20) {
     const words = firstPart.split(/\s+/);
-    if (words.length > 0) return words[0];
+    if (words.length > 0 && words[0] && !/^[\s+=*#\-_/\\|]+$/.test(words[0])) {
+      return words[0];
+    }
   }
 
   return firstPart;
@@ -373,6 +394,9 @@ class VietphraseEngine {
           }
 
           if (key && value) {
+            // Lọc bỏ nếu key hoặc value chỉ là ký hiệu điều khiển hoặc dấu cộng
+            if (/^[\s+=*#\-_/\\|]+$/.test(key)) continue;
+
             // XỬ LÝ ĐẶC BIỆT CHO LẠC VIỆT:
             // File Lạc Việt chứa giải nghĩa từ điển chi tiết (pinyin, âm Hán Việt, định nghĩa nhiều dòng)
             // Ta lưu bản gốc vào lacvietRawLookupMap để phục vụ tra cứu popup
@@ -382,7 +406,7 @@ class VietphraseEngine {
                 this.lacvietRawLookupMap.set(key, value);
               }
               const cleanWord = extractCleanLacVietWord(value);
-              if (cleanWord && !this.lacvietMap.has(key)) {
+              if (cleanWord && !/^[\s+=*#\-_/\\|]+$/.test(cleanWord) && !this.lacvietMap.has(key)) {
                 this.lacvietMap.set(key, cleanWord);
                 setTargetMax(key.length);
               }
@@ -391,7 +415,7 @@ class VietphraseEngine {
 
             // Các tầng thông thường: làm sạch các ký tự xuống dòng / tab ngẫu nhiên
             const cleanVal = cleanDictionaryValue(value);
-            if (cleanVal) {
+            if (cleanVal && !/^[\s+=*#\-_/\\|]+$/.test(cleanVal)) {
               if (!targetMap.has(key)) {
                 targetMap.set(key, cleanVal);
                 setTargetMax(key.length);
@@ -534,17 +558,35 @@ class VietphraseEngine {
     let i = 0;
     const n = text.length;
 
+    const isValidWord = (w?: string | null): boolean => {
+      if (!w) return false;
+      const trimmed = w.trim();
+      if (!trimmed) return false;
+      if (/^[\s+=*#\-_/\\|]+$/.test(trimmed)) return false;
+      return true;
+    };
+
+    const cleanMeaning = (w: string): string => {
+      let m = w.includes('/') ? w.split('/')[0] : w;
+      m = m.replace(/^[+=*#\-_/\\|\s]+/, '').trim();
+      return m;
+    };
+
     const tryConsumeSuffix = () => {
       if (this.maxSuffixesLength > 0 && i < n) {
         const sLimit = Math.min(n, i + this.maxSuffixesLength);
         for (let sj = sLimit; sj > i; sj--) {
           const sSub = text.substring(i, sj);
           if (this.suffixesMap.has(sSub)) {
-            let sMeaning = this.suffixesMap.get(sSub) || sSub;
-            if (sMeaning.includes('/')) sMeaning = sMeaning.split('/')[0];
-            result += sMeaning + " ";
-            i = sj;
-            break;
+            const rawMeaning = this.suffixesMap.get(sSub);
+            if (isValidWord(rawMeaning)) {
+              const sMeaning = cleanMeaning(rawMeaning!);
+              if (isValidWord(sMeaning)) {
+                result += sMeaning + " ";
+                i = sj;
+                break;
+              }
+            }
           }
         }
       }
@@ -559,13 +601,17 @@ class VietphraseEngine {
         for (let j = limit; j > i; j--) {
           const sub = text.substring(i, j);
           if (this.namesMap.has(sub)) {
-            let meaning = this.namesMap.get(sub) || sub;
-            if (meaning.includes('/')) meaning = meaning.split('/')[0];
-            result += " " + meaning + " ";
-            i = j;
-            matched = true;
-            tryConsumeSuffix();
-            break;
+            const rawMeaning = this.namesMap.get(sub);
+            if (isValidWord(rawMeaning)) {
+              const meaning = cleanMeaning(rawMeaning!);
+              if (isValidWord(meaning)) {
+                result += " " + meaning + " ";
+                i = j;
+                matched = true;
+                tryConsumeSuffix();
+                break;
+              }
+            }
           }
         }
       }
@@ -576,12 +622,16 @@ class VietphraseEngine {
         for (let j = limit; j > i; j--) {
           const sub = text.substring(i, j);
           if (this.vietphraseMap.has(sub)) {
-            let meaning = this.vietphraseMap.get(sub) || sub;
-            if (meaning.includes('/')) meaning = meaning.split('/')[0];
-            result += " " + meaning + " ";
-            i = j;
-            matched = true;
-            break;
+            const rawMeaning = this.vietphraseMap.get(sub);
+            if (isValidWord(rawMeaning)) {
+              const meaning = cleanMeaning(rawMeaning!);
+              if (isValidWord(meaning)) {
+                result += " " + meaning + " ";
+                i = j;
+                matched = true;
+                break;
+              }
+            }
           }
         }
       }
@@ -592,13 +642,17 @@ class VietphraseEngine {
         for (let j = limit; j > i; j--) {
           const sub = text.substring(i, j);
           if (this.nounsMap.has(sub)) {
-            let meaning = this.nounsMap.get(sub) || sub;
-            if (meaning.includes('/')) meaning = meaning.split('/')[0];
-            result += " " + meaning + " ";
-            i = j;
-            matched = true;
-            tryConsumeSuffix();
-            break;
+            const rawMeaning = this.nounsMap.get(sub);
+            if (isValidWord(rawMeaning)) {
+              const meaning = cleanMeaning(rawMeaning!);
+              if (isValidWord(meaning)) {
+                result += " " + meaning + " ";
+                i = j;
+                matched = true;
+                tryConsumeSuffix();
+                break;
+              }
+            }
           }
         }
       }
@@ -609,12 +663,16 @@ class VietphraseEngine {
         for (let j = limit; j > i; j--) {
           const sub = text.substring(i, j);
           if (this.suffixesMap.has(sub)) {
-            let meaning = this.suffixesMap.get(sub) || sub;
-            if (meaning.includes('/')) meaning = meaning.split('/')[0];
-            result += " " + meaning + " ";
-            i = j;
-            matched = true;
-            break;
+            const rawMeaning = this.suffixesMap.get(sub);
+            if (isValidWord(rawMeaning)) {
+              const meaning = cleanMeaning(rawMeaning!);
+              if (isValidWord(meaning)) {
+                result += " " + meaning + " ";
+                i = j;
+                matched = true;
+                break;
+              }
+            }
           }
         }
       }
@@ -625,12 +683,16 @@ class VietphraseEngine {
         for (let j = limit; j > i; j--) {
           const sub = text.substring(i, j);
           if (this.pronounsMap.has(sub)) {
-            let meaning = this.pronounsMap.get(sub) || sub;
-            if (meaning.includes('/')) meaning = meaning.split('/')[0];
-            result += " " + meaning + " ";
-            i = j;
-            matched = true;
-            break;
+            const rawMeaning = this.pronounsMap.get(sub);
+            if (isValidWord(rawMeaning)) {
+              const meaning = cleanMeaning(rawMeaning!);
+              if (isValidWord(meaning)) {
+                result += " " + meaning + " ";
+                i = j;
+                matched = true;
+                break;
+              }
+            }
           }
         }
       }
@@ -641,12 +703,16 @@ class VietphraseEngine {
         for (let j = limit; j > i; j--) {
           const sub = text.substring(i, j);
           if (this.lacvietMap.has(sub)) {
-            let meaning = this.lacvietMap.get(sub) || sub;
-            if (meaning.includes('/')) meaning = meaning.split('/')[0];
-            result += " " + meaning + " ";
-            i = j;
-            matched = true;
-            break;
+            const rawMeaning = this.lacvietMap.get(sub);
+            if (isValidWord(rawMeaning)) {
+              const meaning = cleanMeaning(rawMeaning!);
+              if (isValidWord(meaning)) {
+                result += " " + meaning + " ";
+                i = j;
+                matched = true;
+                break;
+              }
+            }
           }
         }
       }
@@ -657,18 +723,27 @@ class VietphraseEngine {
         for (let j = limit; j > i; j--) {
           const sub = text.substring(i, j);
           if (this.otherMap.has(sub)) {
-            let meaning = this.otherMap.get(sub) || sub;
-            if (meaning.includes('/')) meaning = meaning.split('/')[0];
-            result += " " + meaning + " ";
-            i = j;
-            matched = true;
-            break;
+            const rawMeaning = this.otherMap.get(sub);
+            if (isValidWord(rawMeaning)) {
+              const meaning = cleanMeaning(rawMeaning!);
+              if (isValidWord(meaning)) {
+                result += " " + meaning + " ";
+                i = j;
+                matched = true;
+                break;
+              }
+            }
           }
         }
       }
 
       if (!matched) {
-        result += text[i];
+        const ch = text[i];
+        if (/[\u4e00-\u9fa5]/.test(ch) && BASE_HANVIET_MAP[ch]) {
+          result += " " + BASE_HANVIET_MAP[ch] + " ";
+        } else {
+          result += ch;
+        }
         i++;
       }
     }
@@ -748,7 +823,7 @@ class VietphraseEngine {
 
     // Nếu văn bản không chứa từ riêng nào của người dùng
     if (intervals.length === 0) {
-      return this.translateBuiltinDictionaries(text).replace(/\s+/g, ' ').trim();
+      return this.cleanTranslatedText(this.translateBuiltinDictionaries(text));
     }
 
     // Sắp xếp các khoảng từ trái sang phải
@@ -790,7 +865,228 @@ class VietphraseEngine {
       result += " " + this.translateBuiltinDictionaries(gap) + " ";
     }
 
-    return result.replace(/\s+/g, ' ').trim();
+    return this.cleanTranslatedText(result);
+  }
+
+  // Làm sạch khoảng trắng và định dạng dấu câu sau dịch
+  private cleanTranslatedText(raw: string): string {
+    if (!raw) return "";
+    return raw
+      .replace(/[+=*#|]/g, ' ') // Xóa sạch 100% các ký tự dấu cộng hoặc ký hiệu rác
+      .replace(/\s+/g, ' ')
+      .replace(/\s+([,.:;!?])/g, '$1')
+      .replace(/([“"'])\s+/g, '$1')
+      .replace(/\s+([”"'])/g, '$1')
+      .trim();
+  }
+
+  // Thuật toán Dịch Thô Lạc Việt (100% Thuần Từ Điển Cục Bộ - KHÔNG dùng bất kỳ AI nào)
+  // Ưu tiên từ điển Lạc Việt người dùng nạp (nếu có) kết hợp bộ từ điển Hán Việt & Lạc Việt chuẩn hóa
+  translateLacViet(text: string, customTerms: CustomTerm[] | Map<string, string> = []): string {
+    if (!text) return "";
+
+    // 1. Chuẩn bị Custom Map kết hợp từ riêng truyện (Tên nhân vật, địa danh)
+    const effectiveCustomMap = new Map<string, string>(this.globalCustomMap);
+    if (customTerms instanceof Map) {
+      customTerms.forEach((val, key) => {
+        if (key && val) effectiveCustomMap.set(key.trim(), val.trim());
+      });
+    } else if (Array.isArray(customTerms)) {
+      for (const t of customTerms) {
+        if (t.term && t.meaning) {
+          effectiveCustomMap.set(t.term.trim(), t.meaning.trim());
+        }
+      }
+    }
+
+    // 2. Hàm dịch một đoạn bằng từ điển Lạc Việt, Vietphrase và Hán Việt
+    const translateLacVietSegment = (seg: string): string => {
+      let res = "";
+      let i = 0;
+      const len = seg.length;
+
+      const isValidWord = (w?: string | null): boolean => {
+        if (!w) return false;
+        const trimmed = w.trim();
+        if (!trimmed) return false;
+        if (/^[\s+=*#\-_/\\|]+$/.test(trimmed)) return false;
+        return true;
+      };
+
+      const cleanMeaning = (w: string): string => {
+        let m = w.includes('/') ? w.split('/')[0] : w;
+        m = m.replace(/^[+=*#\-_/\\|\s]+/, '').trim();
+        return m;
+      };
+
+      while (i < len) {
+        let matched = false;
+
+        // Ưu tiên 1: Tra cứu cụm từ trong file Lạc Việt người dùng đã nạp
+        if (this.lacvietMap.size > 0 && this.maxLacvietLength > 0) {
+          const limit = Math.min(len, i + this.maxLacvietLength);
+          for (let j = limit; j > i; j--) {
+            const sub = seg.substring(i, j);
+            if (this.lacvietMap.has(sub)) {
+              const rawMeaning = this.lacvietMap.get(sub);
+              if (isValidWord(rawMeaning)) {
+                const meaning = cleanMeaning(rawMeaning!);
+                if (isValidWord(meaning)) {
+                  res += " " + meaning + " ";
+                  i = j;
+                  matched = true;
+                  break;
+                }
+              }
+            }
+          }
+        }
+
+        // Ưu tiên 2: Tra cứu cụm từ Lạc Việt cơ bản tích hợp sẵn (BASE_LACVIET_PHRASES)
+        if (!matched) {
+          const limit = Math.min(len, i + 8);
+          for (let j = limit; j > i; j--) {
+            const sub = seg.substring(i, j);
+            if (BASE_LACVIET_PHRASES[sub]) {
+              res += " " + BASE_LACVIET_PHRASES[sub] + " ";
+              i = j;
+              matched = true;
+              break;
+            }
+          }
+        }
+
+        // Ưu tiên 3: Tra cứu cụm từ trong Vietphrase chung (để bản dịch thô có ngữ nghĩa tiếng Việt trôi chảy)
+        if (!matched && this.vietphraseMap.size > 0 && this.maxVietphraseLength > 0) {
+          const limit = Math.min(len, i + this.maxVietphraseLength);
+          for (let j = limit; j > i; j--) {
+            const sub = seg.substring(i, j);
+            if (this.vietphraseMap.has(sub)) {
+              const rawMeaning = this.vietphraseMap.get(sub);
+              if (isValidWord(rawMeaning)) {
+                const meaning = cleanMeaning(rawMeaning!);
+                if (isValidWord(meaning)) {
+                  res += " " + meaning + " ";
+                  i = j;
+                  matched = true;
+                  break;
+                }
+              }
+            }
+          }
+        }
+
+        // Ưu tiên 4: Tra cứu từng chữ Hán qua Lạc Việt đơn hoặc Bảng Hán Việt chuẩn BASE_HANVIET_MAP
+        if (!matched) {
+          const ch = seg[i];
+          if (/[\u4e00-\u9fa5]/.test(ch)) {
+            let word: string | undefined = undefined;
+            const lvWord = this.lacvietMap.get(ch);
+            if (isValidWord(lvWord)) {
+              word = cleanMeaning(lvWord!);
+            }
+            if (!isValidWord(word)) {
+              word = BASE_HANVIET_MAP[ch];
+            }
+            if (isValidWord(word)) {
+              res += " " + word + " ";
+            } else {
+              res += ch;
+            }
+            i++;
+            matched = true;
+          } else {
+            // Xử lý các dấu câu tiếng Trung thông dụng
+            if (ch === '，') res += ', ';
+            else if (ch === '。') res += '. ';
+            else if (ch === '！') res += '! ';
+            else if (ch === '？') res += '? ';
+            else if (ch === '：') res += ': ';
+            else if (ch === '；') res += '; ';
+            else if (ch === '“' || ch === '”') res += '"';
+            else if (ch === '‘' || ch === '’') res += "'";
+            else if (ch === '、') res += ', ';
+            else res += ch;
+            i++;
+          }
+        }
+      }
+
+      return res;
+    };
+
+    // Nếu không có custom terms, chạy trực tiếp
+    if (effectiveCustomMap.size === 0) {
+      return this.cleanTranslatedText(translateLacVietSegment(text));
+    }
+
+    // Nếu có custom terms, áp dụng Interval Locking để bảo vệ tên nhân vật
+    const sortedEntries = Array.from(effectiveCustomMap.entries())
+      .filter(([k, v]) => k && v && k.trim())
+      .map(([k, v]) => [k.trim(), v.trim()])
+      .sort((a, b) => b[0].length - a[0].length);
+
+    if (sortedEntries.length === 0) {
+      return this.cleanTranslatedText(translateLacVietSegment(text));
+    }
+
+    const n = text.length;
+    const occupied = new Uint8Array(n);
+    const intervals: Array<{ start: number; end: number; meaning: string; term: string }> = [];
+
+    for (const [term, meaning] of sortedEntries) {
+      let startPos = 0;
+      while (startPos < n) {
+        const idx = text.indexOf(term, startPos);
+        if (idx === -1) break;
+        const end = idx + term.length;
+
+        let isFree = true;
+        for (let p = idx; p < end; p++) {
+          if (occupied[p] === 1) {
+            isFree = false;
+            break;
+          }
+        }
+
+        if (isFree) {
+          for (let p = idx; p < end; p++) {
+            occupied[p] = 1;
+          }
+          intervals.push({ start: idx, end, meaning, term });
+        }
+
+        startPos = idx + 1;
+      }
+    }
+
+    if (intervals.length === 0) {
+      return this.cleanTranslatedText(translateLacVietSegment(text));
+    }
+
+    intervals.sort((a, b) => a.start - b.start);
+
+    let result = "";
+    let cursor = 0;
+
+    for (const item of intervals) {
+      if (item.start > cursor) {
+        const gap = text.substring(cursor, item.start);
+        result += " " + translateLacVietSegment(gap) + " ";
+      }
+
+      let termMeaning = item.meaning;
+      if (termMeaning.includes('/')) termMeaning = termMeaning.split('/')[0];
+      result += " " + termMeaning + " ";
+      cursor = item.end;
+    }
+
+    if (cursor < n) {
+      const gap = text.substring(cursor);
+      result += " " + translateLacVietSegment(gap) + " ";
+    }
+
+    return this.cleanTranslatedText(result);
   }
 }
 

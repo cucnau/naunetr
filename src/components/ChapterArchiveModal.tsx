@@ -171,7 +171,7 @@ export const ChapterArchiveModal: React.FC<ChapterArchiveModalProps> = ({
                   <tr>
                     <th style="width: 22%; background-color: #EFEBE9; color: #3E2723; border: 1px solid #D7CCC8;">Raw</th>
                     <th style="width: 23%; background-color: #EFEBE9; color: #3E2723; border: 1px solid #D7CCC8;">Vietphrase</th>
-                    <th style="width: 23%; background-color: #EFEBE9; color: #3E2723; border: 1px solid #D7CCC8;">GG/DL</th>
+                    <th style="width: 23%; background-color: #EFEBE9; color: #3E2723; border: 1px solid #D7CCC8;">VietTrans</th>
                     <th style="width: 32%; background-color: #EFEBE9; color: #3E2723; border: 1px solid #D7CCC8;">Edit</th>
                   </tr>
                 </thead>
@@ -487,7 +487,7 @@ export const ChapterArchiveModal: React.FC<ChapterArchiveModalProps> = ({
                       Thư mục: Bản đối chiếu dạng bảng
                     </span>
                     <p className="text-[10px] text-[#A1887F]">
-                      Chứa file bảng đối chiếu 4 cột (Raw - Vietphrase - Google/DeepL - Edit).
+                      Chứa file bảng đối chiếu 4 cột (Raw - Vietphrase - VietTrans - Edit).
                     </p>
                   </div>
                 </label>

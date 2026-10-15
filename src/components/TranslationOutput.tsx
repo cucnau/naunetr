@@ -696,7 +696,7 @@ const EditableDeepl = ({
           onChange={handleChange}
           onBlur={handleBlur}
           onKeyDown={handleKeyDown}
-          placeholder="Nhập GG/DeepL..."
+          placeholder="Nhập VietTrans..."
           className={`w-full bg-transparent border-none outline-none resize-none overflow-hidden p-0 text-[#A1887F] leading-[1.1] ${isFocusMode ? 'text-[8.5px] sm:text-[11.5px]' : 'text-[8.5px]'} focus:ring-0 m-0 block whitespace-normal min-h-[1.1em]`}
           style={{ fontWeight: 400, display: 'block', margin: 0 }}
           rows={1}
@@ -707,9 +707,9 @@ const EditableDeepl = ({
           onMouseDown={handleMouseDown}
           onClick={handleClick}
           className={`${isFocusMode ? 'text-[8.5px] sm:text-[11.5px]' : 'text-[8.5px]'} text-[#A1887F] leading-[1.1] opacity-60 break-words cursor-text hover:opacity-90 transition-opacity min-h-[1.1em]`}
-          title="Bấm vào để sửa GG/DeepL trực tiếp"
+          title="Bấm vào để sửa VietTrans trực tiếp"
         >
-          {localText || <span className="opacity-40 not-italic text-[8px] hover:opacity-100">[+ Thêm GG/DeepL]</span>}
+          {localText || <span className="opacity-40 not-italic text-[8px] hover:opacity-100">[+ Thêm VietTrans]</span>}
         </div>
       )}
     </div>
@@ -1231,7 +1231,7 @@ const containsChineseText = (str: string): boolean => {
             <tr>
               <th style="width: 22%; background-color: #EFEBE9; color: #3E2723; border: 1px solid #D7CCC8;">Raw</th>
               <th style="width: 23%; background-color: #EFEBE9; color: #3E2723; border: 1px solid #D7CCC8;">Vietphrase</th>
-              <th style="width: 23%; background-color: #EFEBE9; color: #3E2723; border: 1px solid #D7CCC8;">GG/DL</th>
+              <th style="width: 23%; background-color: #EFEBE9; color: #3E2723; border: 1px solid #D7CCC8;">VietTrans</th>
               <th style="width: 32%; background-color: #EFEBE9; color: #3E2723; border: 1px solid #D7CCC8;">Edit</th>
             </tr>
           </thead>
@@ -1743,8 +1743,19 @@ const containsChineseText = (str: string): boolean => {
           )}
           {hasSegments && (
              <div className="hidden sm:flex w-full bg-[#EFEBE9] text-[#5D4037] text-[9px] font-bold uppercase tracking-wider shadow-sm border-t border-[#D7CCC8]">
-                 <div className="w-[45%] p-1 border-r border-[#D7CCC8] pl-2">Raw</div>
-                 <div className="w-[55%] p-1 pl-2">Edit</div>
+                 <div className="w-[45%] p-1 border-r border-[#D7CCC8] pl-2">Raw / Vietphrase</div>
+                 <div className="w-[55%] p-1 pl-2 flex items-center justify-between pr-2">
+                   <span>Edit</span>
+                   <a 
+                     href="https://vietnamese-translation.com/chinese-traditional-to-vietnamese.aspx" 
+                     target="_blank" 
+                     rel="noopener noreferrer"
+                     className="text-[8px] font-semibold text-[#8D6E63] hover:text-[#3E2723] hover:underline flex items-center gap-0.5 normal-case tracking-normal"
+                     title="Mở web dịch vietnamese-translation.com trong tab mới"
+                   >
+                     VietTrans ↗
+                   </a>
+                 </div>
              </div>
           )}
       </div>
@@ -2153,7 +2164,7 @@ const containsChineseText = (str: string): boolean => {
                 }}
               />
               <p className="text-[10px] text-[#A1887F] mt-2 italic">
-                Bảng sẽ xuất ra Word gồm 4 cột đối chiếu: Raw, Vietphrase, DeepL và Edit.
+                Bảng sẽ xuất ra Word gồm 4 cột đối chiếu: Raw, Vietphrase, VietTrans và Edit.
               </p>
             </div>
             

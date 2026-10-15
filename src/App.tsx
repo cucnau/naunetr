@@ -19,7 +19,7 @@ import { AuthPanel } from './components/AuthPanel';
 import { NovelSelector } from './components/NovelSelector';
 import { FontSelectorModal } from './components/FontSelectorModal';
 import { initFont } from './services/fontService';
-import { BookOpen, Loader2, Eraser, Quote, Layout, History, AlertTriangle, Layers, FolderOpen, Keyboard, BookA, Users, X, Wifi, Scissors, CheckSquare, Square, Type } from 'lucide-react';
+import { BookOpen, Loader2, Eraser, Quote, Layout, History, AlertTriangle, Layers, FolderOpen, Keyboard, BookA, Users, X, Wifi, Scissors, CheckSquare, Square, Type, ExternalLink } from 'lucide-react';
 import { checkAndApplyShortcut, getStoredShortcuts, isShortcutsEnabled, syncShortcutsFromCloud } from './services/shortcutService';
 import { handleSmartQuotesKeyDown, convertStraightToSmartQuotes } from './services/quoteUtils';
 import { getScopedStorageItem, setScopedStorageItem } from './services/storageNamespace';
@@ -1781,7 +1781,7 @@ useEffect(() => {
                                   <span>{segmentCount} đoạn văn</span>
                               </div>
                               <label 
-                                  title="Tự động lọc bỏ các dòng trống khi dán nội dung vào ô Raw, DeepL, Edit" 
+                                  title="Tự động lọc bỏ các dòng trống khi dán nội dung vào ô Raw, VietTrans, Edit" 
                                   className="sm:hidden text-[10px] text-[#5D4037] hover:text-[#3E2723] px-1.5 py-0.5 rounded hover:bg-[#D7CCC8]/60 flex items-center gap-1.5 cursor-pointer select-none shrink-0 whitespace-nowrap"
                               >
                                   <input 
@@ -1797,7 +1797,7 @@ useEffect(() => {
                           {/* Hàng 2 trên mobile / Bên phải trên desktop */}
                           <div className="flex items-center justify-end gap-1.5 sm:gap-2 overflow-x-auto scrollbar-none">
                               <label 
-                                  title="Tự động lọc bỏ các dòng trống khi dán nội dung vào ô Raw, DeepL, Edit" 
+                                  title="Tự động lọc bỏ các dòng trống khi dán nội dung vào ô Raw, VietTrans, Edit" 
                                   className="hidden sm:flex text-[10px] text-[#5D4037] hover:text-[#3E2723] px-1.5 py-1 rounded hover:bg-[#D7CCC8]/60 items-center gap-1 cursor-pointer select-none shrink-0 whitespace-nowrap"
                               >
                                   <input 
@@ -1855,12 +1855,24 @@ useEffect(() => {
                           </div>
                           <div className="flex flex-col flex-1">
                               <div className="flex justify-between items-center px-3 pt-1.5 pb-1 bg-[#FAFAFA]/40">
-                                  <div className="text-[9px] font-bold text-[#8D6E63] uppercase tracking-wider">2. DeepL {mode === 'beta' && <span className="text-[8px] font-normal lowercase text-[#BCAAA4]">(không bắt buộc)</span>}</div>
+                                  <div className="text-[9px] font-bold text-[#8D6E63] uppercase tracking-wider flex items-center gap-1">
+                                      <a 
+                                          href="https://vietnamese-translation.com/chinese-traditional-to-vietnamese.aspx" 
+                                          target="_blank" 
+                                          rel="noopener noreferrer"
+                                          className="hover:underline flex items-center gap-1 text-[#8D6E63] hover:text-[#3E2723] transition-colors group/vt"
+                                          title="Bấm để mở trang web dịch vietnamese-translation.com trong tab mới"
+                                      >
+                                          <span>2. VietTrans</span>
+                                          <ExternalLink size={10} className="group-hover/vt:translate-x-0.5 transition-transform" />
+                                      </a>
+                                      {mode === 'beta' && <span className="text-[8px] font-normal lowercase text-[#BCAAA4]">(không bắt buộc)</span>}
+                                  </div>
                                   <button
                                       type="button"
                                       onClick={() => handleCleanFieldBlankLines('deeplText')}
                                       disabled={!session.deeplText}
-                                      title="Xóa các dòng trống trong ô DeepL"
+                                      title="Xóa các dòng trống trong ô VietTrans"
                                       className="text-[9px] text-[#8D6E63] hover:text-[#3E2723] hover:bg-[#EFEBE9] px-1.5 py-0.5 rounded flex items-center gap-1 disabled:opacity-40"
                                   >
                                       <Scissors size={9} /> Dọn dòng trống
@@ -1884,7 +1896,7 @@ useEffect(() => {
                                           }
                                       }
                                   }}
-                                  placeholder="Dán DeepL vào đây..."
+                                  placeholder="Dán VietTrans (hoặc web dịch) vào đây..."
                                   className="flex-1 p-3 text-sm bg-transparent border-none outline-none resize-none placeholder:text-[#BCAAA4] leading-relaxed"
                                   spellCheck="false"
                               />
