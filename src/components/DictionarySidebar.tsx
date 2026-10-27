@@ -87,7 +87,7 @@ export const DictionarySidebar: React.FC<DictionarySidebarProps> = ({
   sheetUrl,
   onUpdateSheetUrl,
   refreshTrigger,
-  onExportExcel
+  onExportExcel,
 }) => {
   // Term editing state
   const [editingTermId, setEditingTermId] = useState<string | null>(null);
@@ -424,12 +424,13 @@ export const DictionarySidebar: React.FC<DictionarySidebarProps> = ({
     }
   };
 
+
   return (
-    <div className="flex flex-col h-full bg-[#EFE5D9] w-full shrink-0">
+    <div className={`flex flex-col h-full w-full shrink-0 bg-[#EFE5D9]`}>
       {/* Header */}
-      <div className="p-3 border-b border-[#D7CCC8] bg-[#D7CCC8]/30 flex items-center justify-between">
-         <div className="flex items-center gap-2 text-[#3E2723] font-bold">
-            <BookUser size={16} className="text-[#5D4037]" />
+      <div className={`p-3 border-b flex items-center justify-between border-[#D7CCC8] bg-[#D7CCC8]/30`}>
+         <div className={`flex items-center gap-2 font-bold text-[#3E2723]`}>
+            <BookUser size={16} className={"text-[#5D4037]"} />
             <span className="text-sm">Kho Từ Vựng</span>
          </div>
          <div className="flex items-center gap-1">
@@ -460,6 +461,7 @@ export const DictionarySidebar: React.FC<DictionarySidebarProps> = ({
             </button>
          </div>
       </div>
+
 
       {/* Settings Panel */}
       {showSettings && (
@@ -893,18 +895,17 @@ export const DictionarySidebar: React.FC<DictionarySidebarProps> = ({
 )} 
       {/* Sync Buttons */}
       {!showSettings && (
-          <div className="px-2 py-1.5 border-b border-[#D7CCC8] flex flex-col gap-1.5 bg-[#EFE5D9]">
+          <div className={`px-2 py-1.5 border-b flex flex-col gap-1.5 bg-[#EFE5D9] border-[#D7CCC8]`}>
              <div className="flex gap-2 justify-center">
-                <button onClick={() => handlePullFromCloud(false)} disabled={isSyncing || !isSignedIn} className="flex-1 flex items-center justify-center gap-1 text-[10px] font-bold uppercase bg-white border border-blue-200 text-blue-700 py-1 rounded hover:bg-blue-50 shadow-sm disabled:opacity-50">
+                <button onClick={() => handlePullFromCloud(false)} disabled={isSyncing || !isSignedIn} className="flex-1 flex items-center justify-center gap-1 text-[10px] font-bold uppercase py-1 rounded shadow-xs disabled:opacity-50 transition-colors bg-white border border-blue-200 text-blue-700 hover:bg-blue-50">
                    {isSyncing ? <Loader2 className="animate-spin" size={12} /> : <Download size={12} />} Tải về
                 </button>
-                <button onClick={() => handlePushToCloud(false)} disabled={isSyncing || !isSignedIn} className="flex-1 flex items-center justify-center gap-1 text-[10px] font-bold uppercase bg-white border border-green-200 text-green-700 py-1 rounded hover:bg-green-50 shadow-sm disabled:opacity-50">
+                <button onClick={() => handlePushToCloud(false)} disabled={isSyncing || !isSignedIn} className="flex-1 flex items-center justify-center gap-1 text-[10px] font-bold uppercase py-1 rounded shadow-xs disabled:opacity-50 transition-colors bg-white border border-green-200 text-green-700 hover:bg-green-50">
                    {isSyncing ? <Loader2 className="animate-spin" size={12} /> : <Upload size={12} />} Đẩy lên
                 </button>
              </div>
           </div>
       )}
-      
       
       {syncMessage && (
          <div className={`px-2 py-0.5 text-[10px] text-center font-bold ${syncMessage.type === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'} transition-all`}>
@@ -912,38 +913,37 @@ export const DictionarySidebar: React.FC<DictionarySidebarProps> = ({
          </div>
       )}
       {/* Search Bar */}
-      <div className="px-2 py-1.5 border-b border-[#D7CCC8] bg-[#EFE5D9] sticky top-0 z-10">
+      <div className={`px-2 py-1.5 border-b sticky top-0 z-10 bg-[#EFE5D9] border-[#D7CCC8]`}>
         <div className="relative">
-          <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-[#A1887F]" />
+          <Search size={12} className={`absolute left-2.5 top-1/2 -translate-y-1/2 text-[#A1887F]`} />
           <input 
             type="text" 
-            placeholder="Tìm kiếm..." 
+            placeholder="Tìm kiếm từ vựng..." 
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-7 pr-6 py-1 text-xs bg-white border border-[#D7CCC8] rounded-full focus:ring-1 focus:ring-[#8D6E63] outline-none transition-all placeholder:text-[#D7CCC8]"
+            className="w-full pl-7 pr-6 py-1 text-xs rounded-full outline-none transition-all bg-white border border-[#D7CCC8] text-[#3E2723] focus:ring-1 focus:ring-[#8D6E63] placeholder:text-[#D7CCC8]"
           />
           {searchTerm && (
             <button 
               onClick={() => setSearchTerm('')}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-[#A1887F] hover:text-[#5D4037]"
+              className={`absolute right-2 top-1/2 -translate-y-1/2 text-[#A1887F] hover:text-[#5D4037]`}
             >
               <X size={10} />
-</button>
+            </button>
           )}
-          
         </div>
       </div>
 
       {/* Table Content */}
-      <div className="flex-1 min-h-0 overflow-y-auto bg-[#F5E6D3]">
+      <div className={`flex-1 min-h-0 overflow-y-auto bg-[#F5E6D3]`}>
         <table className="w-full text-left border-collapse">
-          <thead className="bg-[#EFEBE9] sticky top-0 z-10 shadow-sm">
+          <thead className={`sticky top-0 z-10 shadow-xs bg-[#EFEBE9] text-[#5D4037]`}>
             <tr>
-              <th className="py-0.5 px-1 text-[10px] font-bold text-[#5D4037] uppercase tracking-wider w-1/2 border-r border-[#D7CCC8]">Trung</th>
-              <th className="py-0.5 px-1 text-[10px] font-bold text-[#5D4037] uppercase tracking-wider w-1/2">Việt</th>
+              <th className={`py-1 px-2 text-[10px] font-bold uppercase tracking-wider w-1/2 border-r border-[#D7CCC8]`}>Trung</th>
+              <th className="py-1 px-2 text-[10px] font-bold uppercase tracking-wider w-1/2">Việt</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-[#EFEBE9] bg-white">
+          <tbody className={`divide-y bg-white divide-[#EFEBE9]`}>
             {filteredTerms.length === 0 ? (
               <tr>
                 <td colSpan={2} className="py-8 text-center text-xs text-[#BCAAA4] italic">
@@ -1076,14 +1076,17 @@ export const DictionarySidebar: React.FC<DictionarySidebarProps> = ({
       </div>
 
       {/* Add New Section */}
-      <div className="p-1.5 border-t border-[#D7CCC8] bg-[#EFE5D9] space-y-1 shrink-0">
+      <div className={`p-1.5 border-t space-y-1 shrink-0 ${
+        'border-[#D7CCC8] bg-[#EFE5D9]'
+      }`}>
          <div className="flex gap-1">
             <input
+                id="dict-sidebar-new-term"
                 type="text"
                 placeholder="Từ gốc"
                 value={newTerm}
                 onChange={(e) => setNewTerm(e.target.value)}
-                className={`w-1/2 px-1 py-0.5 text-[10px] border border-[#D7CCC8] rounded outline-none focus:border-[#8D6E63] font-serif-sc bg-white`}
+                className="w-1/2 px-1 py-0.5 text-[10px] rounded outline-none font-serif-sc border border-[#D7CCC8] focus:border-[#8D6E63] bg-white text-[#3E2723]"
             />
             <input
                type="text"
@@ -1091,7 +1094,7 @@ export const DictionarySidebar: React.FC<DictionarySidebarProps> = ({
                value={newMeaning}
                onChange={(e) => setNewMeaning(e.target.value)}
                onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
-               className={`w-1/2 px-1 py-0.5 text-[10px] border border-[#D7CCC8] rounded outline-none focus:border-[#8D6E63] bg-white`}
+               className="w-1/2 px-1 py-0.5 text-[10px] rounded outline-none border border-[#D7CCC8] focus:border-[#8D6E63] bg-white text-[#3E2723]"
             />
          </div>
          <div className="flex gap-1 items-center">

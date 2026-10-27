@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { AppStatus, TranslationSession, HistoryItem, TranslationResponse, Chapter, TranslationSegment, Character, Relationship, CustomTerm } from './types';
 import { exportToExcel } from './services/excelService';
-import { getNovels, getChaptersFromCloud, saveChapterToCloud, bulkSaveChaptersToCloud, deleteChapterFromCloud, clearNovelChaptersFromCloud, syncFirestoreData, subscribeToChapters, subscribeToUserLiveWorkspace, saveUserLiveWorkspaceToCloud, getDeviceId } from './services/firestoreService';
+import { getNovels, createNovel, deleteNovel, getChaptersFromCloud, saveChapterToCloud, bulkSaveChaptersToCloud, deleteChapterFromCloud, clearNovelChaptersFromCloud, syncFirestoreData, subscribeToChapters, subscribeToUserLiveWorkspace, saveUserLiveWorkspaceToCloud, getDeviceId } from './services/firestoreService';
 import { auth } from './services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { vietphraseEngine } from './services/vietphraseService';
@@ -19,10 +19,11 @@ import { AuthPanel } from './components/AuthPanel';
 import { NovelSelector } from './components/NovelSelector';
 import { FontSelectorModal } from './components/FontSelectorModal';
 import { initFont } from './services/fontService';
-import { BookOpen, Loader2, Eraser, Quote, Layout, History, AlertTriangle, Layers, FolderOpen, Keyboard, BookA, Users, X, Wifi, Scissors, CheckSquare, Square, Type, ExternalLink } from 'lucide-react';
+import { BookOpen, Loader2, Eraser, Quote, Layout, History, AlertTriangle, Layers, FolderOpen, Keyboard, BookA, Users, X, Wifi, Scissors, CheckSquare, Square, Type, ExternalLink, FileText, Cloud, Check, Star, ChevronDown, CheckCircle2 } from 'lucide-react';
 import { checkAndApplyShortcut, getStoredShortcuts, isShortcutsEnabled, syncShortcutsFromCloud } from './services/shortcutService';
 import { handleSmartQuotesKeyDown, convertStraightToSmartQuotes } from './services/quoteUtils';
 import { getScopedStorageItem, setScopedStorageItem } from './services/storageNamespace';
+import { normalizeVietnameseText } from './services/vietnameseUtils';
 
 const EXAMPLE_TEXT = "路遥知马力，日久见人心。";
 
@@ -140,13 +141,13 @@ const sanitizeResult = (result: TranslationResponse | null): TranslationResponse
             ...result,
             segments: (result.segments || []).map(s => ({
                 source: (s.source || "").trim(),
-                natural: (s.natural || "").trim().replace(/\n+$/, ""),
-                quick: (s.quick || "").trim().replace(/\n+$/, ""),
-                deepl: (s.deepl || "").trim().replace(/\n+$/, "")
+                natural: normalizeVietnameseText((s.natural || "").trim().replace(/\n+$/, "")),
+                quick: normalizeVietnameseText((s.quick || "").trim().replace(/\n+$/, "")),
+                deepl: normalizeVietnameseText((s.deepl || "").trim().replace(/\n+$/, ""))
             })),
-            naturalTranslation: (result.naturalTranslation || "").trim().replace(/\n+$/, ""),
-            quickTrans: (result.quickTrans || "").trim().replace(/\n+$/, ""),
-            deeplTranslation: (result.deeplTranslation || "").trim().replace(/\n+$/, ""),
+            naturalTranslation: normalizeVietnameseText((result.naturalTranslation || "").trim().replace(/\n+$/, "")),
+            quickTrans: normalizeVietnameseText((result.quickTrans || "").trim().replace(/\n+$/, "")),
+            deeplTranslation: normalizeVietnameseText((result.deeplTranslation || "").trim().replace(/\n+$/, "")),
             vocabulary: result.vocabulary || []
         };
     } catch (e) {
@@ -158,6 +159,8 @@ const sanitizeResult = (result: TranslationResponse | null): TranslationResponse
 /**
  * Tu dong khoi phuc lai danh sach segments doi chieu neu bi rong
  * do loi cat bo bo nho (QuotaExceededError) hoac phien bi luoc bot truoc do.
+ * CHỈ khôi phục khi đã có bản dịch thực sự (naturalTranslation không rỗng).
+ * Tuyệt đối không tự động tạo segments khi người dùng mới chỉ dán raw hoặc chưa bấm phân tích.
  */
 const reconstructSegmentsIfEmpty = (sessionData: TranslationSession): TranslationSession => {
     const result = sessionData.result;
@@ -168,7 +171,8 @@ const reconstructSegmentsIfEmpty = (sessionData: TranslationSession): Translatio
         const natText = result.naturalTranslation || '';
         const deeplText = sessionData.deeplText || result.deeplTranslation || '';
 
-        if (rawText.trim() || natText.trim()) {
+        // Khôi phục khi có rawText hoặc có naturalTranslation
+        if (rawText.trim().length > 0 || natText.trim().length > 0) {
             const rawLines = rawText ? rawText.split('\n') : [];
             const natLines = natText ? natText.split('\n') : [];
             const dpLines = deeplText ? deeplText.split('\n') : [];
@@ -180,10 +184,11 @@ const reconstructSegmentsIfEmpty = (sessionData: TranslationSession): Translatio
                     const src = rawLines[i] ?? '';
                     const nat = natLines[i] !== undefined ? natLines[i] : extractBracketsOnly(src);
                     const dp = dpLines[i] ?? '';
+                    const qk = src ? vietphraseEngine.translate(src) : '';
                     reconstructedSegments.push({
                         source: src,
                         natural: nat,
-                        quick: '',
+                        quick: qk,
                         deepl: dp
                     });
                 }
@@ -192,7 +197,8 @@ const reconstructSegmentsIfEmpty = (sessionData: TranslationSession): Translatio
                     result: {
                         ...result,
                         segments: reconstructedSegments,
-                        naturalTranslation: reconstructedSegments.map(s => s.natural).join('\n')
+                        naturalTranslation: reconstructedSegments.map(s => s.natural).join('\n'),
+                        quickTrans: reconstructedSegments.map(s => s.quick).join('\n')
                     }
                 };
             }
@@ -315,6 +321,111 @@ function AppContent() {
   const lastLocalEditTimeRef = useRef<number>(0);
   const deletedChapterIdsRef = useRef<Set<string>>(new Set());
 
+
+
+  // Danh sách Novels
+  const [novels, setNovels] = useState<Novel[]>(() => {
+    try {
+      const saved = getScopedStorageItem('cached_novels_list');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+      return [{ id: 'default', name: 'Truyện mặc định' }];
+    } catch (_) {
+      return [{ id: 'default', name: 'Truyện mặc định' }];
+    }
+  });
+
+  // Tải danh sách truyện từ Firestore
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        try {
+          const cloudNovels = await getNovels();
+          if (cloudNovels && cloudNovels.length > 0) {
+            setNovels(cloudNovels);
+            setScopedStorageItem('cached_novels_list', JSON.stringify(cloudNovels));
+            if (!session.currentNovelId) {
+              setSession(prev => ({ ...prev, currentNovelId: cloudNovels[0].id }));
+            }
+          }
+        } catch (e) {
+          console.warn("Lỗi tải novels:", e);
+        }
+      }
+    });
+    return () => unsub();
+  }, [session.currentNovelId]);
+
+  // Handler tạo truyện mới
+  const handleCreateNovel = async (name: string) => {
+    const newId = `novel_${Date.now()}`;
+    const newNovel: Novel = { id: newId, name };
+    setNovels(prev => [...prev, newNovel]);
+    setSession(prev => ({
+      ...prev,
+      currentNovelId: newId,
+      currentChapterId: undefined,
+      result: null,
+      inputText: '',
+      deeplText: '',
+      preEditedText: ''
+    }));
+    try {
+      if (auth.currentUser) {
+        await createNovel(newId, name);
+      }
+      setScopedStorageItem('cached_novels_list', JSON.stringify([...novels, newNovel]));
+    } catch (e) {
+      console.warn("Lưu truyện lên Cloud lỗi, đã lưu máy:", e);
+    }
+  };
+
+  const handleRenameNovel = async (id: string, newName: string) => {
+    setNovels(prev => prev.map(n => n.id === id ? { ...n, name: newName } : n));
+    try {
+      if (auth.currentUser && id !== 'default') {
+        await createNovel(id, newName);
+      }
+    } catch (_) {}
+  };
+
+  const handleDeleteNovel = async (id: string) => {
+    let nextCurrentId = session.currentNovelId;
+    setNovels(prev => {
+      const remaining = prev.filter(n => n.id !== id);
+      const finalNovels = remaining.length > 0 ? remaining : [{ id: `novel_${Date.now()}`, name: 'Thư mục mới' }];
+      nextCurrentId = finalNovels[0].id;
+      setScopedStorageItem('cached_novels_list', JSON.stringify(finalNovels));
+      return finalNovels;
+    });
+
+    setSession(prev => ({
+      ...prev,
+      currentNovelId: nextCurrentId,
+      currentChapterId: undefined,
+      result: null,
+      inputText: '',
+      deeplText: '',
+      preEditedText: ''
+    }));
+
+    // Cập nhật danh sách chương: xóa các chương thuộc truyện bị xóa
+    setChapters(prev => {
+      const remainingChaps = prev.filter(c => c.novelId !== id && (id !== 'default' || c.novelId));
+      return remainingChaps;
+    });
+
+    try {
+      if (auth.currentUser && id !== 'default') {
+        await deleteNovel(id);
+      }
+    } catch (_) {}
+  };
+
+
+
   // --- REFS ---
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -392,7 +503,12 @@ useEffect(() => {
 
      db.getAllChapters().then(savedChapters => {
          if (savedChapters) {
-             setChapters(savedChapters);
+             const normalized = savedChapters.map(c => ({
+                 ...c,
+                 name: normalizeVietnameseText(c.name),
+                 result: c.result ? (sanitizeResult(c.result) as TranslationResponse) : c.result
+             }));
+             setChapters(normalized);
          }
      });
 
@@ -422,6 +538,14 @@ useEffect(() => {
   // Dong bo Custom Map vao Vietphrase Engine de chac chan ghi de len ban dich Vietphrase o moi noi
   useEffect(() => {
     const map = new Map<string, string>();
+    // 1. Nạp toàn bộ kho nhân vật & từ vựng đã lưu trong ứng dụng làm fallback
+    (session.characters || []).forEach(c => {
+      if (c.chineseName && c.vietName) map.set(c.chineseName.trim(), c.vietName.trim());
+    });
+    (session.customTerms || []).forEach(t => {
+      if (t.term && t.meaning) map.set(t.term.trim(), t.meaning.trim());
+    });
+    // 2. Ghi đè bởi từ vựng & nhân vật riêng của truyện hiện tại (ưu tiên cao nhất)
     currentNovelCharacters.forEach(c => {
       if (c.chineseName && c.vietName) map.set(c.chineseName.trim(), c.vietName.trim());
     });
@@ -429,7 +553,7 @@ useEffect(() => {
       if (t.term && t.meaning) map.set(t.term.trim(), t.meaning.trim());
     });
     vietphraseEngine.setGlobalCustomMap(map);
-  }, [currentNovelCharacters, currentNovelTerms]);
+  }, [session.characters, session.customTerms, currentNovelCharacters, currentNovelTerms]);
 
   // Tự động tải và ĐỒNG BỘ THỜI GIAN THỰC (Real-time) Toàn bộ Không gian làm việc (Truyện đang chọn, Bảng edit chương kể cả chưa lưu kho)
   useEffect(() => {
@@ -520,8 +644,16 @@ useEffect(() => {
 
           const mergedMap = new Map<string, Chapter>();
           localChaptersForNovel.forEach(c => mergedMap.set(c.id, { ...c, novelId: currentNovelId }));
-          (cloudChapters || []).forEach(c => mergedMap.set(c.id, c));
-          const mergedList = Array.from(mergedMap.values()).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+          const mergedList = Array.from(mergedMap.values())
+            .filter(c => {
+              if (c.id.startsWith('auto_') && (!c.result?.segments || c.result.segments.length === 0)) {
+                db.deleteChapter(c.id).catch(() => {});
+                deleteChapterFromCloud(c.id).catch(() => {});
+                return false;
+              }
+              return true;
+            })
+            .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 
           if (isMounted) {
             setChapters(prev => {
@@ -543,6 +675,7 @@ useEffect(() => {
               realtimeChapters.forEach(c => map.set(c.id, c));
               const mergedCurrent = Array.from(map.values())
                 .filter(c => !deletedChapterIdsRef.current.has(c.id))
+                .filter(c => !(c.id.startsWith('auto_') && (!c.result?.segments || c.result.segments.length === 0)))
                 .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
               return [...mergedCurrent, ...otherNovelsChapters];
             });
@@ -606,19 +739,18 @@ useEffect(() => {
     };
   }, [session.currentNovelId]);
 
-  // Tu dong khoi phuc lai cac dong doi chieu neu dang o tinh trang rong segments
+  // Tu dong khoi phuc lai cac dong doi chieu neu dang o tinh trang rong segments (chi khi da tung dich xong va co ban dich)
   useEffect(() => {
-    if (session.result && (!session.result.segments || session.result.segments.length === 0)) {
+    if (session.status === AppStatus.SUCCESS && session.result && (!session.result.segments || session.result.segments.length === 0)) {
       const nat = session.result.naturalTranslation || '';
-      const raw = session.inputText || '';
-      if (nat.trim() || raw.trim()) {
+      if (nat.trim()) {
         const fixed = reconstructSegmentsIfEmpty(session);
         if (fixed.result?.segments && fixed.result.segments.length > 0) {
           setSession(fixed);
         }
       }
     }
-  }, [session.result, session.inputText]);
+  }, [session.status, session.result]);
 
   // Luu phien lam viec hien tai an toan: Luon luu day du vao IndexedDB (khong gioi han dung luong)
   // va luu du phong vao localStorage (neu localStorage qua tai thi IndexedDB van bao ve 100% du lieu)
@@ -711,7 +843,18 @@ useEffect(() => {
     try {
       const currentId = session.currentNovelId || 'default';
       const novelCharsWithId = novelChars.map(c => ({ ...c, novelId: c.novelId || currentId }));
-      const otherChars = (session.characters || []).filter(c => c.novelId && c.novelId !== currentId);
+      const novelCharIds = new Set(novelCharsWithId.map(c => c.id));
+      const novelChineseNames = new Set(novelCharsWithId.map(c => c.chineseName.trim().toLowerCase()));
+
+      // Giữ lại các nhân vật khác (thuộc truyện khác hoặc nhân vật chung chưa bị ghi đè)
+      const otherChars = (session.characters || []).filter(c => {
+        if (novelCharIds.has(c.id)) return false;
+        if (c.novelId === currentId) return false;
+        // Nếu cùng tên tiếng Trung nhưng ở truyện khác và đã có trong novelChars thì ưu tiên novelChars
+        if (novelChineseNames.has(c.chineseName.trim().toLowerCase())) return false;
+        return true;
+      });
+
       const merged = [...novelCharsWithId, ...otherChars];
       updateSession({ characters: merged });
       db.saveCharacters(merged).catch(err => {
@@ -726,7 +869,8 @@ useEffect(() => {
     try {
       const currentId = session.currentNovelId || 'default';
       const novelRelsWithId = novelRels.map(r => ({ ...r, novelId: r.novelId || currentId }));
-      const otherRels = (session.relationships || []).filter(r => r.novelId && r.novelId !== currentId);
+      const novelRelIds = new Set(novelRelsWithId.map(r => r.id));
+      const otherRels = (session.relationships || []).filter(r => !novelRelIds.has(r.id) && r.novelId !== currentId);
       const merged = [...novelRelsWithId, ...otherRels];
       updateSession({ relationships: merged });
     } catch (err) {
@@ -738,7 +882,17 @@ useEffect(() => {
     try {
       const currentId = session.currentNovelId || 'default';
       const novelTermsWithId = novelTerms.map(t => ({ ...t, novelId: t.novelId || currentId }));
-      const otherTerms = (session.customTerms || []).filter(t => t.novelId && t.novelId !== currentId);
+      const novelTermIds = new Set(novelTermsWithId.map(t => t.id));
+      const novelTermsClean = new Set(novelTermsWithId.map(t => t.term.trim().toLowerCase()));
+
+      // Giữ lại các từ vựng khác (thuộc truyện khác hoặc từ vựng chung chưa bị ghi đè)
+      const otherTerms = (session.customTerms || []).filter(t => {
+        if (novelTermIds.has(t.id)) return false;
+        if (t.novelId === currentId) return false;
+        if (novelTermsClean.has(t.term.trim().toLowerCase())) return false;
+        return true;
+      });
+
       const merged = [...novelTermsWithId, ...otherTerms];
       updateSession({ customTerms: merged });
       db.bulkSaveCustomTerms(merged).catch(err => {
@@ -1227,68 +1381,19 @@ useEffect(() => {
 
   const handleTranslate = async (forceFastAlign = false) => {
     if (!session.inputText.trim()) return;
-    
-    // --- BƯỚC TỰ ĐỘNG LƯU TRỮ CHƯƠNG ĐANG EDIT NẾU QUÊN CHƯA LƯU ---
-    if (session.result && session.inputText.trim()) {
-      const alreadySaved = chapters.some(c => c.inputText.trim() === session.inputText.trim());
-      if (!alreadySaved) {
-        let autoName = "";
-        const lines = session.inputText.split('\n').map(l => l.trim()).filter(Boolean);
-        
-        for (const line of lines.slice(0, 5)) {
-          if (line.match(/(Chương\s+\d+|第[一二三四五六七八九十百千万\d]+章)/i)) {
-            const customMap = new Map<string, string>();
-            currentNovelCharacters.forEach(c => {
-                if (c.chineseName && c.vietName) customMap.set(c.chineseName.trim(), c.vietName.trim());
-            });
-            currentNovelTerms.forEach(t => {
-                if (t.term && t.meaning) customMap.set(t.term.trim(), t.meaning.trim());
-            });
-            autoName = vietphraseEngine.translate(line, customMap);
-            break;
-          }
-        }
-        
-        if (!autoName && session.result.segments && session.result.segments.length > 0) {
-          const firstEditLine = session.result.segments[0].natural.trim();
-          if (firstEditLine) {
-            autoName = firstEditLine.slice(0, 50);
-          }
-        }
-        
-        if (!autoName) {
-          autoName = `Chương tự động (${new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })})`;
-        } else {
-          autoName = `[Tự động] ${autoName}`;
-        }
-        
-        const autoChapter: Chapter = {
-          id: `auto_${Date.now()}`,
-          novelId: session.currentNovelId,
-          name: autoName,
-          timestamp: Date.now(),
-          inputText: session.inputText,
-          deeplText: session.deeplText,
-          preEditedText: session.preEditedText,
-          result: session.result,
-          completedSegments: session.completedSegments
-        };
-        
-        try {
-          await db.saveChapter(autoChapter);
-          await saveChapterToCloud(autoChapter);
-          setChapters(prev => [autoChapter, ...prev]);
-          console.log("Auto-saved draft on translate:", autoName);
-        } catch (e) {
-          console.error("Auto save on translate failed", e);
-        }
-      }
-    }
 
     // --- BƯỚC 1: TÍNH TOÁN VIETPHRASE NỘI BỘ ---
     const inputLines = session.inputText.split(/\r?\n/).map(l => l.replace(/\r$/, ''));
     
     const customMap = new Map<string, string>();
+    // 1. Nạp toàn bộ kho từ vựng & nhân vật đã lưu làm nền tảng
+    (session.characters || []).forEach(c => {
+        if (c.chineseName && c.vietName) customMap.set(c.chineseName.trim(), c.vietName.trim());
+    });
+    (session.customTerms || []).forEach(t => {
+        if (t.term && t.meaning) customMap.set(t.term.trim(), t.meaning.trim());
+    });
+    // 2. Ghi đè bởi từ vựng & nhân vật truyện hiện tại
     currentNovelCharacters.forEach(c => {
         if (c.chineseName && c.vietName) customMap.set(c.chineseName.trim(), c.vietName.trim());
     });
@@ -1301,7 +1406,8 @@ useEffect(() => {
         quick: vietphraseEngine.translate(line, customMap),
     }));
     
-    updateSession({ status: AppStatus.LOADING, error: null, result: null, completedSegments: [], currentHistoryId: undefined, currentChapterId: undefined });
+    const currentChapId = session.currentChapterId;
+    updateSession({ status: AppStatus.LOADING, error: null, result: null, completedSegments: [], currentHistoryId: undefined, currentChapterId: currentChapId });
 
     try {
       const hasPreEdited = !!(session.preEditedText && session.preEditedText.trim());
@@ -1356,15 +1462,84 @@ useEffect(() => {
       const sanitized = sanitizeResult(mergedResult);
       const historyId = Date.now().toString();
       
-      updateSession({ 
-        result: sanitized, 
-        status: AppStatus.SUCCESS,
-        currentHistoryId: historyId 
-      });
+      let activeChapId = currentChapId;
+      if (!activeChapId) {
+        // Tự động tạo duy nhất 1 chương mới nếu chưa có chương liên kết
+        activeChapId = `chap_${Date.now()}`;
+        let extractedName = "";
+        const lines = session.inputText.split('\n').map(l => l.trim()).filter(Boolean);
+        for (const line of lines.slice(0, 5)) {
+          if (line.match(/(Chương\s+\d+|第[一二三四五六七八九十百千万\d]+章)/i)) {
+            extractedName = vietphraseEngine.translate(line, customMap);
+            break;
+          }
+        }
+        const novChapters = chapters.filter(c => c.novelId === session.currentNovelId);
+        const autoName = extractedName || session.name || `Chương ${novChapters.length + 1}`;
+
+        const newChapter: Chapter = {
+          id: activeChapId,
+          novelId: session.currentNovelId || 'default',
+          name: autoName,
+          timestamp: Date.now(),
+          inputText: session.inputText,
+          deeplText: session.deeplText,
+          preEditedText: session.preEditedText,
+          result: sanitized as TranslationResponse,
+          completedSegments: []
+        };
+        db.saveChapter(newChapter).catch(console.warn);
+        saveChapterToCloud(newChapter).catch(console.warn);
+        setChapters(prev => [newChapter, ...prev]);
+        updateSession({ 
+          name: autoName,
+          result: sanitized, 
+          status: AppStatus.SUCCESS,
+          currentHistoryId: historyId,
+          currentChapterId: activeChapId
+        });
+      } else {
+        // Cập nhật DUY NHẤT chương hiện tại, tuyệt đối không tạo thêm file mới
+        updateSession({ 
+          result: sanitized, 
+          status: AppStatus.SUCCESS,
+          currentHistoryId: historyId,
+          currentChapterId: activeChapId
+        });
+
+        setChapters(prev => prev.map(c => {
+          if (c.id === activeChapId) {
+            return {
+              ...c,
+              timestamp: Date.now(),
+              inputText: session.inputText,
+              deeplText: session.deeplText,
+              preEditedText: session.preEditedText,
+              result: sanitized as TranslationResponse,
+              completedSegments: []
+            };
+          }
+          return c;
+        }));
+        
+        const chapToSave: Chapter = {
+          id: activeChapId,
+          novelId: session.currentNovelId || 'default',
+          name: session.name || 'Chương',
+          timestamp: Date.now(),
+          inputText: session.inputText,
+          deeplText: session.deeplText,
+          preEditedText: session.preEditedText,
+          result: sanitized as TranslationResponse,
+          completedSegments: []
+        };
+        db.saveChapter(chapToSave).catch(console.warn);
+        saveChapterToCloud(chapToSave).catch(console.warn);
+      }
 
       saveUserLiveWorkspaceToCloud({
         novelId: session.currentNovelId,
-        chapterId: '',
+        chapterId: currentChapId || '',
         status: AppStatus.SUCCESS,
         result: sanitized,
         completedSegments: [],
@@ -1477,16 +1652,52 @@ useEffect(() => {
 
   const handleRestoreChapter = (chapter: Chapter) => {
     lastLocalEditTimeRef.current = Date.now();
-    const restoredResult = sanitizeResult(chapter.result);
+    let restoredResult = sanitizeResult(chapter.result);
     const completed = chapter.completedSegments || [];
     const activeNovelId = chapter.novelId || session.currentNovelId;
 
+    // Nếu segments bị rỗng nhưng có inputText, tự động khôi phục segments ngay lập tức
+    if ((!restoredResult?.segments || restoredResult.segments.length === 0) && chapter.inputText?.trim()) {
+      const rawLines = chapter.inputText.split(/\r?\n/).filter(Boolean);
+      if (rawLines.length > 0) {
+        const customMap = new Map<string, string>();
+        currentNovelCharacters.forEach(c => {
+          if (c.chineseName && c.vietName) customMap.set(c.chineseName.trim(), c.vietName.trim());
+        });
+        currentNovelTerms.forEach(t => {
+          if (t.term && t.meaning) customMap.set(t.term.trim(), t.meaning.trim());
+        });
+
+        const recoveredSegments: TranslationSegment[] = rawLines.map(line => ({
+          source: line,
+          natural: extractBracketsOnly(line),
+          quick: vietphraseEngine.translate(line, customMap),
+          deepl: ''
+        }));
+
+        restoredResult = {
+          segments: recoveredSegments,
+          naturalTranslation: recoveredSegments.map(s => s.natural).join('\n'),
+          quickTrans: recoveredSegments.map(s => s.quick).join('\n'),
+          deeplTranslation: '',
+          sinoVietnamese: '',
+          vocabulary: []
+        };
+      }
+    }
+
+    const hasSegments = !!(restoredResult?.segments && restoredResult.segments.length > 0);
+    const sourceText = chapter.inputText || (hasSegments ? (restoredResult?.segments || []).map(s => s.source || '').join('\n') : "");
+    const deeplText = chapter.deeplText || (hasSegments ? (restoredResult?.segments || []).map(s => s.deepl || '').join('\n') : "");
+    const naturalText = chapter.preEditedText || (hasSegments ? (restoredResult?.segments || []).map(s => s.natural || '').join('\n') : "");
+
     updateSession({
-      inputText: chapter.inputText,
-      deeplText: chapter.deeplText || "",
-      preEditedText: chapter.preEditedText || "",
+      name: chapter.name,
+      inputText: sourceText,
+      deeplText: deeplText,
+      preEditedText: naturalText,
       result: restoredResult,
-      status: AppStatus.SUCCESS,
+      status: hasSegments ? AppStatus.SUCCESS : AppStatus.IDLE,
       error: null,
       completedSegments: completed,
       currentHistoryId: undefined,
@@ -1499,16 +1710,26 @@ useEffect(() => {
       novelId: activeNovelId,
       chapterId: chapter.id,
       chapterName: chapter.name,
-      status: AppStatus.SUCCESS,
+      status: hasSegments ? AppStatus.SUCCESS : AppStatus.IDLE,
       completedSegments: completed,
       segments: restoredResult?.segments || [],
       result: restoredResult,
-      inputText: chapter.inputText,
-      deeplText: chapter.deeplText,
-      preEditedText: chapter.preEditedText,
+      inputText: sourceText,
+      deeplText: deeplText,
+      preEditedText: naturalText,
       updatedAt: Date.now()
     }, true);
   };
+
+  // Tự động nạp nội dung chương nếu session có currentChapterId nhưng chưa có nội dung
+  useEffect(() => {
+    if (session.currentChapterId && !session.result && !session.inputText.trim() && chapters.length > 0) {
+      const activeChap = chapters.find(c => c.id === session.currentChapterId);
+      if (activeChap && (activeChap.inputText?.trim() || (activeChap.result?.segments && activeChap.result.segments.length > 0))) {
+        handleRestoreChapter(activeChap);
+      }
+    }
+  }, [session.currentChapterId, session.result, session.inputText, chapters]);
 
   const handleSelectNovel = (novelId: string) => {
     lastLocalEditTimeRef.current = Date.now();
@@ -1567,9 +1788,37 @@ useEffect(() => {
 
   const handleDeleteChapter = async (id: string) => {
     deletedChapterIdsRef.current.add(id);
-    await db.deleteChapter(id);
-    await deleteChapterFromCloud(id);
+    // 1. Cập nhật state UI ngay lập tức
     setChapters(prev => prev.filter(c => c.id !== id));
+
+    // 2. Xóa trong IndexedDB cục bộ
+    try {
+      await db.deleteChapter(id);
+    } catch (e) {
+      console.warn("Lỗi xóa chương trong IndexedDB:", e);
+    }
+
+    // 3. Xóa trên Cloud Firestore
+    try {
+      await deleteChapterFromCloud(id);
+    } catch (e) {
+      console.warn("Lỗi xóa chương trên Cloud:", e);
+    }
+
+    // 4. Nếu chương đang mở chính là chương vừa xóa, dọn sạch session
+    if (session.currentChapterId === id) {
+      updateSession({
+        currentChapterId: undefined,
+        currentHistoryId: undefined,
+        name: '',
+        inputText: '',
+        deeplText: '',
+        preEditedText: '',
+        result: null,
+        completedSegments: [],
+        status: AppStatus.IDLE
+      });
+    }
   };
 
   const handleRenameChapter = async (id: string, newName: string) => {
@@ -1609,116 +1858,117 @@ useEffect(() => {
     exportToExcel(filteredTerms, filteredChars, filteredRels, novelName, filteredShortcuts);
   };
 
+
+
   return (
-    <div className="h-screen flex flex-col bg-[#F5E6D3] text-[#3E2723] font-sans overflow-hidden">
+    <div className="h-screen flex flex-col font-sans overflow-hidden bg-[#F5E6D3] text-[#3E2723]">
       
       {/* HEADER */}
-      <header className={`bg-[#EFE5D9] text-[#3E2723] border-b border-[#D7CCC8] h-14 items-center justify-between px-3 sm:px-4 shrink-0 z-20 shadow-xs overflow-x-auto no-scrollbar ${isFocusMode ? 'hidden' : 'flex'}`}>
-        <div className="flex items-center gap-1.5 sm:gap-4 shrink-0">
-          {/* Segmented Mode Control */}
-          <div className="flex bg-[#E4D5C3] p-0.5 rounded-lg border border-[#D7CCC8]">
-            <button
-              onClick={() => setMode('edit')}
-              className={`px-2 sm:px-3 py-1 rounded-md text-[11px] font-bold transition-all ${mode === 'edit' ? 'bg-[#5D4037] text-white shadow-xs' : 'text-[#5D4037] hover:text-[#3E2723]'}`}
-              title="Chế độ Edit"
-            >
-              <span className="sm:hidden">E</span>
-              <span className="hidden sm:inline">Edit</span>
-            </button>
-            <button
-              onClick={() => setMode('beta')}
-              className={`px-2 sm:px-3 py-1 rounded-md text-[11px] font-bold transition-all flex items-center gap-1 ${mode === 'beta' ? 'bg-[#5D4037] text-white shadow-xs' : 'text-[#5D4037] hover:text-[#3E2723]'}`}
-              title="Chế độ Beta"
-            >
-              <span className="sm:hidden">B</span>
-              <span className="hidden sm:inline">Beta</span>
-            </button>
-          </div>
-        </div>
-        
-        {/* RIGHT CONTROLS */}
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            {/* Nút mở Từ vựng cho màn hình nhỏ / Tablet (Chỉ icon) */}
-            <button
-              onClick={() => setShowMobileSidebar(true)}
-              className="lg:hidden flex items-center justify-center text-[#5D4037] hover:text-[#3E2723] bg-white hover:bg-[#FAF6F0] p-2 sm:px-2.5 sm:py-1 rounded-full border border-[#D7CCC8] shadow-2xs transition-colors"
-              title="Kho Từ vựng"
-            >
-               <BookA size={14} />
-            </button>
-
-            {/* Nút mở Nhân vật & Quan hệ cho màn hình nhỏ / Tablet (Chỉ icon) */}
-            <button
-              onClick={() => setShowMobileWorldInfo(true)}
-              className="xl:hidden flex items-center justify-center text-[#5D4037] hover:text-[#3E2723] bg-white hover:bg-[#FAF6F0] p-2 sm:px-2.5 sm:py-1 rounded-full border border-[#D7CCC8] shadow-2xs transition-colors"
-              title="Bảng Nhân vật & Thiết lập"
-            >
-               <Users size={14} />
-            </button>
-
-            <NovelSelector 
-              currentNovelId={session.currentNovelId || ''} 
-              onSelectNovel={handleSelectNovel} 
-            />
-            <button 
-              onClick={() => setShowShortcuts(true)} 
-              className={`flex items-center gap-1.5 text-[10px] font-medium px-2.5 py-1 rounded-full border transition-colors shadow-2xs ${
-                shortcutsEnabled 
-                  ? 'text-[#5D4037] hover:text-[#3E2723] bg-white hover:bg-[#FAF6F0] border-[#D7CCC8]' 
-                  : 'text-[#8D6E63] hover:text-[#3E2723] bg-white/60 border-[#D7CCC8]'
-              }`}
-              title="Bảng gõ tắt (Auto-replace)"
-            >
-               <Keyboard size={12} />
-               <span className="hidden sm:inline">Gõ tắt</span>
-               {shortcuts.length > 0 && (
-                 <span className={`text-[9px] px-1.5 py-0.2 rounded-full font-mono font-bold ${shortcutsEnabled ? 'bg-[#EFEBE9] text-[#5D4037]' : 'bg-gray-200 text-gray-500'}`}>
-                   {shortcuts.filter(s => s.enabled).length}
-                 </span>
-               )}
-            </button>
-            <button 
-              onClick={() => setShowFontModal(true)} 
-              className="flex items-center gap-1.5 text-[10px] font-medium text-[#5D4037] hover:text-[#3E2723] bg-white hover:bg-[#FAF6F0] px-2 sm:px-2.5 py-1 rounded-full border border-[#D7CCC8] shadow-2xs transition-colors"
-              title="Đổi phông chữ hiển thị toàn ứng dụng"
-            >
-               <Type size={12} />
-               <span className="hidden sm:inline">Phông chữ</span>
-            </button>
-            <button onClick={() => setShowChapters(true)} className="flex items-center gap-1.5 text-[10px] font-medium text-[#5D4037] hover:text-[#3E2723] bg-white hover:bg-[#FAF6F0] px-2 sm:px-2.5 py-1 rounded-full border border-[#D7CCC8] shadow-2xs transition-colors">
-               <FolderOpen size={12} />
-               <span className="hidden sm:inline">Kho chương</span>
-               <span>({currentNovelChapters.length})</span>
-            </button>
-            <button onClick={() => setShowHistory(true)} className="flex items-center gap-1.5 text-[10px] font-medium text-[#5D4037] hover:text-[#3E2723] bg-white hover:bg-[#FAF6F0] px-2 py-1 rounded-full border border-[#D7CCC8] shadow-2xs transition-colors">
-               <History size={12} />
-               <span className="hidden sm:inline">Lịch sử</span>
-            </button>
-
-            {auth.currentUser && (
-              <div 
-                className={`flex items-center gap-1 text-[10px] px-2 py-1 rounded-full border transition-all ${
-                  Date.now() - lastRemoteSyncTime < 4000
-                    ? 'bg-emerald-100 text-emerald-800 border-emerald-400 shadow-sm animate-pulse'
-                    : 'text-[#5D4037] border-[#D7CCC8] bg-white shadow-2xs'
-                }`}
-                title={Date.now() - lastRemoteSyncTime < 4000 ? "Vừa đồng bộ tức thì từ thiết bị khác!" : "Đang kết nối đồng bộ thời gian thực (Laptop ⇄ Điện thoại)"}
+      
+        <header className={`bg-[#EFE5D9] text-[#3E2723] border-b border-[#D7CCC8] h-14 items-center justify-between px-3 sm:px-4 shrink-0 z-20 shadow-xs overflow-x-auto no-scrollbar ${isFocusMode ? 'hidden' : 'flex'}`}>
+          <div className="flex items-center gap-1.5 sm:gap-4 shrink-0">
+            {/* Segmented Mode Control */}
+            <div className="flex bg-[#E4D5C3] p-0.5 rounded-lg border border-[#D7CCC8]">
+              <button
+                onClick={() => setMode('edit')}
+                className={`px-2 sm:px-3 py-1 rounded-md text-[11px] font-bold transition-all ${mode === 'edit' ? 'bg-[#5D4037] text-white shadow-xs' : 'text-[#5D4037] hover:text-[#3E2723]'}`}
+                title="Chế độ Edit"
               >
-                <Wifi size={11} className={Date.now() - lastRemoteSyncTime < 4000 ? "text-emerald-600" : "text-[#8D6E63]"} />
-                <span className="hidden md:inline font-mono text-[9px]">
-                  {Date.now() - lastRemoteSyncTime < 4000 ? "Đã đồng bộ" : "Live"}
-                </span>
-              </div>
-            )}
+                <span className="sm:hidden">E</span>
+                <span className="hidden sm:inline">Edit</span>
+              </button>
+              <button
+                onClick={() => setMode('beta')}
+                className={`px-2 sm:px-3 py-1 rounded-md text-[11px] font-bold transition-all flex items-center gap-1 ${mode === 'beta' ? 'bg-[#5D4037] text-white shadow-xs' : 'text-[#5D4037] hover:text-[#3E2723]'}`}
+                title="Chế độ Beta"
+              >
+                <span className="sm:hidden">B</span>
+                <span className="hidden sm:inline">Beta</span>
+              </button>
+            </div>
+          </div>
+          
+          {/* RIGHT CONTROLS */}
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+              <button
+                onClick={() => setShowMobileSidebar(true)}
+                className="lg:hidden flex items-center justify-center text-[#5D4037] hover:text-[#3E2723] bg-white hover:bg-[#FAF6F0] p-2 sm:px-2.5 sm:py-1 rounded-full border border-[#D7CCC8] shadow-2xs transition-colors"
+                title="Kho Từ vựng"
+              >
+                 <BookA size={14} />
+              </button>
 
-            <AuthPanel />
-        </div>
-      </header>
+              <button
+                onClick={() => setShowMobileWorldInfo(true)}
+                className="xl:hidden flex items-center justify-center text-[#5D4037] hover:text-[#3E2723] bg-white hover:bg-[#FAF6F0] p-2 sm:px-2.5 sm:py-1 rounded-full border border-[#D7CCC8] shadow-2xs transition-colors"
+                title="Bảng Nhân vật & Thiết lập"
+              >
+                 <Users size={14} />
+              </button>
+
+              <NovelSelector 
+                currentNovelId={session.currentNovelId || ''} 
+                onSelectNovel={handleSelectNovel}
+              />
+              <button 
+                onClick={() => setShowShortcuts(true)} 
+                className={`flex items-center gap-1.5 text-[10px] font-medium px-2.5 py-1 rounded-full border transition-colors shadow-2xs ${
+                  shortcutsEnabled 
+                    ? 'text-[#5D4037] hover:text-[#3E2723] bg-white hover:bg-[#FAF6F0] border-[#D7CCC8]' 
+                    : 'text-[#8D6E63] hover:text-[#3E2723] bg-white/60 border-[#D7CCC8]'
+                }`}
+                title="Bảng gõ tắt (Auto-replace)"
+              >
+                 <Keyboard size={12} />
+                 <span className="hidden sm:inline">Gõ tắt</span>
+                 {shortcuts.length > 0 && (
+                   <span className={`text-[9px] px-1.5 py-0.2 rounded-full font-mono font-bold ${shortcutsEnabled ? 'bg-[#EFEBE9] text-[#5D4037]' : 'bg-gray-200 text-gray-500'}`}>
+                     {shortcuts.filter(s => s.enabled).length}
+                   </span>
+                 )}
+              </button>
+              <button 
+                onClick={() => setShowFontModal(true)} 
+                className="flex items-center gap-1.5 text-[10px] font-medium text-[#5D4037] hover:text-[#3E2723] bg-white hover:bg-[#FAF6F0] px-2 sm:px-2.5 py-1 rounded-full border border-[#D7CCC8] shadow-2xs transition-colors"
+                title="Đổi phông chữ hiển thị toàn ứng dụng"
+              >
+                 <Type size={12} />
+                 <span className="hidden sm:inline">Phông chữ</span>
+              </button>
+              <button onClick={() => setShowChapters(true)} className="flex items-center gap-1.5 text-[10px] font-medium text-[#5D4037] hover:text-[#3E2723] bg-white hover:bg-[#FAF6F0] px-2 sm:px-2.5 py-1 rounded-full border border-[#D7CCC8] shadow-2xs transition-colors">
+                 <FolderOpen size={12} />
+                 <span className="hidden sm:inline">Kho chương</span>
+                 <span>({currentNovelChapters.length})</span>
+              </button>
+              <button onClick={() => setShowHistory(true)} className="flex items-center gap-1.5 text-[10px] font-medium text-[#5D4037] hover:text-[#3E2723] bg-white hover:bg-[#FAF6F0] px-2 py-1 rounded-full border border-[#D7CCC8] shadow-2xs transition-colors">
+                 <History size={12} />
+                 <span className="hidden sm:inline">Lịch sử</span>
+              </button>
+
+              {auth.currentUser && (
+                <div 
+                  className={`flex items-center gap-1 text-[10px] px-2 py-1 rounded-full border transition-all ${
+                    Date.now() - lastRemoteSyncTime < 4000
+                      ? 'bg-emerald-100 text-emerald-800 border-emerald-400 shadow-sm animate-pulse'
+                      : 'text-[#5D4037] border-[#D7CCC8] bg-white shadow-2xs'
+                  }`}
+                  title={Date.now() - lastRemoteSyncTime < 4000 ? "Vừa đồng bộ tức thì từ thiết bị khác!" : "Đang kết nối đồng bộ thời gian thực (Laptop ⇄ Điện thoại)"}
+                >
+                  <Wifi size={11} className={Date.now() - lastRemoteSyncTime < 4000 ? "text-emerald-600" : "text-[#8D6E63]"} />
+                  <span className="hidden md:inline font-mono text-[9px]">
+                    {Date.now() - lastRemoteSyncTime < 4000 ? "Đã đồng bộ" : "Live"}
+                  </span>
+                </div>
+              )}
+
+              <AuthPanel />
+          </div>
+        </header>
 
       {/* MAIN WORKSPACE */}
       <div className="flex-1 flex overflow-hidden relative">
         {/* LEFT SIDEBAR (Desktop / Laptop) */}
-        <div className={`w-80 border-r border-[#D7CCC8] bg-[#EFE5D9] shrink-0 ${isFocusMode ? 'hidden' : 'hidden lg:block'}`}>
+        <div className={`w-80 shrink-0 ${isFocusMode ? 'hidden' : 'hidden lg:block'} border-r border-[#D7CCC8] bg-[#EFE5D9]`}>
             <DictionarySidebar 
                 currentNovelId={session.currentNovelId || ''}
                 terms={currentNovelTerms} 
@@ -1737,14 +1987,14 @@ useEffect(() => {
               className="fixed inset-0 bg-black/50 transition-opacity" 
               onClick={() => setShowMobileSidebar(false)} 
             />
-            <div className="relative w-80 max-w-[85vw] bg-[#EFE5D9] h-full shadow-2xl z-10 flex flex-col animate-in slide-in-from-left duration-200">
-              <div className="flex items-center justify-between p-2.5 bg-[#EFE5D9] text-[#3E2723] border-b border-[#D7CCC8]">
-                <span className="text-xs font-bold text-[#3E2723] flex items-center gap-1.5">
+            <div className={`relative w-80 max-w-[85vw] h-full shadow-2xl z-10 flex flex-col animate-in slide-in-from-left duration-200 bg-[#EFE5D9]`}>
+              <div className={`flex items-center justify-between p-2.5 border-b bg-[#EFE5D9] text-[#3E2723] border-[#D7CCC8]`}>
+                <span className={`text-xs font-bold flex items-center gap-1.5 text-[#3E2723]`}>
                   <BookA size={14} className="text-[#5D4037]" /> Kho từ vựng
                 </span>
                 <button 
                   onClick={() => setShowMobileSidebar(false)}
-                  className="p-1 rounded-md text-[#5D4037] hover:text-[#3E2723] hover:bg-[#D7CCC8]/50 transition-colors"
+                  className={`p-1 rounded-md transition-colors text-[#5D4037] hover:text-[#3E2723] hover:bg-[#D7CCC8]/50`}
                 >
                   <X size={16} />
                 </button>
@@ -1765,32 +2015,41 @@ useEffect(() => {
           document.body
         )}
 
-        {/* CENTER MAIN CONTENT */}
-        <main className="flex-1 flex flex-col h-full overflow-hidden bg-[#F5E6D3] min-w-0">
+        <main className={`flex-1 flex flex-col h-full overflow-hidden min-w-0 bg-[#F5E6D3]`}>
           <div className={`flex-1 ${isFocusMode ? 'h-full flex flex-col p-2 sm:p-3 overflow-hidden' : 'overflow-y-auto overflow-x-hidden scroll-smooth scrollbar-thin scrollbar-thumb-[#D7CCC8] scrollbar-track-transparent'}`}>
              <div className={`flex flex-col ${isFocusMode ? 'h-full flex-1 min-h-0' : 'px-2 pb-2'}`}>
                 
                 {/* INPUT AREA */}
                 {!isFocusMode && (
-                  <div className="mt-2 bg-white rounded-xl shadow-sm border border-[#D7CCC8] overflow-hidden transition-all focus-within:ring-2 focus-within:ring-[#8D6E63]/20 focus-within:border-[#8D6E63]/50 mb-2 flex flex-col">
-                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center bg-[#EFEBE9]/50 px-2.5 sm:px-3 py-1.5 border-b border-[#EFEBE9] gap-1.5 sm:gap-2">
+                  <div className={`mt-2 overflow-hidden transition-all mb-2 flex flex-col ${
+                    'bg-white rounded-xl shadow-sm border border-[#D7CCC8] focus-within:ring-2 focus-within:ring-[#8D6E63]/20 focus-within:border-[#8D6E63]/50'
+                  }`}>
+                      <div className={`flex flex-col sm:flex-row sm:justify-between sm:items-center px-2.5 sm:px-3 py-1.5 border-b gap-1.5 sm:gap-2 ${
+                        'bg-[#EFEBE9]/50 border-[#EFEBE9]'
+                      }`}>
                           {/* Hàng 1 trên mobile / Bên trái trên desktop */}
                           <div className="flex items-center justify-between sm:justify-start gap-2">
-                              <div className="flex items-center gap-1 text-[10px] font-bold text-[#8D6E63] shrink-0 whitespace-nowrap">
+                              <div className={`flex items-center gap-1 text-[10px] font-bold shrink-0 whitespace-nowrap ${
+                                'text-[#8D6E63]'
+                              }`}>
                                   <Layers size={11} />
                                   <span>{segmentCount} đoạn văn</span>
                               </div>
                               <label 
                                   title="Tự động lọc bỏ các dòng trống khi dán nội dung vào ô Raw, VietTrans, Edit" 
-                                  className="sm:hidden text-[10px] text-[#5D4037] hover:text-[#3E2723] px-1.5 py-0.5 rounded hover:bg-[#D7CCC8]/60 flex items-center gap-1.5 cursor-pointer select-none shrink-0 whitespace-nowrap"
+                                  className={`sm:hidden text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1.5 cursor-pointer select-none shrink-0 whitespace-nowrap ${
+                                    'text-[#5D4037] hover:text-[#3E2723] hover:bg-[#D7CCC8]/60'
+                                  }`}
                               >
                                   <input 
                                       type="checkbox" 
                                       checked={autoCleanBlankLines} 
                                       onChange={(e) => setAutoCleanBlankLines(e.target.checked)} 
-                                      className="w-3.5 h-3.5 rounded text-[#5D4037] focus:ring-0 cursor-pointer"
+                                      className={`w-3.5 h-3.5 rounded focus:ring-0 cursor-pointer ${
+                                        'text-[#5D4037]'
+                                      }`}
                                   />
-                                  <span>Tự xóa dòng trống khi dán</span>
+                                  <span>Tự xóa dòng trống</span>
                               </label>
                           </div>
 
@@ -1798,44 +2057,52 @@ useEffect(() => {
                           <div className="flex items-center justify-end gap-1.5 sm:gap-2 overflow-x-auto scrollbar-none">
                               <label 
                                   title="Tự động lọc bỏ các dòng trống khi dán nội dung vào ô Raw, VietTrans, Edit" 
-                                  className="hidden sm:flex text-[10px] text-[#5D4037] hover:text-[#3E2723] px-1.5 py-1 rounded hover:bg-[#D7CCC8]/60 items-center gap-1 cursor-pointer select-none shrink-0 whitespace-nowrap"
+                                  className={`hidden sm:flex text-[10px] px-1.5 py-1 rounded items-center gap-1 cursor-pointer select-none shrink-0 whitespace-nowrap ${
+                                    'text-[#5D4037] hover:text-[#3E2723] hover:bg-[#D7CCC8]/60'
+                                  }`}
                               >
                                   <input 
                                       type="checkbox" 
                                       checked={autoCleanBlankLines} 
                                       onChange={(e) => setAutoCleanBlankLines(e.target.checked)} 
-                                      className="w-3 h-3 rounded text-[#5D4037] focus:ring-0 cursor-pointer"
+                                      className={`w-3 h-3 rounded focus:ring-0 cursor-pointer ${
+                                        'text-[#5D4037]'
+                                      }`}
                                   />
-                                  <span>Tự xóa dòng trống khi dán</span>
+                                  <span>Tự xóa dòng trống</span>
                               </label>
                               <button 
                                   onClick={handleCleanAllBlankLines} 
                                   disabled={!session.inputText && !session.deeplText && !session.preEditedText} 
                                   title="Lọc bỏ toàn bộ dòng trống trong tất cả các ô nhập" 
-                                  className="text-[10px] text-[#8D6E63] hover:text-[#3E2723] px-2 py-1 rounded hover:bg-[#D7CCC8] flex items-center gap-1 disabled:opacity-50 shrink-0 whitespace-nowrap bg-[#EFEBE9]/60 sm:bg-transparent"
+                                   className="text-[10px] px-2 py-1 rounded flex items-center gap-1 disabled:opacity-40 shrink-0 whitespace-nowrap transition-colors text-[#8D6E63] hover:text-[#3E2723] hover:bg-[#D7CCC8] bg-[#EFEBE9]/60 sm:bg-transparent"
                               >
                                   <Scissors size={11} /> <span>Xóa dòng trống</span>
                               </button>
                               <button 
                                   onClick={handleClearSession} 
                                   disabled={!session.inputText && !session.deeplText && !session.preEditedText} 
-                                  className="text-[10px] text-[#8D6E63] hover:text-[#3E2723] px-2 py-1 rounded hover:bg-[#D7CCC8] flex items-center gap-1 disabled:opacity-50 shrink-0 whitespace-nowrap bg-[#EFEBE9]/60 sm:bg-transparent"
+                                   className="text-[10px] px-2 py-1 rounded flex items-center gap-1 disabled:opacity-40 shrink-0 whitespace-nowrap transition-colors text-[#8D6E63] hover:text-[#3E2723] hover:bg-[#D7CCC8] bg-[#EFEBE9]/60 sm:bg-transparent"
                               >
                                   <Eraser size={11} /> <span>Xóa</span>
                               </button>
                           </div>
                       </div>
 
-                      <div className={`grid ${mode === 'beta' ? 'grid-cols-1 sm:grid-cols-3' : 'grid-cols-1 sm:grid-cols-2'} flex-1 min-h-[140px] divide-y sm:divide-y-0 sm:divide-x divide-[#EFEBE9]`}>
+                      <div className={`grid ${mode === 'beta' ? 'grid-cols-1 sm:grid-cols-3' : 'grid-cols-1 sm:grid-cols-2'} flex-1 min-h-[140px] divide-y sm:divide-y-0 sm:divide-x ${
+                        'divide-[#EFEBE9]'
+                      }`}>
                           <div className="flex flex-col flex-1">
-                              <div className="flex justify-between items-center px-3 pt-1.5 pb-1 bg-[#FAFAFA]/40">
-                                  <div className="text-[9px] font-bold text-[#8D6E63] uppercase tracking-wider">1. Raw</div>
+                              <div className={`flex justify-between items-center px-3 pt-1.5 pb-1 ${'bg-[#FAFAFA]/40'}`}>
+                                  <div className={`text-[9px] font-bold uppercase tracking-wider ${'text-[#8D6E63]'}`}>1. Raw</div>
                                   <button
                                       type="button"
                                       onClick={() => handleCleanFieldBlankLines('inputText')}
                                       disabled={!session.inputText}
                                       title="Xóa các dòng trống trong ô Raw"
-                                      className="text-[9px] text-[#8D6E63] hover:text-[#3E2723] hover:bg-[#EFEBE9] px-1.5 py-0.5 rounded flex items-center gap-1 disabled:opacity-40"
+                                      className={`text-[9px] px-1.5 py-0.5 rounded flex items-center gap-1 disabled:opacity-40 transition-colors ${
+                                        'text-[#8D6E63] hover:text-[#3E2723] hover:bg-[#EFEBE9]'
+                                      }`}
                                   >
                                       <Scissors size={9} /> Dọn dòng trống
                                   </button>
@@ -1849,31 +2116,39 @@ useEffect(() => {
                                       handleSmartQuotesKeyDown(e, (newVal) => handleInputChange({ inputText: newVal }));
                                   }}
                                   placeholder="Nhập Raw..."
-                                  className="flex-1 p-3 text-lg font-serif-sc bg-transparent border-none outline-none resize-none placeholder:text-[#BCAAA4] leading-relaxed"
+                                  className={`flex-1 p-3 text-lg font-serif-sc bg-transparent border-none outline-none resize-none leading-relaxed ${
+                                    'text-[#3E2723] placeholder:text-[#BCAAA4]'
+                                  }`}
                                   spellCheck="false"
                               />
                           </div>
                           <div className="flex flex-col flex-1">
-                              <div className="flex justify-between items-center px-3 pt-1.5 pb-1 bg-[#FAFAFA]/40">
-                                  <div className="text-[9px] font-bold text-[#8D6E63] uppercase tracking-wider flex items-center gap-1">
+                              <div className={`flex justify-between items-center px-3 pt-1.5 pb-1 ${'bg-[#FAFAFA]/40'}`}>
+                                  <div className={`text-[9px] font-bold uppercase tracking-wider flex items-center gap-1 ${
+                                    'text-[#8D6E63]'
+                                  }`}>
                                       <a 
                                           href="https://vietnamese-translation.com/chinese-traditional-to-vietnamese.aspx" 
                                           target="_blank" 
                                           rel="noopener noreferrer"
-                                          className="hover:underline flex items-center gap-1 text-[#8D6E63] hover:text-[#3E2723] transition-colors group/vt"
+                                          className={`hover:underline flex items-center gap-1 transition-colors group/vt ${
+                                            'text-[#8D6E63] hover:text-[#3E2723]'
+                                          }`}
                                           title="Bấm để mở trang web dịch vietnamese-translation.com trong tab mới"
                                       >
                                           <span>2. VietTrans</span>
                                           <ExternalLink size={10} className="group-hover/vt:translate-x-0.5 transition-transform" />
                                       </a>
-                                      {mode === 'beta' && <span className="text-[8px] font-normal lowercase text-[#BCAAA4]">(không bắt buộc)</span>}
+                                      {mode === 'beta' && <span className={`text-[8px] font-normal lowercase ${'text-[#BCAAA4]'}`}>(không bắt buộc)</span>}
                                   </div>
                                   <button
                                       type="button"
                                       onClick={() => handleCleanFieldBlankLines('deeplText')}
                                       disabled={!session.deeplText}
                                       title="Xóa các dòng trống trong ô VietTrans"
-                                      className="text-[9px] text-[#8D6E63] hover:text-[#3E2723] hover:bg-[#EFEBE9] px-1.5 py-0.5 rounded flex items-center gap-1 disabled:opacity-40"
+                                      className={`text-[9px] px-1.5 py-0.5 rounded flex items-center gap-1 disabled:opacity-40 transition-colors ${
+                                        'text-[#8D6E63] hover:text-[#3E2723] hover:bg-[#EFEBE9]'
+                                      }`}
                                   >
                                       <Scissors size={9} /> Dọn dòng trống
                                   </button>
@@ -1897,20 +2172,28 @@ useEffect(() => {
                                       }
                                   }}
                                   placeholder="Dán VietTrans (hoặc web dịch) vào đây..."
-                                  className="flex-1 p-3 text-sm bg-transparent border-none outline-none resize-none placeholder:text-[#BCAAA4] leading-relaxed"
+                                  className={`flex-1 p-3 text-sm bg-transparent border-none outline-none resize-none leading-relaxed ${
+                                    'text-[#3E2723] placeholder:text-[#BCAAA4]'
+                                  }`}
                                   spellCheck="false"
                               />
                           </div>
                           {mode === 'beta' && (
                               <div className="flex flex-col flex-1">
-                                  <div className="flex justify-between items-center px-3 pt-1.5 pb-1 bg-[#FAFAFA]/40">
-                                      <div className="text-[9px] font-bold text-[#E64A19] uppercase tracking-wider flex items-center gap-1">3. Edit sẵn <span className="bg-[#E64A19] text-white text-[7px] px-1 rounded-full uppercase">Beta</span></div>
+                                  <div className={`flex justify-between items-center px-3 pt-1.5 pb-1 ${'bg-[#FAFAFA]/40'}`}>
+                                      <div className={`text-[9px] font-bold uppercase tracking-wider flex items-center gap-1 ${
+                                        'text-[#E64A19]'
+                                      }`}>
+                                        3. Edit sẵn <span className={`text-white text-[7px] px-1 rounded-full uppercase ${'bg-[#E64A19]'}`}>Beta</span>
+                                      </div>
                                       <button
                                           type="button"
                                           onClick={() => handleCleanFieldBlankLines('preEditedText')}
                                           disabled={!session.preEditedText}
                                           title="Xóa các dòng trống trong ô Edit sẵn"
-                                          className="text-[9px] text-[#E64A19] hover:text-[#BF360C] hover:bg-[#FBE9E7] px-1.5 py-0.5 rounded flex items-center gap-1 disabled:opacity-40"
+                                          className={`text-[9px] px-1.5 py-0.5 rounded flex items-center gap-1 disabled:opacity-40 transition-colors ${
+                                            'text-[#E64A19] hover:text-[#BF360C] hover:bg-[#FBE9E7]'
+                                          }`}
                                       >
                                           <Scissors size={9} /> Dọn dòng trống
                                       </button>
@@ -1934,25 +2217,31 @@ useEffect(() => {
                                           }
                                       }}
                                       placeholder="Dán edit sẵn vào đây..."
-                                      className="flex-1 p-3 text-sm bg-transparent border-none outline-none resize-none placeholder:text-[#BCAAA4] leading-relaxed font-medium text-[#4E342E]"
+                                      className={`flex-1 p-3 text-sm bg-transparent border-none outline-none resize-none leading-relaxed font-medium ${
+                                        'text-[#4E342E] placeholder:text-[#BCAAA4]'
+                                      }`}
                                       spellCheck="false"
                                   />
                               </div>
                           )}
                       </div>
 
-                      <div className="flex justify-between items-center p-2 border-t border-[#EFEBE9] bg-[#FAFAFA]">
+                      <div className={`flex justify-between items-center p-2.5 border-t ${
+                        'bg-[#FAFAFA] border-[#EFEBE9]'
+                      }`}>
                           <div className="flex items-center gap-4">
-                              <div className="text-[10px] font-medium transition-colors text-[#A1887F]">
+                              <div className={`text-[10px] font-medium transition-colors ${
+                                'text-[#A1887F]'
+                              }`}>
                                   {session.inputText.length} ký tự
                               </div>
                           </div>
                           <button
                               onClick={() => handleTranslate(false)}
                               disabled={session.status === AppStatus.LOADING || !session.inputText.trim()}
-                              className="bg-[#3E2723] text-[#FFECB3] hover:bg-[#4E342E] disabled:bg-[#A1887F] disabled:cursor-not-allowed px-4 py-1.5 rounded text-sm font-bold flex items-center gap-2 transition-all shadow-sm"
+                               className="px-4 py-1.5 rounded text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-2xs bg-[#3E2723] text-[#FFECB3] hover:bg-[#4E342E] disabled:bg-[#A1887F] disabled:cursor-not-allowed"
                           >
-                              {session.status === AppStatus.LOADING ? (<><Loader2 className="animate-spin" size={14} /> Phân tích...</>) : 'Phân tích'}
+                              {session.status === AppStatus.LOADING ? (<><Loader2 className="animate-spin" size={13} /> Phân tích...</>) : 'Phân tích'}
                           </button>
                       </div>
                   </div>
@@ -2001,9 +2290,11 @@ useEffect(() => {
                     </div>
                 ) : (
                     session.status === AppStatus.IDLE && (
-                        <div className="flex flex-col items-center justify-center text-[#BCAAA4] border-2 border-dashed border-[#D7CCC8] rounded-xl py-12">
+                        <div className={`flex flex-col items-center justify-center py-12 ${
+                          'border-2 border-dashed border-[#D7CCC8] rounded-xl text-[#BCAAA4]'
+                        }`}>
                             <Layout size={32} className="mb-2 opacity-50"/>
-                            <p className="text-xs">Khu vực hiển thị kết quả</p>
+                            <p className="text-xs">Khu vực hiển thị kết quả dịch</p>
                         </div>
                     )
                 )}
@@ -2012,7 +2303,7 @@ useEffect(() => {
         </main>
 
         {/* RIGHT SIDEBAR (Desktop / Laptop) */}
-        <div className={`w-[360px] border-l border-[#D7CCC8] bg-[#EFE5D9] shrink-0 ${isFocusMode ? 'hidden' : 'hidden xl:block'}`}>
+        <div className={`w-[360px] shrink-0 ${isFocusMode ? 'hidden' : 'hidden xl:block'} border-l border-[#D7CCC8] bg-[#EFE5D9]`}>
             <WorldInfoPanel 
                 currentNovelId={session.currentNovelId || ''}
                 characters={currentNovelCharacters} 
@@ -2022,7 +2313,7 @@ useEffect(() => {
                 notes={session.notes} 
                 onUpdateNotes={(val) => updateSession({ notes: val })} 
                 sheetUrl={session.sheetUrl} 
-                onUpdateSheetUrl={(url) => updateSession({ sheetUrl: url })} 
+                onUpdateSheetUrl={(url) => updateSession({ sheetUrl: url })}
             />
         </div>
 
@@ -2055,7 +2346,7 @@ useEffect(() => {
                     notes={session.notes} 
                     onUpdateNotes={(val) => updateSession({ notes: val })} 
                     sheetUrl={session.sheetUrl} 
-                    onUpdateSheetUrl={(url) => updateSession({ sheetUrl: url })} 
+                    onUpdateSheetUrl={(url) => updateSession({ sheetUrl: url })}
                 />
               </div>
             </div>

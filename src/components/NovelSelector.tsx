@@ -130,12 +130,12 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, on
 
   return (
     <div className="flex items-center gap-1.5 shrink-0">
-      <div className="flex items-center gap-1 bg-white hover:bg-[#FAF6F0] rounded-md border border-[#D7CCC8] px-2 py-1 shadow-2xs transition-colors">
+      <div className="flex items-center gap-1 rounded-md px-2 py-1 transition-colors bg-white hover:bg-[#FAF6F0] border border-[#D7CCC8] text-[#3E2723] shadow-2xs">
         <Book size={12} className="text-[#5D4037]" />
         <select 
           value={currentNovelId || (novels[0]?.id || '')} 
           onChange={(e) => onSelectNovel(e.target.value)}
-          className="bg-transparent text-[#3E2723] font-medium text-[10px] outline-none max-w-[120px] cursor-pointer"
+          className="bg-transparent font-medium text-[10px] outline-none max-w-[120px] cursor-pointer text-[#3E2723]"
         >
           {novels.length === 0 && <option value="" disabled>-- Chọn truyện --</option>}
           {novels.map(n => (
@@ -143,13 +143,18 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, on
           ))}
         </select>
         {loading ? (
-          <Loader2 size={12} className="animate-spin text-[#8D6E63] ml-0.5" />
+          <Loader2 size={12} className="animate-spin ml-0.5 text-[#8D6E63]" />
         ) : (
-          <button onClick={handleCreate} className="ml-1 text-[#8D6E63] hover:text-[#3E2723]" title="Tạo truyện mới">
+          <button 
+            onClick={handleCreate} 
+            className="ml-1 transition-colors text-[#8D6E63] hover:text-[#3E2723]" 
+            title="Tạo truyện mới"
+          >
             <Plus size={12} />
           </button>
         )}
       </div>
+
       {error && (
         <span 
           className="text-[9px] text-[#C62828] bg-red-50 border border-red-200 px-1.5 py-0.5 rounded cursor-pointer opacity-90 hover:opacity-100" 

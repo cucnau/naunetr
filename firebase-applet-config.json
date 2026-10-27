@@ -1,10 +1,12 @@
 {
   "projectId": "naunetr",
-  "appId": "1:653677194547:web:427ca8f0bbce8e6a852246",
+  "appId": "1:653677194547:web:b3ff44a847bf8a8f852246",
   "apiKey": "AIzaSyACPEjQZLNKvdNc_hEgLOyEIv6xqQKY3e8",
   "authDomain": "naunetr.firebaseapp.com",
-  "firestoreDatabaseId": "(default)",
+  "firestoreDatabaseId": "ai-studio-nuntr-03f76b7c-dd62-4305-811a-5da8c9ab9010",
   "storageBucket": "naunetr.firebasestorage.app",
   "messagingSenderId": "653677194547",
-  "measurementId": "G-WCDPQFYNRL"
+  "measurementId": "",
+  "oAuthClientId": "653677194547-c12855qsbufcfsf37q9o46e1ud0sf8mi.apps.googleusercontent.com",
+  "recaptchaSiteKey": ""
 }

@@ -517,7 +517,7 @@ export const deleteChapterFromCloud = async (chapterId: string): Promise<void> =
   try {
     await deleteDoc(doc(db, 'chapters', chapterId));
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, path);
+    console.warn("Không thể xóa chương trên Cloud Firestore:", error);
   }
 };
 

@@ -100,21 +100,17 @@ export function shouldUpgradeBrackets(currentVal: string, source: string): boole
   if (!newBrackets) return false;
 
   const trimmed = (currentVal || '').trim();
-  // Neu o edit dang trong
+  // Neu o edit dang trong thi tu dong dien dau san
   if (!trimmed) return true;
 
   // Neu da khop dung voi gia tri dau moi -> khong can cap nhat
   if (trimmed === newBrackets) return false;
 
-  // Neu gia tri hien tai chi la cac dau ngoac cu chua co …… hoac ——
-  const isOnlyOldBrackets = trimmed === '【】' || trimmed === '《》' || trimmed === '【】 《》';
-  if (isOnlyOldBrackets) return true;
-
-  // Neu gia tri hien tai khong co bat ky chu cai hoac so nao (nguoi dung chua go noi dung)
-  const hasAlphanumeric = /[a-zA-Z0-9\u00C0-\u024F\u1EA0-\u1EF9\u4E00-\u9FFF]/.test(trimmed);
-  if (!hasAlphanumeric) {
+  // Neu gia tri hien tai chi la cap ngoac cu chua co noi dung dau ben trong (vi du 【】 nang cap thanh 【……】)
+  if ((trimmed === '【】' || trimmed === '《》') && (newBrackets.startsWith('【') || newBrackets.startsWith('《')) && newBrackets.length > 2) {
     return true;
   }
 
+  // Nguoi dung da chu dong nhap hoac sua noi dung (ke ca dau ..., ......, v.v.), khong tu dong ghi de
   return false;
 }

@@ -271,7 +271,7 @@ const EditableSegment = ({
                     textareaRef.current.setSelectionRange(1, 1);
                 }
             }, 10);
-        } else if (val === '……' || val === '——') {
+        } else if (val === '……' || val === '——' || val === '......' || val === '...') {
             setTimeout(() => {
                 if (textareaRef.current) {
                     textareaRef.current.setSelectionRange(0, 0);

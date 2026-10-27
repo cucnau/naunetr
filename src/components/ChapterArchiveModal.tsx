@@ -407,12 +407,8 @@ export const ChapterArchiveModal: React.FC<ChapterArchiveModalProps> = ({
                   {/* Actions */}
                   <div className="flex items-center gap-1 shrink-0">
                     <button
-                      onClick={() => {
-                        if (window.confirm(`Bạn có chắc chắn muốn khôi phục và tiếp tục sửa "${c.name}"? Bản nháp hiện tại của bạn sẽ bị ghi đè.`)) {
-                          onSelectChapter(c);
-                        }
-                      }}
-                      className="flex items-center gap-1 text-[10px] font-bold text-[#5D4037] hover:text-[#3E2723] bg-[#EFEBE9] hover:bg-[#D7CCC8] px-2.5 py-1 rounded transition-colors"
+                      onClick={() => onSelectChapter(c)}
+                      className="flex items-center gap-1 text-[10px] font-bold text-[#5D4037] hover:text-[#3E2723] bg-[#EFEBE9] hover:bg-[#D7CCC8] px-2.5 py-1 rounded transition-colors cursor-pointer"
                       title="Nạp vào editor để edit tiếp"
                     >
                       <RotateCcw size={11} />
