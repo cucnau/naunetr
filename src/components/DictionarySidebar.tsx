@@ -5,7 +5,7 @@ import { Plus, Trash2, BookUser, Settings, Download, Upload, Loader2, Save, Code
 import { syncFirestoreData, deleteFirestoreDoc, overwriteFirestoreData } from '../services/firestoreService';
 import { auth } from '../services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import { vietphraseEngine, VIETPHRASE_CATEGORY_CONFIG } from '../services/vietphraseService';
+import { vietphraseEngine, VIETPHRASE_CATEGORY_CONFIG, getOmittedParticlesConfig, saveOmittedParticlesConfig, DEFAULT_OMITTED_PARTICLES, OMITTED_PARTICLES_EXPLANATIONS } from '../services/vietphraseService';
 // Deleted smartClassify import
 
 interface DictionarySidebarProps {
@@ -158,6 +158,41 @@ export const DictionarySidebar: React.FC<DictionarySidebarProps> = ({
     return saved === null ? true : saved === 'true';
   });
   const isInitialMount = useRef(true);
+
+  // Cấu hình trợ từ / hư từ bỏ qua trong Vietphrase (mặc định: 地, 了)
+  const [omittedParticlesEnabled, setOmittedParticlesEnabled] = useState<boolean>(() => getOmittedParticlesConfig().enabled);
+  const [omittedParticlesInput, setOmittedParticlesInput] = useState<string>(() => getOmittedParticlesConfig().particles);
+
+  const handleToggleOmittedParticles = (enabled: boolean) => {
+    setOmittedParticlesEnabled(enabled);
+    saveOmittedParticlesConfig(enabled, omittedParticlesInput);
+  };
+
+  const handleUpdateOmittedParticles = (val: string) => {
+    setOmittedParticlesInput(val);
+    saveOmittedParticlesConfig(omittedParticlesEnabled, val);
+  };
+
+  const handleResetDefaultParticles = () => {
+    setOmittedParticlesInput(DEFAULT_OMITTED_PARTICLES);
+    saveOmittedParticlesConfig(omittedParticlesEnabled, DEFAULT_OMITTED_PARTICLES);
+  };
+
+  const handleToggleSingleParticle = (char: string) => {
+    const currentList = omittedParticlesInput
+      .split(/[,，\s]+/)
+      .map(s => s.trim())
+      .filter(Boolean);
+    let nextList: string[];
+    if (currentList.includes(char)) {
+      nextList = currentList.filter(c => c !== char);
+    } else {
+      nextList = [...currentList, char];
+    }
+    const nextStr = nextList.join(', ');
+    setOmittedParticlesInput(nextStr);
+    saveOmittedParticlesConfig(omittedParticlesEnabled, nextStr);
+  };
   const isPullingRef = useRef(false); // Flag to ignore changes caused by pulling data
 
   // Persist autoSync preference
@@ -627,6 +662,94 @@ export const DictionarySidebar: React.FC<DictionarySidebarProps> = ({
                     multiple
                     onChange={handleMultipleFilesUpload} 
                 />
+
+                {/* TÙY CHỌN ẨN TRỢ TỪ HƯ TỪ ĐƠN LẺ */}
+                <div className="mt-3 p-2.5 rounded-lg bg-[#FAF8F5] border border-[#D7CCC8] text-[10px] text-[#5D4037]">
+                  <div className="flex items-center justify-between">
+                    <label className="font-bold text-[#3E2723] flex items-center gap-1.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={omittedParticlesEnabled}
+                        onChange={(e) => handleToggleOmittedParticles(e.target.checked)}
+                        className="rounded text-[#5D4037] focus:ring-[#8D6E63] cursor-pointer"
+                      />
+                      <span>Tự động ẩn trợ từ / hư từ khi đứng đơn lẻ</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleResetDefaultParticles}
+                      className="text-[9px] text-[#8D6E63] hover:text-[#3E2723] underline font-medium cursor-pointer"
+                      title="Khôi phục danh sách chuẩn"
+                    >
+                      Bộ chuẩn ({OMITTED_PARTICLES_EXPLANATIONS.length} từ)
+                    </button>
+                  </div>
+                  
+                  {omittedParticlesEnabled && (
+                    <div className="mt-2 space-y-2.5">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[9px] text-[#8D6E63] font-medium shrink-0">Các từ lọc:</span>
+                        <input
+                          type="text"
+                          value={omittedParticlesInput}
+                          onChange={(e) => handleUpdateOmittedParticles(e.target.value)}
+                          placeholder="地, 了, 着, 著, 啦, 呗, 嘛, 咧..."
+                          className="flex-1 text-[10px] px-2 py-1 border border-[#D7CCC8] rounded bg-white font-mono text-[#3E2723] focus:border-[#8D6E63] outline-none"
+                        />
+                      </div>
+
+                      {/* Hiển thị phân nhóm 4 thể loại trợ từ / hư từ */}
+                      <div className="space-y-2 max-h-60 overflow-y-auto pr-0.5 scrollbar-thin">
+                        {[
+                          { key: 'structure', title: '1. Trợ từ kết cấu & thời thái (hay gặp nhất)' },
+                          { key: 'modal', title: '2. Trợ từ ngữ khí cuối câu (khẩu ngữ / đối thoại)' },
+                          { key: 'classical', title: '3. Hư từ cổ phong & tiên hiệp / kiếm hiệp' },
+                          { key: 'interjection', title: '4. Thán từ & từ đệm khẩu ngữ' }
+                        ].map(group => {
+                          const itemsInGroup = OMITTED_PARTICLES_EXPLANATIONS.filter(item => item.group === group.key);
+                          return (
+                            <div key={group.key} className="bg-white p-1.5 rounded border border-[#D7CCC8]/60">
+                              <div className="text-[8.5px] font-bold text-[#5D4037] mb-1 flex items-center justify-between">
+                                <span>{group.title}</span>
+                                <span className="text-[8px] font-normal text-[#8D6E63]">{itemsInGroup.length} từ</span>
+                              </div>
+                              <div className="grid grid-cols-2 gap-1">
+                                {itemsInGroup.map(item => {
+                                  const active = omittedParticlesInput
+                                    .split(/[,，\s]+/)
+                                    .map(s => s.trim())
+                                    .includes(item.char);
+                                  return (
+                                    <button
+                                      key={item.char}
+                                      type="button"
+                                      onClick={() => handleToggleSingleParticle(item.char)}
+                                      className={`px-1.5 py-0.5 rounded text-left border transition-all flex items-center justify-between text-[9px] cursor-pointer ${
+                                        active
+                                          ? 'bg-[#EFE5D9] border-[#8D6E63] text-[#3E2723] font-bold'
+                                          : 'bg-white border-[#E0D7D0] text-[#A1887F] opacity-60 hover:opacity-100'
+                                      }`}
+                                      title={`${item.char} (${item.pinyin}): ${item.reason}`}
+                                    >
+                                      <span className="font-mono text-[11px]">{item.char}</span>
+                                      <span className="text-[8px] font-normal truncate ml-1 text-[#5D4037]">
+                                        bỏ "{item.hanviet}"
+                                      </span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  <p className="text-[8.5px] text-[#8D6E63] mt-2 leading-tight">
+                    * Đã thiết lập sẵn trọn bộ <strong>27 trợ từ / hư từ</strong> gây cấn trong truyện Trung. Bạn chỉ cần bấm nhẹ vào từng thẻ để bật/tắt nếu muốn. Các từ ghép có nghĩa (như 地方, 了解, 为了, 着急, 著名, 善哉...) vẫn luôn được giữ nguyên nghĩa 100%.
+                  </p>
+                </div>
              </div>
 
              {/* KHỐI TRA CỨU TỪ ĐIỂN & LẠC VIỆT TRỰC TIẾP */}

@@ -110,6 +110,92 @@ export const VIETPHRASE_CATEGORY_CONFIG: Record<VietphraseCategory, { label: str
   other: { label: 'Khác (Bổ trợ)', priorityNum: 7, badgeClass: 'bg-stone-100 text-stone-800 border-stone-300', desc: 'Quy tắc / bổ trợ' }
 };
 
+// Cấu hình trợ từ / hư từ bỏ qua khi dịch Vietphrase (trọn bộ 27 từ phân nhóm ngữ pháp)
+export const DEFAULT_OMITTED_PARTICLES = '地, 了, 着, 著, 啦, 呗, 嘛, 咧, 哩, 咯, 喽, 嘍, 呐, 啵, 咩, 喏, 矣, 焉, 哉, 兮, 乎, 呃, 欸, 诶, 哼, 咦, 嗬';
+export const OMITTED_PARTICLES_STORAGE_KEY = 'vp_omitted_particles';
+export const OMITTED_PARTICLES_ENABLED_KEY = 'vp_omitted_particles_enabled';
+
+export interface OmittedParticleInfo {
+  char: string;
+  pinyin: string;
+  hanviet: string;
+  group: 'structure' | 'modal' | 'classical' | 'interjection';
+  groupName: string;
+  reason: string;
+}
+
+export const OMITTED_PARTICLES_EXPLANATIONS: OmittedParticleInfo[] = [
+  // Nhóm 1: Trợ từ kết cấu & Thời thái (gây cấn nhất trong văn truyện)
+  { char: '地', pinyin: 'de', hanviet: 'địa', group: 'structure', groupName: 'Trợ từ kết cấu & thời thái', reason: 'Trợ từ trạng ngữ (vd: 慢慢地走 -> chậm rãi đi, không hiện "địa")' },
+  { char: '了', pinyin: 'le', hanviet: 'liễu', group: 'structure', groupName: 'Trợ từ kết cấu & thời thái', reason: 'Trợ từ hoàn thành/ngữ khí (vd: 吃饱了 -> ăn no, không hiện "liễu")' },
+  { char: '着', pinyin: 'zhe', hanviet: 'trước/trứ', group: 'structure', groupName: 'Trợ từ kết cấu & thời thái', reason: 'Trợ từ tiếp diễn (vd: 看着 -> nhìn, 笑着说 -> cười nói, không hiện "trước/trứ")' },
+  { char: '著', pinyin: 'zhe', hanviet: 'trước/trứ', group: 'structure', groupName: 'Trợ từ kết cấu & thời thái', reason: 'Dạng phồn thể/biến thể của 着 khi làm trợ từ tiếp diễn' },
+
+  // Nhóm 2: Trợ từ ngữ khí cuối câu (khẩu ngữ & đối thoại nhân vật)
+  { char: '啦', pinyin: 'la', hanviet: 'lạp', group: 'modal', groupName: 'Trợ từ ngữ khí cuối câu', reason: 'Trợ từ ngữ khí ghép của 了+啊 (vd: 好啦 -> được rồi, không hiện "lạp")' },
+  { char: '呗', pinyin: 'bei', hanviet: 'bái', group: 'modal', groupName: 'Trợ từ ngữ khí cuối câu', reason: 'Trợ từ ngữ khí biểu thị hiển nhiên/bất đắc dĩ (không hiện "bái")' },
+  { char: '嘛', pinyin: 'ma', hanviet: 'ma', group: 'modal', groupName: 'Trợ từ ngữ khí cuối câu', reason: 'Trợ từ ngữ khí nhắc nhở/nhấn mạnh (không hiện "ma")' },
+  { char: '咧', pinyin: 'lie', hanviet: 'liệt', group: 'modal', groupName: 'Trợ từ ngữ khí cuối câu', reason: 'Trợ từ ngữ khí cảm thán cuối câu (không hiện "liệt")' },
+  { char: '哩', pinyin: 'li', hanviet: 'lý', group: 'modal', groupName: 'Trợ từ ngữ khí cuối câu', reason: 'Trợ từ ngữ khí khẩu ngữ (vd: 甜着哩, không hiện "lý")' },
+  { char: '咯', pinyin: 'lo', hanviet: 'lạc', group: 'modal', groupName: 'Trợ từ ngữ khí cuối câu', reason: 'Trợ từ ngữ khí khẩu ngữ (vd: 走咯, 完咯, không hiện "lạc")' },
+  { char: '喽', pinyin: 'lou', hanviet: 'lâu', group: 'modal', groupName: 'Trợ từ ngữ khí cuối câu', reason: 'Trợ từ ngữ khí khẩu ngữ (vd: 吃饭喽, 走喽, không hiện "lâu")' },
+  { char: '嘍', pinyin: 'lou', hanviet: 'lâu', group: 'modal', groupName: 'Trợ từ ngữ khí cuối câu', reason: 'Phồn thể của 喽' },
+  { char: '呐', pinyin: 'na', hanviet: 'nột', group: 'modal', groupName: 'Trợ từ ngữ khí cuối câu', reason: 'Trợ từ ngữ khí hô ứng/hỏi (vd: 怎么回事呐, không hiện "nột")' },
+  { char: '啵', pinyin: 'bo', hanviet: 'ba', group: 'modal', groupName: 'Trợ từ ngữ khí cuối câu', reason: 'Trợ từ ngữ khí khẩu ngữ nũng nịu (vd: 好啵, không hiện "ba")' },
+  { char: '咩', pinyin: 'mie', hanviet: 'mê', group: 'modal', groupName: 'Trợ từ ngữ khí cuối câu', reason: 'Trợ từ ngữ khí nghi vấn khẩu ngữ (vd: 是咩, không hiện "mê")' },
+  { char: '喏', pinyin: 'nuo', hanviet: 'nhạ/nặc', group: 'modal', groupName: 'Trợ từ ngữ khí cuối câu', reason: 'Trợ từ chỉ thị khẩu ngữ (vd: 喏, 给你, không hiện "nhạ")' },
+
+  // Nhóm 3: Hư từ cổ phong / Tiên hiệp / Kiếm hiệp (thường gặp trong truyện cổ trang, tu tiên)
+  { char: '矣', pinyin: 'yi', hanviet: 'hĩ', group: 'classical', groupName: 'Hư từ cổ phong & tiên hiệp', reason: 'Hư từ hoàn thành cuối câu thời cổ (vd: 逝矣, 休矣, không hiện "hĩ")' },
+  { char: '焉', pinyin: 'yan', hanviet: 'yên', group: 'classical', groupName: 'Hư từ cổ phong & tiên hiệp', reason: 'Hư từ ngữ khí cuối câu cổ (không hiện âm thô "yên")' },
+  { char: '哉', pinyin: 'zai', hanviet: 'tai', group: 'classical', groupName: 'Hư từ cổ phong & tiên hiệp', reason: 'Hư từ cảm thán cổ (vd: 痛哉, 善哉, 快哉, không hiện "tai")' },
+  { char: '兮', pinyin: 'xi', hanviet: 'hề', group: 'classical', groupName: 'Hư từ cổ phong & tiên hiệp', reason: 'Hư từ đệm nhịp thơ cổ (vd: 大风起兮, không hiện "hề")' },
+  { char: '乎', pinyin: 'hu', hanviet: 'hồ', group: 'classical', groupName: 'Hư từ cổ phong & tiên hiệp', reason: 'Hư từ nghi vấn/ngữ khí cuối câu cổ (không hiện "hồ")' },
+
+  // Nhóm 4: Thán từ & Từ đệm khẩu ngữ (tránh bị dịch âm Hán Việt thô cứng)
+  { char: '呃', pinyin: 'e', hanviet: 'ách', group: 'interjection', groupName: 'Thán từ & từ đệm khẩu ngữ', reason: 'Từ đệm ấp úng ngập ngừng (vd: 呃..., không hiện "ách...")' },
+  { char: '欸', pinyin: 'ei', hanviet: 'hĩ', group: 'interjection', groupName: 'Thán từ & từ đệm khẩu ngữ', reason: 'Thán từ gọi/than thở (không hiện "hĩ")' },
+  { char: '诶', pinyin: 'ei', hanviet: 'ai', group: 'interjection', groupName: 'Thán từ & từ đệm khẩu ngữ', reason: 'Thán từ khẩu ngữ gọi đáp (không hiện "ai")' },
+  { char: '哼', pinyin: 'heng', hanviet: 'hanh', group: 'interjection', groupName: 'Thán từ & từ đệm khẩu ngữ', reason: 'Tiếng hừ mũi khinh bỉ (vd: 哼!, không hiện "hanh!")' },
+  { char: '咦', pinyin: 'yi', hanviet: 'di', group: 'interjection', groupName: 'Thán từ & từ đệm khẩu ngữ', reason: 'Thán từ ngạc nhiên (vd: 咦?, không hiện "di?")' },
+  { char: '嗬', pinyin: 'he', hanviet: 'hà', group: 'interjection', groupName: 'Thán từ & từ đệm khẩu ngữ', reason: 'Thán từ trầm trồ ngạc nhiên (vd: 嗬!, không hiện "hà!")' }
+];
+
+export function getOmittedParticlesConfig(): { enabled: boolean; particles: string } {
+  try {
+    const enabledVal = typeof window !== 'undefined' ? localStorage.getItem(OMITTED_PARTICLES_ENABLED_KEY) : 'true';
+    const particlesVal = typeof window !== 'undefined' ? localStorage.getItem(OMITTED_PARTICLES_STORAGE_KEY) : null;
+    
+    // Nếu chưa lưu hoặc danh sách cũ ít hơn 15 từ, tự động nâng cấp lên bộ chuẩn đầy đủ 27 từ
+    let finalParticles = DEFAULT_OMITTED_PARTICLES;
+    if (particlesVal && particlesVal.trim()) {
+      const currentTokens = particlesVal.split(/[,，\s]+/).filter(Boolean);
+      if (currentTokens.length >= 15) {
+        finalParticles = particlesVal;
+      }
+    }
+    
+    return {
+      enabled: enabledVal !== 'false',
+      particles: finalParticles
+    };
+  } catch (_) {
+    return { enabled: true, particles: DEFAULT_OMITTED_PARTICLES };
+  }
+}
+
+export function saveOmittedParticlesConfig(enabled: boolean, particles: string): void {
+  try {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(OMITTED_PARTICLES_ENABLED_KEY, enabled ? 'true' : 'false');
+      localStorage.setItem(OMITTED_PARTICLES_STORAGE_KEY, particles);
+    }
+    vietphraseEngine.updateOmittedParticles(enabled, particles);
+  } catch (e) {
+    console.warn("Could not save omitted particles config", e);
+  }
+}
+
 class VietphraseEngine {
   private files: VietphraseFileItem[] = [];
   
@@ -135,7 +221,41 @@ class VietphraseEngine {
   private listeners: Set<() => void> = new Set();
   private globalCustomMap: Map<string, string> = new Map();
 
-  constructor() {}
+  // Trợ từ / Hư từ đơn lẻ cần bỏ qua trong Vietphrase (mặc định: 地, 了)
+  private omittedParticlesEnabled: boolean = true;
+  private omittedParticlesSet: Set<string> = new Set(['地', '了']);
+
+  constructor() {
+    const conf = getOmittedParticlesConfig();
+    this.omittedParticlesEnabled = conf.enabled;
+    const tokens = (conf.particles || '地, 了')
+      .split(/[,，\s]+/)
+      .map(s => s.trim())
+      .filter(Boolean);
+    this.omittedParticlesSet = new Set(tokens.length > 0 ? tokens : ['地', '了']);
+  }
+
+  public updateOmittedParticles(enabled: boolean, particlesStr: string) {
+    this.omittedParticlesEnabled = enabled;
+    const tokens = (particlesStr || '')
+      .split(/[,，\s]+/)
+      .map(s => s.trim())
+      .filter(Boolean);
+    this.omittedParticlesSet = new Set(tokens.length > 0 ? tokens : ['地', '了']);
+    this.notify();
+  }
+
+  public isOmittedParticle(char: string): boolean {
+    if (!this.omittedParticlesEnabled) return false;
+    return this.omittedParticlesSet.has(char);
+  }
+
+  public getOmittedParticlesInfo(): { enabled: boolean; particles: string } {
+    return {
+      enabled: this.omittedParticlesEnabled,
+      particles: Array.from(this.omittedParticlesSet).join(', ')
+    };
+  }
 
   // Đăng ký nhận sự kiện thay đổi dữ liệu từ điển
   subscribe(listener: () => void) {
@@ -600,6 +720,7 @@ class VietphraseEngine {
         const limit = Math.min(n, i + this.maxNamesLength);
         for (let j = limit; j > i; j--) {
           const sub = text.substring(i, j);
+          if (j - i === 1 && this.isOmittedParticle(sub)) continue;
           if (this.namesMap.has(sub)) {
             const rawMeaning = this.namesMap.get(sub);
             if (isValidWord(rawMeaning)) {
@@ -621,6 +742,7 @@ class VietphraseEngine {
         const limit = Math.min(n, i + this.maxVietphraseLength);
         for (let j = limit; j > i; j--) {
           const sub = text.substring(i, j);
+          if (j - i === 1 && this.isOmittedParticle(sub)) continue;
           if (this.vietphraseMap.has(sub)) {
             const rawMeaning = this.vietphraseMap.get(sub);
             if (isValidWord(rawMeaning)) {
@@ -641,6 +763,7 @@ class VietphraseEngine {
         const limit = Math.min(n, i + this.maxNounsLength);
         for (let j = limit; j > i; j--) {
           const sub = text.substring(i, j);
+          if (j - i === 1 && this.isOmittedParticle(sub)) continue;
           if (this.nounsMap.has(sub)) {
             const rawMeaning = this.nounsMap.get(sub);
             if (isValidWord(rawMeaning)) {
@@ -662,6 +785,7 @@ class VietphraseEngine {
         const limit = Math.min(n, i + this.maxSuffixesLength);
         for (let j = limit; j > i; j--) {
           const sub = text.substring(i, j);
+          if (j - i === 1 && this.isOmittedParticle(sub)) continue;
           if (this.suffixesMap.has(sub)) {
             const rawMeaning = this.suffixesMap.get(sub);
             if (isValidWord(rawMeaning)) {
@@ -682,6 +806,7 @@ class VietphraseEngine {
         const limit = Math.min(n, i + this.maxPronounsLength);
         for (let j = limit; j > i; j--) {
           const sub = text.substring(i, j);
+          if (j - i === 1 && this.isOmittedParticle(sub)) continue;
           if (this.pronounsMap.has(sub)) {
             const rawMeaning = this.pronounsMap.get(sub);
             if (isValidWord(rawMeaning)) {
@@ -702,6 +827,7 @@ class VietphraseEngine {
         const limit = Math.min(n, i + this.maxLacvietLength);
         for (let j = limit; j > i; j--) {
           const sub = text.substring(i, j);
+          if (j - i === 1 && this.isOmittedParticle(sub)) continue;
           if (this.lacvietMap.has(sub)) {
             const rawMeaning = this.lacvietMap.get(sub);
             if (isValidWord(rawMeaning)) {
@@ -722,6 +848,7 @@ class VietphraseEngine {
         const limit = Math.min(n, i + this.maxOtherLength);
         for (let j = limit; j > i; j--) {
           const sub = text.substring(i, j);
+          if (j - i === 1 && this.isOmittedParticle(sub)) continue;
           if (this.otherMap.has(sub)) {
             const rawMeaning = this.otherMap.get(sub);
             if (isValidWord(rawMeaning)) {
@@ -739,12 +866,17 @@ class VietphraseEngine {
 
       if (!matched) {
         const ch = text[i];
-        if (/[\u4e00-\u9fa5]/.test(ch) && BASE_HANVIET_MAP[ch]) {
-          result += " " + BASE_HANVIET_MAP[ch] + " ";
+        if (this.isOmittedParticle(ch)) {
+          // Bỏ qua trợ từ hư từ đơn lẻ (như 地, 了) - không hiện âm Hán Việt thừa
+          i++;
         } else {
-          result += ch;
+          if (/[\u4e00-\u9fa5]/.test(ch) && BASE_HANVIET_MAP[ch]) {
+            result += " " + BASE_HANVIET_MAP[ch] + " ";
+          } else {
+            result += ch;
+          }
+          i++;
         }
-        i++;
       }
     }
 
@@ -777,7 +909,7 @@ class VietphraseEngine {
 
     // Nếu không có custom terms, chạy trực tiếp từ điển hệ thống
     if (effectiveCustomMap.size === 0) {
-      return this.translateBuiltinDictionaries(text).replace(/\s+/g, ' ').trim();
+      return this.cleanTranslatedText(this.translateBuiltinDictionaries(text));
     }
 
     // THUẬT TOÁN INTERVAL LOCKING:
