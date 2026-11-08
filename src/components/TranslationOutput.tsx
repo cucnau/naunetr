@@ -170,6 +170,18 @@ const EditableSegment = ({
         };
     }, [novelId]);
     
+    useEffect(() => {
+        const handleFlush = () => {
+            if (debounceTimeout.current) {
+                clearTimeout(debounceTimeout.current);
+                debounceTimeout.current = null;
+            }
+            onUpdate(localText);
+        };
+        window.addEventListener('app_flush_edits', handleFlush);
+        return () => window.removeEventListener('app_flush_edits', handleFlush);
+    }, [localText, onUpdate]);
+
     const adjustHeight = () => {
         if (textareaRef.current) {
             textareaRef.current.style.height = '0px';
@@ -371,6 +383,18 @@ const EditableSource = ({
     }
   }, [text, isFocused]);
 
+  useEffect(() => {
+    const handleFlush = () => {
+      if (debounceTimeout.current) {
+        clearTimeout(debounceTimeout.current);
+        debounceTimeout.current = null;
+      }
+      onUpdate(localText);
+    };
+    window.addEventListener('app_flush_edits', handleFlush);
+    return () => window.removeEventListener('app_flush_edits', handleFlush);
+  }, [localText, onUpdate]);
+
   const adjustHeight = () => {
     if (textareaRef.current) {
       textareaRef.current.style.height = '0px';
@@ -500,6 +524,18 @@ const EditableQuick = ({
     }
   }, [text, isFocused]);
 
+  useEffect(() => {
+    const handleFlush = () => {
+      if (debounceTimeout.current) {
+        clearTimeout(debounceTimeout.current);
+        debounceTimeout.current = null;
+      }
+      onUpdate(localText);
+    };
+    window.addEventListener('app_flush_edits', handleFlush);
+    return () => window.removeEventListener('app_flush_edits', handleFlush);
+  }, [localText, onUpdate]);
+
   const adjustHeight = () => {
     if (textareaRef.current) {
       textareaRef.current.style.height = '0px';
@@ -618,6 +654,18 @@ const EditableDeepl = ({
       setLocalText(text);
     }
   }, [text, isFocused]);
+
+  useEffect(() => {
+    const handleFlush = () => {
+      if (debounceTimeout.current) {
+        clearTimeout(debounceTimeout.current);
+        debounceTimeout.current = null;
+      }
+      onUpdate(localText);
+    };
+    window.addEventListener('app_flush_edits', handleFlush);
+    return () => window.removeEventListener('app_flush_edits', handleFlush);
+  }, [localText, onUpdate]);
 
   const adjustHeight = () => {
     if (textareaRef.current) {
@@ -1274,16 +1322,22 @@ const containsChineseText = (str: string): boolean => {
   };
 
   const handleConfirmSaveArchive = (overrideMode?: 'new' | 'update') => {
+    (document.activeElement as HTMLElement)?.blur();
+    window.dispatchEvent(new CustomEvent('app_flush_edits'));
     let name = archiveChapterName.trim();
     if (!name) {
       name = `Chương ${(chaptersCount || 0) + 1}`;
     }
     const finalMode = overrideMode || saveMode;
-    onSaveChapter?.(name, finalMode);
+    setTimeout(() => {
+      onSaveChapter?.(name, finalMode);
+    }, 50);
     setShowSaveArchiveModal(false);
   };
 
   const saveToArchive = () => {
+    (document.activeElement as HTMLElement)?.blur();
+    window.dispatchEvent(new CustomEvent('app_flush_edits'));
     if (!data.segments || data.segments.length === 0) return;
 
     let detectedName = "";

@@ -356,6 +356,9 @@ export const restoreLeanChapter = (raw: any): Chapter => {
     if (!chapter.deeplText) {
       chapter.deeplText = segs.map(s => s.deepl || '').join('\n');
     }
+    if (!chapter.preEditedText) {
+      chapter.preEditedText = segs.map(s => s.natural || '').join('\n');
+    }
     if (!chapter.result.naturalTranslation) {
       chapter.result.naturalTranslation = segs.map(s => s.natural || '').join('\n');
     }
@@ -376,12 +379,24 @@ const prepareChapterForCloud = (chap: Chapter, userId: string): Record<string, a
     createdAt: Timestamp.now()
   };
 
-  // If chapter has segments, prune duplicate joined full-text strings if estimated size > 500KB
+  // Nếu chapter đã có segments chi tiết, luôn dọn dẹp các trường rác không dùng đến
   if (rawData.result?.segments && rawData.result.segments.length > 0) {
+    rawData.result = {
+      ...rawData.result,
+      sinoVietnamese: "",
+      vocabulary: []
+    };
+
     const jsonEstimate = JSON.stringify(rawData);
-    if (jsonEstimate.length > 500 * 1024) {
+    // Nếu kích thước > 350KB, loại bỏ chuỗi string nối dài trùng lặp để nằm gọn trong hạn mức Firestore
+    if (jsonEstimate.length > 350 * 1024) {
       rawData.result = {
-        segments: rawData.result.segments,
+        segments: rawData.result.segments.map((s: any) => ({
+          source: (s.source || '').trim(),
+          natural: (s.natural || '').trim(),
+          quick: (s.quick || '').trim(),
+          deepl: (s.deepl || '').trim()
+        })),
         naturalTranslation: "",
         quickTrans: "",
         deeplTranslation: "",
