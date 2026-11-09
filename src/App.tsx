@@ -208,7 +208,7 @@ const reconstructSegmentsIfEmpty = (sessionData: TranslationSession): Translatio
 };
 
 // Thuật toán giải quyết xung đột thông minh giữa Bản Cục Bộ (IndexedDB) và Bản Đám Mây (Firestore)
-// QUY TẮC BẢO VỆ DỮ LIỆU: Không bao giờ để bản Cloud ít đoạn hơn hoặc cũ hơn ghi đè làm mất đoạn cuối chương!
+// QUY TẮC BẢO VỆ DỮ LIỆU: Không bao giờ để bản Cloud ít đoạn hơn hoặc cũ hơn ghi đè làm mất đoạn cuối chương hay tên chương!
 const resolveChapterConflict = (localChap?: Chapter, cloudChap?: Chapter): { selected: Chapter; shouldSyncToCloud: boolean } => {
   if (!localChap && cloudChap) return { selected: cloudChap, shouldSyncToCloud: false };
   if (localChap && !cloudChap) return { selected: localChap, shouldSyncToCloud: true };
@@ -230,10 +230,18 @@ const resolveChapterConflict = (localChap?: Chapter, cloudChap?: Chapter): { sel
   if (cSegs > lSegs) {
     return { selected: c, shouldSyncToCloud: false };
   }
-  // 3. Nếu số đoạn bằng nhau: Bản nào mới hơn theo timestamp thì lấy bản đó
+  // 3. Nếu số đoạn bằng nhau:
+  // Nếu Local có timestamp mới hơn hoặc bằng Cloud (ví dụ vừa đổi tên hoặc vừa gõ): Ưu tiên 100% Local!
   if (lTime >= cTime) {
     return { selected: l, shouldSyncToCloud: lTime > cTime };
   } else {
+    // Nếu Cloud có timestamp mới hơn nhưng tên ở Local khác tên ở Cloud:
+    // Nếu Local đã được đặt tên rõ ràng, giữ lại tên mới của Local
+    if (l.name && l.name !== c.name) {
+      if (c.name.startsWith('Chương ') || c.name.startsWith('chap_') || lTime >= cTime - 86400000) {
+        return { selected: { ...c, name: l.name, timestamp: Math.max(lTime, cTime) }, shouldSyncToCloud: true };
+      }
+    }
     return { selected: c, shouldSyncToCloud: false };
   }
 };
@@ -732,18 +740,16 @@ useEffect(() => {
 
             const resolvedRealtimeMap = new Map<string, Chapter>();
             const toSaveDb: Chapter[] = [];
-            const toSyncCloud: Chapter[] = [];
 
             realtimeChapters.forEach(cloudCh => {
               if (deletedChapterIdsRef.current.has(cloudCh.id)) return;
               const localCh = localDbMap.get(cloudCh.id);
-              const { selected, shouldSyncToCloud } = resolveChapterConflict(localCh, cloudCh);
+              const { selected } = resolveChapterConflict(localCh, cloudCh);
               resolvedRealtimeMap.set(cloudCh.id, selected);
 
-              if (selected === cloudCh) {
+              // Chỉ lưu vào IndexedDB nếu bản Cloud thực sự mới hơn bản Local
+              if (selected === cloudCh && (!localCh || (cloudCh.timestamp || 0) > (localCh.timestamp || 0))) {
                 toSaveDb.push(cloudCh);
-              } else if (shouldSyncToCloud && localCh) {
-                toSyncCloud.push(localCh);
               }
             });
 
@@ -751,15 +757,11 @@ useEffect(() => {
             localDbMap.forEach((localCh, id) => {
               if (!resolvedRealtimeMap.has(id)) {
                 resolvedRealtimeMap.set(id, localCh);
-                toSyncCloud.push(localCh);
               }
             });
 
             for (const ch of toSaveDb) {
               await db.saveChapter(ch);
-            }
-            for (const ch of toSyncCloud) {
-              saveChapterToCloud(ch, true).catch(console.warn);
             }
 
             setChapters(prev => {
@@ -1948,12 +1950,31 @@ useEffect(() => {
   };
 
   const handleRenameChapter = async (id: string, newName: string) => {
+    const trimmed = newName.trim();
+    if (!trimmed) return;
+
+    lastLocalEditTimeRef.current = Date.now();
     const chapter = chapters.find(c => c.id === id);
     if (!chapter) return;
-    const updated = { ...chapter, name: newName };
-    await db.saveChapter(updated);
-    await saveChapterToCloud(updated);
+
+    const now = Date.now();
+    const updated: Chapter = { ...chapter, name: trimmed, timestamp: now };
+
+    // 1. Cập nhật UI ngay tức thì (Optimistic update)
     setChapters(prev => prev.map(c => c.id === id ? updated : c));
+    if (session.currentChapterId === id) {
+      updateSession({ name: trimmed });
+    }
+
+    // 2. Lưu vĩnh viễn vào IndexedDB (Local - không bị ảnh hưởng bởi quota Cloud)
+    await db.saveChapter(updated);
+
+    // 3. Cố gắng đồng bộ lên Cloud (bọc try-catch để nếu Cloud hết quota thì không crash và không bị rollback)
+    try {
+      await saveChapterToCloud(updated, true);
+    } catch (e) {
+      console.warn("Không thể lưu tên mới lên Cloud lúc này (hết quota hoặc offline):", e);
+    }
   };
 
   const handleClearAllChapters = async () => {

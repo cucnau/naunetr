@@ -362,6 +362,7 @@ export const ChapterArchiveModal: React.FC<ChapterArchiveModalProps> = ({
                               if (e.key === 'Enter') saveNameEdit(c.id);
                               if (e.key === 'Escape') setEditingId(null);
                             }}
+                            onBlur={() => saveNameEdit(c.id)}
                             className="bg-white border border-[#8D6E63] rounded px-2 py-0.5 text-xs text-[#3E2723] font-bold outline-none flex-1 max-w-sm focus:ring-1 focus:ring-[#8D6E63]"
                             autoFocus
                           />

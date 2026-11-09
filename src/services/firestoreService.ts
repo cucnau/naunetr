@@ -442,6 +442,20 @@ export const getChaptersFromCloud = async (novelId: string, retryCount = 1): Pro
   }
 };
 
+let quotaExhaustedUntil: number = 0;
+
+export const isCloudQuotaExhausted = (): boolean => {
+  return Date.now() < quotaExhaustedUntil;
+};
+
+const handleQuotaExhausted = (error: any) => {
+  const msg = String(error?.message || error || '').toLowerCase();
+  if (msg.includes('quota') || msg.includes('resource-exhausted') || msg.includes('resource_exhausted')) {
+    quotaExhaustedUntil = Date.now() + 5 * 60 * 1000;
+    console.warn("Firestore đã đạt giới hạn miễn phí hàng ngày (Resource Exhausted). Ứng dụng tự động lưu trữ an toàn 100% trên IndexedDB của thiết bị.");
+  }
+};
+
 const chapterDebounceTimers = new Map<string, any>();
 const chaptersInFlight = new Set<string>();
 const pendingChapterSaves = new Map<string, Chapter>();
@@ -450,14 +464,16 @@ export const saveChapterToCloud = async (chapter: Chapter, immediate: boolean = 
   const user = auth.currentUser;
   if (!user) return; // Silent return if not logged in
   if (!chapter.novelId || !chapter.id) return;
-  const path = `chapters/${chapter.id}`;
+  if (isCloudQuotaExhausted()) return;
 
   const executeWrite = async (chap: Chapter) => {
+    if (isCloudQuotaExhausted()) return;
     chaptersInFlight.add(chap.id);
     try {
       const dataToSave = prepareChapterForCloud(chap, user.uid);
       await setDoc(doc(db, 'chapters', chap.id), dataToSave, { merge: true });
     } catch (error: any) {
+      handleQuotaExhausted(error);
       console.warn("Lỗi lưu chương lên Cloud:", error?.message || error);
     } finally {
       chaptersInFlight.delete(chap.id);
@@ -503,6 +519,7 @@ export const saveChapterToCloud = async (chapter: Chapter, immediate: boolean = 
 export const bulkSaveChaptersToCloud = async (chapters: Chapter[]): Promise<void> => {
   const user = auth.currentUser;
   if (!user || chapters.length === 0) return;
+  if (isCloudQuotaExhausted()) return;
   
   // Batch writes in small chunks of 5 chapters with pause to prevent stream exhaust
   const chunkSize = 5;
@@ -728,8 +745,10 @@ export const saveUserLiveWorkspaceToCloud = async (
 ): Promise<void> => {
   const user = auth.currentUser;
   if (!user) return;
+  if (isCloudQuotaExhausted()) return;
 
   const executeSave = async (payloadData: Partial<LiveSessionData>) => {
+    if (isCloudQuotaExhausted()) return;
     isLiveWorkspaceInFlight = true;
     try {
       const scope = getAppScope();
@@ -771,6 +790,7 @@ export const saveUserLiveWorkspaceToCloud = async (
       const sanitized = sanitizeData(payload);
       await setDoc(docRef, sanitized, { merge: true });
     } catch (e: any) {
+      handleQuotaExhausted(e);
       console.warn("Lỗi lưu Live Workspace lên Cloud:", e?.message || e);
     } finally {
       isLiveWorkspaceInFlight = false;
