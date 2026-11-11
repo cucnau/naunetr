@@ -92,8 +92,9 @@ export const getNovels = async (retryCount = 1): Promise<Novel[]> => {
   if (!user) return [];
   const path = 'novels';
   try {
-    // Tải toàn bộ danh sách truyện trên Firestore để tất cả bạn bè trong nhóm edit đều nhìn thấy
-    const snap = await withTimeout(getDocs(collection(db, path)), 8000, 'Tải danh sách truyện quá thời gian');
+    // Chỉ lấy đúng các bộ truyện thuộc tài khoản đang đăng nhập (user.uid)
+    const q = query(collection(db, path), where('userId', '==', user.uid));
+    const snap = await withTimeout(getDocs(q), 8000, 'Tải danh sách truyện quá thời gian');
     const novels: Novel[] = [];
     snap.forEach(d => {
       const data = d.data();
@@ -107,10 +108,13 @@ export const getNovels = async (retryCount = 1): Promise<Novel[]> => {
       await new Promise(res => setTimeout(res, 1000));
       return getNovels(retryCount - 1);
     }
-    console.warn("Không thể tải danh sách truyện từ đám mây (đang dùng cache cục bộ):", error);
+    console.warn("Không thể tải danh sách truyện từ đám mây (đang dùng cache của tài khoản này):", error);
     try {
-      const recovered = recoverAllCachedNovels();
-      if (Array.isArray(recovered) && recovered.length > 0) return recovered;
+      const userCached = getScopedStorageItem(`cached_novels_${user.uid}`);
+      if (userCached) {
+        const parsed = JSON.parse(userCached);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
     } catch (_) {}
     return [];
   }
@@ -166,8 +170,8 @@ export const overwriteFirestoreData = async <T extends { id: string, novelId?: s
   const collectionName = type === 'vocab' ? 'customTerms' : type === 'char' ? 'characters' : type === 'rel' ? 'relationships' : type === 'shortcut' ? 'shortcuts' : 'chapters';
   const collRef = collection(db, collectionName);
 
-  // 1. Fetch all existing documents belonging to this novelId
-  const q = query(collRef, where('novelId', '==', novelId));
+  // 1. Fetch all existing documents belonging to this user and novelId
+  const q = query(collRef, where('userId', '==', user.uid), where('novelId', '==', novelId));
   const snapshot = await getDocs(q);
 
   const operations: { type: 'set' | 'delete', ref: any, data?: any }[] = [];
@@ -233,7 +237,7 @@ export const syncFirestoreData = async <T extends { id: string, novelId?: string
   const collRef = collection(db, collectionName);
 
   if (action === 'GET') {
-    const q = query(collRef, where('novelId', '==', novelId));
+    const q = query(collRef, where('userId', '==', user.uid), where('novelId', '==', novelId));
     const querySnapshot = await getDocs(q);
     const result: any[] = [];
     const localMap = new Map<string, any>();
@@ -253,7 +257,7 @@ export const syncFirestoreData = async <T extends { id: string, novelId?: string
     const cacheKey = `${collectionName}_${novelId}`;
     let dbDocsMap = dbCache.get(cacheKey);
     if (!dbDocsMap) {
-      const q = query(collRef, where('novelId', '==', novelId));
+      const q = query(collRef, where('userId', '==', user.uid), where('novelId', '==', novelId));
       const querySnapshot = await getDocs(q);
       dbDocsMap = new Map<string, any>();
       querySnapshot.forEach(doc => {
@@ -421,7 +425,7 @@ export const getChaptersFromCloud = async (novelId: string, retryCount = 1): Pro
   if (!user || !novelId) return [];
   const path = 'chapters';
   try {
-    const q = query(collection(db, path), where('novelId', '==', novelId));
+    const q = query(collection(db, path), where('userId', '==', user.uid), where('novelId', '==', novelId));
     const snap = await getDocs(q);
     const chapters: Chapter[] = [];
     snap.forEach(d => {
@@ -557,7 +561,7 @@ export const clearNovelChaptersFromCloud = async (novelId: string): Promise<void
   if (!user || !novelId) return;
   const path = 'chapters';
   try {
-    const q = query(collection(db, 'chapters'), where('novelId', '==', novelId));
+    const q = query(collection(db, 'chapters'), where('userId', '==', user.uid), where('novelId', '==', novelId));
     const snap = await getDocs(q);
     const batch = writeBatch(db);
     snap.forEach(d => {
@@ -574,7 +578,7 @@ export const getShortcutsFromCloud = async (novelId: string): Promise<TextShortc
   if (!user || !novelId) return [];
   const path = 'shortcuts';
   try {
-    const q = query(collection(db, path), where('novelId', '==', novelId));
+    const q = query(collection(db, path), where('userId', '==', user.uid), where('novelId', '==', novelId));
     const snap = await getDocs(q);
     const shortcuts: TextShortcut[] = [];
     snap.forEach(d => {
@@ -668,6 +672,7 @@ export const subscribeToChapters = (
   const path = 'chapters';
   const q = query(
     collection(db, path),
+    where('userId', '==', user.uid),
     where('novelId', '==', novelId)
   );
 

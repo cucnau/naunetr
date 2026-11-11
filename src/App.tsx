@@ -388,41 +388,31 @@ function AppContent() {
     return () => { isMounted = false; };
   }, []);
 
-  // Tải danh sách truyện từ Firestore (hợp nhất với dữ liệu trên máy, không bao giờ ghi đè làm mất truyện cục bộ)
+  // Tải danh sách truyện từ Firestore (đúng cho tài khoản đang đăng nhập, không bị lẫn truyện tài khoản khác)
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
       if (user) {
         try {
           const cloudNovels = await getNovels();
-          const localNovels = await db.autoRecoverNovels();
-          const mergedMap = new Map<string, Novel>();
-
-          // Đưa truyện cục bộ vào trước
-          localNovels.forEach(n => {
-            if (n && n.id && n.name) mergedMap.set(n.id, n);
-          });
-
-          // Đưa truyện trên cloud vào
           if (cloudNovels && cloudNovels.length > 0) {
-            cloudNovels.forEach(n => {
-              if (n && n.id && n.name) mergedMap.set(n.id, n);
-            });
+            setNovels(cloudNovels);
+            await db.saveNovels(cloudNovels, user.uid);
+            setScopedStorageItem(`cached_novels_${user.uid}`, JSON.stringify(cloudNovels));
+            setScopedStorageItem('cached_novels_list', JSON.stringify(cloudNovels));
+            
+            if (!session.currentNovelId || !cloudNovels.some(n => n.id === session.currentNovelId)) {
+              setSession(prev => ({ ...prev, currentNovelId: cloudNovels[0].id }));
+            }
+            return;
           }
 
-          if (mergedMap.size > 1 && mergedMap.has('default') && mergedMap.get('default')?.name === 'Truyện mặc định') {
-            mergedMap.delete('default');
-          }
-
-          const mergedList = mergedMap.size > 0 
-            ? Array.from(mergedMap.values()) 
-            : [{ id: 'default', name: 'Truyện mặc định' }];
-
-          setNovels(mergedList);
-          await db.saveNovels(mergedList);
-          setScopedStorageItem('cached_novels_list', JSON.stringify(mergedList));
-          
-          if (!session.currentNovelId || !mergedList.some(n => n.id === session.currentNovelId)) {
-            setSession(prev => ({ ...prev, currentNovelId: mergedList[0].id }));
+          // Nếu Cloud chưa có hoặc offline: Khôi phục cache của đúng tài khoản này
+          const userLocal = await db.autoRecoverNovels(user.uid);
+          if (userLocal && userLocal.length > 0) {
+            setNovels(userLocal);
+            if (!session.currentNovelId || !userLocal.some(n => n.id === session.currentNovelId)) {
+              setSession(prev => ({ ...prev, currentNovelId: userLocal[0].id }));
+            }
           }
         } catch (e) {
           console.warn("Lỗi tải novels từ đám mây, đang dùng dữ liệu trên máy:", e);
@@ -450,9 +440,13 @@ function AppContent() {
       preEditedText: ''
     }));
 
-    // Lưu bền vững vào cả IndexedDB lẫn LocalStorage
-    await db.saveNovels(updatedNovels);
+    // Lưu bền vững vào cả IndexedDB lẫn LocalStorage theo tài khoản này
+    const uid = auth.currentUser?.uid;
+    await db.saveNovels(updatedNovels, uid);
     await db.saveCurrentNovelId(newId);
+    if (uid) {
+      setScopedStorageItem(`cached_novels_${uid}`, JSON.stringify(updatedNovels));
+    }
     setScopedStorageItem('cached_novels_list', JSON.stringify(updatedNovels));
 
     try {

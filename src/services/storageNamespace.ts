@@ -112,46 +112,70 @@ export function getScopedStorageItem(key: string, legacyKey?: string): string | 
 }
 
 /**
- * Tự động tìm kiếm và khôi phục tất cả danh sách truyện từ mọi vùng nhớ cũ trong localStorage
+ * Tự động tìm kiếm và khôi phục danh sách truyện đúng cho tài khoản đang dùng (targetUid)
+ * Ngăn chặn tuyệt đối việc khôi phục nhầm truyện của tài khoản khác
  */
-export function recoverAllCachedNovels(): Array<{ id: string; name: string }> {
+export function recoverAllCachedNovels(targetUid?: string): Array<{ id: string; name: string }> {
   if (typeof window === 'undefined') return [{ id: 'default', name: 'Truyện mặc định' }];
   
   const novelMap = new Map<string, { id: string; name: string }>();
 
   try {
-    // Quét tất cả các key trong localStorage tìm các danh sách truyện đã từng lưu
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k && (k.includes('novel') || k.includes('cached_novels'))) {
-        try {
-          const raw = localStorage.getItem(k);
-          if (raw) {
-            const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed)) {
-              parsed.forEach((item: any) => {
-                if (item && typeof item === 'object' && item.id && item.name && typeof item.name === 'string') {
-                  novelMap.set(item.id, { id: String(item.id), name: String(item.name).trim() });
-                }
-              });
+    if (targetUid) {
+      // Khi đã đăng nhập: CHỈ đọc cache của chính targetUid này
+      const userKeyPrefix = `cached_novels_${targetUid}`;
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith(userKeyPrefix)) {
+          try {
+            const raw = localStorage.getItem(k);
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              if (Array.isArray(parsed)) {
+                parsed.forEach((item: any) => {
+                  if (item && typeof item === 'object' && item.id && item.name && typeof item.name === 'string') {
+                    novelMap.set(item.id, { id: String(item.id), name: String(item.name).trim() });
+                  }
+                });
+              }
             }
-          }
-        } catch (_) {}
+          } catch (_) {}
+        }
+      }
+    } else {
+      // Khi chưa đăng nhập (khách): Chỉ đọc key cached_novels_list, TUYỆT ĐỐI BỎ QUA các key của tài khoản khác (cached_novels_<uid>)
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && (k === 'cached_novels_list' || k.startsWith('cached_novels_list_'))) {
+          try {
+            const raw = localStorage.getItem(k);
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              if (Array.isArray(parsed)) {
+                parsed.forEach((item: any) => {
+                  if (item && typeof item === 'object' && item.id && item.name && typeof item.name === 'string') {
+                    novelMap.set(item.id, { id: String(item.id), name: String(item.name).trim() });
+                  }
+                });
+              }
+            }
+          } catch (_) {}
+        }
       }
     }
   } catch (e) {
     console.warn("Lỗi quét localStorage phục hồi novels:", e);
   }
 
-  // Nếu tìm thấy danh sách truyện cũ
+  // Nếu tìm thấy danh sách truyện của chính tài khoản này
   if (novelMap.size > 0) {
-    // Nếu có truyện thực tế, loại bỏ 'default' nếu chỉ là placeholder
     if (novelMap.size > 1 && novelMap.has('default') && novelMap.get('default')?.name === 'Truyện mặc định') {
       novelMap.delete('default');
     }
     const recovered = Array.from(novelMap.values());
     try {
-      const scopedKey = getScopedStorageKey('cached_novels_list');
+      const saveKey = targetUid ? `cached_novels_${targetUid}` : 'cached_novels_list';
+      const scopedKey = getScopedStorageKey(saveKey);
       localStorage.setItem(scopedKey, JSON.stringify(recovered));
     } catch (_) {}
     return recovered;

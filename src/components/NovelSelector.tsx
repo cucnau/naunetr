@@ -85,43 +85,29 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, on
     setLoading(true);
     setError(null);
     try {
-      const cloudData = await getNovels();
-      // Hợp nhất thông minh dữ liệu Cloud với dữ liệu cục bộ trên máy
-      const currentLocal = await db.autoRecoverNovels();
-      const mergedMap = new Map<string, Novel>();
-
-      // Đưa truyện cục bộ vào trước
-      currentLocal.forEach(n => {
-        if (n && n.id && n.name) mergedMap.set(n.id, n);
-      });
-
-      // Đưa truyện trên Cloud vào
-      if (cloudData && cloudData.length > 0) {
-        cloudData.forEach(n => {
-          if (n && n.id && n.name) mergedMap.set(n.id, n);
-        });
-      }
-
-      // Xoá 'Truyện mặc định' nếu đã có truyện thực tế
-      if (mergedMap.size > 1 && mergedMap.has('default') && mergedMap.get('default')?.name === 'Truyện mặc định') {
-        mergedMap.delete('default');
-      }
-
-      const mergedList = mergedMap.size > 0 
-        ? Array.from(mergedMap.values()) 
-        : [{ id: 'default', name: 'Truyện mặc định' }];
-
-      setNovels(mergedList);
-
       const currentUid = uid || auth.currentUser?.uid;
-      if (currentUid) {
-        setScopedStorageItem(`cached_novels_${currentUid}`, JSON.stringify(mergedList));
+      const cloudData = await getNovels();
+      
+      // 1. Nếu tải thành công từ Firestore (đã lọc đúng userId của tài khoản này)
+      if (cloudData && cloudData.length > 0) {
+        setNovels(cloudData);
+        if (currentUid) {
+          setScopedStorageItem(`cached_novels_${currentUid}`, JSON.stringify(cloudData));
+          await db.saveNovels(cloudData, currentUid);
+        }
+        if (!currentNovelId || !cloudData.some(n => n.id === currentNovelId)) {
+          onSelectNovel(cloudData[0].id);
+        }
+        return;
       }
-      setScopedStorageItem('cached_novels_list', JSON.stringify(mergedList));
-      await db.saveNovels(mergedList);
 
-      if (!currentNovelId || !mergedList.some(n => n.id === currentNovelId)) {
-        onSelectNovel(mergedList[0].id);
+      // 2. Nếu Cloud chưa có hoặc offline: Khôi phục cache của ĐÚNG tài khoản này
+      const localData = await db.autoRecoverNovels(currentUid);
+      if (localData && localData.length > 0) {
+        setNovels(localData);
+        if (!currentNovelId || !localData.some(n => n.id === currentNovelId)) {
+          onSelectNovel(localData[0].id);
+        }
       }
     } catch (e: any) {
       console.warn("Đang dùng danh sách truyện từ bộ nhớ máy:", e);
@@ -144,9 +130,9 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, on
     setNovels(updatedNovels);
     onSelectNovel(newNovel.id);
     
-    // Lưu đồng thời vào cả IndexedDB lẫn LocalStorage
-    await db.saveNovels(updatedNovels);
+    // Lưu đồng thời vào cả IndexedDB lẫn LocalStorage theo đúng tài khoản này
     const uid = auth.currentUser?.uid;
+    await db.saveNovels(updatedNovels, uid);
     if (uid) {
       setScopedStorageItem(`cached_novels_${uid}`, JSON.stringify(updatedNovels));
     }

@@ -138,17 +138,26 @@ export const db = {
         }
     },
 
-    async getNovels(): Promise<Novel[]> {
+    async getNovels(targetUid?: string): Promise<Novel[]> {
         try {
             const db = await dbPromise;
             return new Promise((resolve) => {
                 const tx = db.transaction(STORE_SETTINGS, 'readonly');
                 const store = tx.objectStore(STORE_SETTINGS);
-                const req = store.get(KEY_NOVELS);
+                const storeKey = targetUid ? `${KEY_NOVELS}_${targetUid}` : KEY_NOVELS;
+                const req = store.get(storeKey);
                 req.onsuccess = () => {
                     const res = req.result;
                     if (Array.isArray(res) && res.length > 0) {
                         resolve(res);
+                    } else if (targetUid) {
+                        // Thử fallback sang key chung
+                        const fallbackReq = store.get(KEY_NOVELS);
+                        fallbackReq.onsuccess = () => {
+                            const fbRes = fallbackReq.result;
+                            resolve(Array.isArray(fbRes) ? fbRes : []);
+                        };
+                        fallbackReq.onerror = () => resolve([]);
                     } else {
                         resolve([]);
                     }
@@ -161,13 +170,16 @@ export const db = {
         }
     },
 
-    async saveNovels(novels: Novel[]): Promise<void> {
+    async saveNovels(novels: Novel[], targetUid?: string): Promise<void> {
         try {
             if (!Array.isArray(novels) || novels.length === 0) return;
             const db = await dbPromise;
             return new Promise((resolve, reject) => {
                 const tx = db.transaction(STORE_SETTINGS, 'readwrite');
                 const store = tx.objectStore(STORE_SETTINGS);
+                if (targetUid) {
+                    store.put(novels, `${KEY_NOVELS}_${targetUid}`);
+                }
                 const req = store.put(novels, KEY_NOVELS);
                 req.onsuccess = () => resolve();
                 req.onerror = () => reject(req.error);
@@ -177,20 +189,20 @@ export const db = {
         }
     },
 
-    async autoRecoverNovels(): Promise<Novel[]> {
+    async autoRecoverNovels(targetUid?: string): Promise<Novel[]> {
         const novelMap = new Map<string, Novel>();
 
-        // 1. Lấy từ IndexedDB settings hiện tại
+        // 1. Lấy từ IndexedDB settings của chính tài khoản này
         try {
-            const currentDbNovels = await this.getNovels();
+            const currentDbNovels = await this.getNovels(targetUid);
             currentDbNovels.forEach(n => {
                 if (n && n.id && n.name) novelMap.set(n.id, n);
             });
         } catch (_) {}
 
-        // 2. Lấy từ localStorage quét đa tầng (kể cả key cũ, default, các domain cũ)
+        // 2. Lấy từ localStorage quét đúng của tài khoản này
         try {
-            const storageNovels = recoverAllCachedNovels();
+            const storageNovels = recoverAllCachedNovels(targetUid);
             storageNovels.forEach(n => {
                 if (n && n.id && n.name && !novelMap.has(n.id)) {
                     novelMap.set(n.id, n);
@@ -198,71 +210,14 @@ export const db = {
             });
         } catch (_) {}
 
-        // 3. Tự động di trú từ các DB cũ (AppDB, AppDB_default, chiVietDB) nếu DB hiện tại thiếu dữ liệu
-        if (typeof window !== 'undefined' && window.indexedDB) {
-            const legacyDbNames = ['AppDB', 'AppDB_default', 'chiVietDB'];
-            for (const legacyName of legacyDbNames) {
-                if (legacyName === DB_NAME) continue;
-                try {
-                    await new Promise<void>((resolveLegacy) => {
-                        const openReq = window.indexedDB.open(legacyName);
-                        openReq.onerror = () => resolveLegacy();
-                        openReq.onsuccess = async () => {
-                            const oldDb = openReq.result;
-                            try {
-                                if (oldDb.objectStoreNames.contains(STORE_SETTINGS)) {
-                                    const tx = oldDb.transaction(STORE_SETTINGS, 'readonly');
-                                    const store = tx.objectStore(STORE_SETTINGS);
-                                    const reqNovels = store.get(KEY_NOVELS);
-                                    reqNovels.onsuccess = () => {
-                                        if (Array.isArray(reqNovels.result)) {
-                                            reqNovels.result.forEach((n: any) => {
-                                                if (n && n.id && n.name && !novelMap.has(n.id)) {
-                                                    novelMap.set(n.id, n);
-                                                }
-                                            });
-                                        }
-                                    };
-                                }
-
-                                if (oldDb.objectStoreNames.contains(STORE_CHAPTERS)) {
-                                    const tx = oldDb.transaction(STORE_CHAPTERS, 'readonly');
-                                    const store = tx.objectStore(STORE_CHAPTERS);
-                                    const reqCh = store.getAll();
-                                    reqCh.onsuccess = async () => {
-                                        const oldChapters: Chapter[] = reqCh.result || [];
-                                        if (oldChapters.length > 0) {
-                                            const currentChapters = await this.getAllChapters();
-                                            const currentIds = new Set(currentChapters.map(c => c.id));
-                                            for (const ch of oldChapters) {
-                                                if (!currentIds.has(ch.id)) {
-                                                    await this.saveChapter(ch);
-                                                }
-                                                if (ch.novelId && !novelMap.has(ch.novelId)) {
-                                                    novelMap.set(ch.novelId, {
-                                                        id: ch.novelId,
-                                                        name: ch.name ? `Truyện (${ch.name.slice(0, 30)})` : (ch.novelId === 'default' ? 'Truyện mặc định' : `Bộ truyện ${ch.novelId}`)
-                                                    });
-                                                }
-                                            }
-                                        }
-                                    };
-                                }
-                            } catch (_) {
-                            } finally {
-                                try { oldDb.close(); } catch (_) {}
-                                resolveLegacy();
-                            }
-                        };
-                    });
-                } catch (_) {}
-            }
-        }
-
-        // 4. Quét chính chapters trong DB hiện tại để cứu các bộ truyện mồ côi
+        // 3. Quét chapters trong DB hiện tại (chỉ lấy chapters thuộc về tài khoản này)
         try {
             const currentChapters = await this.getAllChapters();
             currentChapters.forEach(c => {
+                const cUid = (c as any).userId;
+                // Nếu chapter có ghi nhận userId mà khác targetUid thì bỏ qua
+                if (targetUid && cUid && cUid !== targetUid) return;
+
                 if (c.novelId && !novelMap.has(c.novelId)) {
                     novelMap.set(c.novelId, {
                         id: c.novelId,
@@ -272,7 +227,7 @@ export const db = {
             });
         } catch (_) {}
 
-        // 5. Chuẩn hóa kết quả
+        // 4. Chuẩn hóa kết quả
         if (novelMap.size > 1 && novelMap.has('default') && novelMap.get('default')?.name === 'Truyện mặc định') {
             novelMap.delete('default');
         }
@@ -281,10 +236,11 @@ export const db = {
             ? Array.from(novelMap.values()) 
             : [{ id: 'default', name: 'Truyện mặc định' }];
 
-        // Lưu đồng bộ lại cả vào IndexedDB và localStorage
+        // Lưu đồng bộ lại cho tài khoản này
         try {
-            await this.saveNovels(finalList);
-            setScopedStorageItem('cached_novels_list', JSON.stringify(finalList));
+            await this.saveNovels(finalList, targetUid);
+            const saveKey = targetUid ? `cached_novels_${targetUid}` : 'cached_novels_list';
+            setScopedStorageItem(saveKey, JSON.stringify(finalList));
         } catch (_) {}
 
         return finalList;
