@@ -149,7 +149,7 @@ export const db = {
                 req.onsuccess = () => {
                     const res = req.result;
                     if (Array.isArray(res)) {
-                        const clean = res.filter((n: any) => n && n.id && n.name && !n.name.startsWith('Truyện (') && !n.name.startsWith('Bộ truyện '));
+                        const clean = res.filter((n: any) => n && n.id && typeof n.name === 'string' && n.name.trim().length > 0);
                         resolve(clean);
                     } else {
                         resolve([]);
@@ -166,7 +166,7 @@ export const db = {
     async saveNovels(novels: Novel[], targetUid?: string): Promise<void> {
         try {
             if (!Array.isArray(novels)) return;
-            const cleanNovels = novels.filter(n => n && n.id && n.name && !n.name.startsWith('Truyện (') && !n.name.startsWith('Bộ truyện '));
+            const cleanNovels = novels.filter(n => n && n.id && typeof n.name === 'string' && n.name.trim().length > 0);
             const db = await dbPromise;
             return new Promise((resolve, reject) => {
                 const tx = db.transaction(STORE_SETTINGS, 'readwrite');
@@ -184,17 +184,11 @@ export const db = {
     async autoRecoverNovels(targetUid?: string): Promise<Novel[]> {
         const novelMap = new Map<string, Novel>();
 
-        const isJunkName = (name: string) => {
-            if (!name) return true;
-            const trimmed = name.trim();
-            return trimmed.startsWith('Truyện (') || trimmed.startsWith('Bộ truyện ');
-        };
-
-        // 1. Lấy từ IndexedDB settings của chính tài khoản này
+        // 1. Lấy từ IndexedDB settings của chính tài khoản này (hoặc settings chung)
         try {
             const currentDbNovels = await this.getNovels(targetUid);
             currentDbNovels.forEach(n => {
-                if (n && n.id && n.name && !isJunkName(n.name)) novelMap.set(n.id, n);
+                if (n && n.id && n.name) novelMap.set(n.id, n);
             });
         } catch (_) {}
 
@@ -202,13 +196,28 @@ export const db = {
         try {
             const storageNovels = recoverAllCachedNovels(targetUid);
             storageNovels.forEach(n => {
-                if (n && n.id && n.name && !isJunkName(n.name) && !novelMap.has(n.id)) {
+                if (n && n.id && n.name && !novelMap.has(n.id)) {
                     novelMap.set(n.id, n);
                 }
             });
         } catch (_) {}
 
-        // 3. Chuẩn hóa kết quả
+        // 3. Quét chính chapters trong IndexedDB để khôi phục các bộ truyện đang chứa chương
+        try {
+            const currentChapters = await this.getAllChapters();
+            currentChapters.forEach(c => {
+                if (c.novelId && !novelMap.has(c.novelId)) {
+                    const chName = c.name ? c.name.trim() : '';
+                    const recoveredName = (c as any).novelName || (chName ? `Truyện (${chName.slice(0, 30)})` : (c.novelId === 'default' ? 'Truyện mặc định' : `Truyện đã lưu ${c.novelId.slice(-4)}`));
+                    novelMap.set(c.novelId, {
+                        id: c.novelId,
+                        name: recoveredName
+                    });
+                }
+            });
+        } catch (_) {}
+
+        // 4. Chuẩn hóa kết quả
         if (novelMap.size > 1 && novelMap.has('default') && novelMap.get('default')?.name === 'Truyện mặc định') {
             novelMap.delete('default');
         }

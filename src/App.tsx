@@ -402,9 +402,12 @@ function AppContent() {
             setScopedStorageItem(`cached_novels_${user.uid}`, JSON.stringify(cloudNovels));
             setScopedStorageItem('cached_novels_list', JSON.stringify(cloudNovels));
             
-            if (!session.currentNovelId || !cloudNovels.some(n => n.id === session.currentNovelId)) {
-              setSession(prev => ({ ...prev, currentNovelId: cloudNovels[0].id }));
-            }
+            const nonDefault = cloudNovels.find(n => n.id !== 'default');
+            const targetId = (session.currentNovelId && session.currentNovelId !== 'default' && cloudNovels.some(n => n.id === session.currentNovelId))
+              ? session.currentNovelId
+              : (nonDefault ? nonDefault.id : cloudNovels[0].id);
+
+            setSession(prev => ({ ...prev, currentNovelId: targetId }));
             return;
           }
 
@@ -412,9 +415,12 @@ function AppContent() {
           const userLocal = await db.autoRecoverNovels(user.uid);
           if (userLocal && userLocal.length > 0) {
             setNovels(userLocal);
-            if (!session.currentNovelId || !userLocal.some(n => n.id === session.currentNovelId)) {
-              setSession(prev => ({ ...prev, currentNovelId: userLocal[0].id }));
-            }
+            const nonDefaultLocal = userLocal.find(n => n.id !== 'default');
+            const targetLocalId = (session.currentNovelId && session.currentNovelId !== 'default' && userLocal.some(n => n.id === session.currentNovelId))
+              ? session.currentNovelId
+              : (nonDefaultLocal ? nonDefaultLocal.id : userLocal[0].id);
+
+            setSession(prev => ({ ...prev, currentNovelId: targetLocalId }));
           }
         } catch (e) {
           console.warn("Lỗi tải novels từ đám mây, đang dùng dữ liệu trên máy:", e);

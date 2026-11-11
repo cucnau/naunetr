@@ -120,19 +120,13 @@ export function recoverAllCachedNovels(targetUid?: string): Array<{ id: string; 
   
   const novelMap = new Map<string, { id: string; name: string }>();
 
-  const isJunkName = (name: string) => {
-    if (!name) return true;
-    const trimmed = name.trim();
-    return trimmed.startsWith('Truyện (') || trimmed.startsWith('Bộ truyện ');
-  };
-
   try {
     if (targetUid) {
-      // Khi đã đăng nhập: CHỈ đọc cache của chính targetUid này
+      // Khi đã đăng nhập: Quét cache của targetUid, nếu chưa có thì quét toàn bộ cache novels
       const userKeyPrefix = `cached_novels_${targetUid}`;
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
-        if (k && k.startsWith(userKeyPrefix)) {
+        if (k && (k.startsWith(userKeyPrefix) || k.startsWith('cached_novels_'))) {
           try {
             const raw = localStorage.getItem(k);
             if (raw) {
@@ -141,7 +135,7 @@ export function recoverAllCachedNovels(targetUid?: string): Array<{ id: string; 
                 parsed.forEach((item: any) => {
                   if (item && typeof item === 'object' && item.id && item.name && typeof item.name === 'string') {
                     const cleanName = item.name.trim();
-                    if (!isJunkName(cleanName)) {
+                    if (cleanName.length > 0) {
                       novelMap.set(item.id, { id: String(item.id), name: cleanName });
                     }
                   }
@@ -152,10 +146,10 @@ export function recoverAllCachedNovels(targetUid?: string): Array<{ id: string; 
         }
       }
     } else {
-      // Khi chưa đăng nhập: Chỉ đọc key cached_novels_list
+      // Khi chưa đăng nhập: Quét key cached_novels
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
-        if (k && (k === 'cached_novels_list' || k.startsWith('cached_novels_list_'))) {
+        if (k && (k === 'cached_novels_list' || k.startsWith('cached_novels_'))) {
           try {
             const raw = localStorage.getItem(k);
             if (raw) {
@@ -164,7 +158,7 @@ export function recoverAllCachedNovels(targetUid?: string): Array<{ id: string; 
                 parsed.forEach((item: any) => {
                   if (item && typeof item === 'object' && item.id && item.name && typeof item.name === 'string') {
                     const cleanName = item.name.trim();
-                    if (!isJunkName(cleanName)) {
+                    if (cleanName.length > 0) {
                       novelMap.set(item.id, { id: String(item.id), name: cleanName });
                     }
                   }

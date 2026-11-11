@@ -54,10 +54,13 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, on
           if (userCache) {
             const parsed = JSON.parse(userCache);
             if (Array.isArray(parsed) && parsed.length > 0) {
-              const clean = parsed.filter((n: any) => n && n.name && !n.name.startsWith('Truyện (') && !n.name.startsWith('Bộ truyện '));
+              const clean = parsed.filter((n: any) => n && n.name && typeof n.name === 'string');
               if (clean.length > 0) {
                 setNovels(clean);
-                if (!currentNovelId) onSelectNovel(clean[0].id);
+                const nonDef = clean.find((n: any) => n.id !== 'default');
+                if (!currentNovelId || currentNovelId === 'default') {
+                  onSelectNovel(nonDef ? nonDef.id : clean[0].id);
+                }
               }
             }
           }
@@ -69,7 +72,10 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, on
           const recovered = await db.autoRecoverNovels();
           if (Array.isArray(recovered) && recovered.length > 0) {
             setNovels(recovered);
-            if (!currentNovelId) onSelectNovel(recovered[0].id);
+            const nonDef = recovered.find(n => n.id !== 'default');
+            if (!currentNovelId || currentNovelId === 'default') {
+              onSelectNovel(nonDef ? nonDef.id : recovered[0].id);
+            }
           }
         } catch (_) {
           const fallback = recoverAllCachedNovels();
@@ -94,16 +100,18 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, on
       const currentUid = uid || auth.currentUser?.uid;
       const cloudData = await getNovels();
       
-      // 1. Nếu tải thành công từ Firestore (đã lọc đúng userId của tài khoản này)
+      // 1. Nếu tải thành công từ Firestore
       if (cloudData && cloudData.length > 0) {
         setNovels(cloudData);
         if (currentUid) {
           setScopedStorageItem(`cached_novels_${currentUid}`, JSON.stringify(cloudData));
           await db.saveNovels(cloudData, currentUid);
         }
-        if (!currentNovelId || !cloudData.some(n => n.id === currentNovelId)) {
-          onSelectNovel(cloudData[0].id);
-        }
+        const nonDef = cloudData.find(n => n.id !== 'default');
+        const targetId = (currentNovelId && currentNovelId !== 'default' && cloudData.some(n => n.id === currentNovelId))
+          ? currentNovelId
+          : (nonDef ? nonDef.id : cloudData[0].id);
+        onSelectNovel(targetId);
         return;
       }
 
@@ -111,9 +119,11 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, on
       const localData = await db.autoRecoverNovels(currentUid);
       if (localData && localData.length > 0) {
         setNovels(localData);
-        if (!currentNovelId || !localData.some(n => n.id === currentNovelId)) {
-          onSelectNovel(localData[0].id);
-        }
+        const nonDef = localData.find(n => n.id !== 'default');
+        const targetId = (currentNovelId && currentNovelId !== 'default' && localData.some(n => n.id === currentNovelId))
+          ? currentNovelId
+          : (nonDef ? nonDef.id : localData[0].id);
+        onSelectNovel(targetId);
       }
     } catch (e: any) {
       console.warn("Đang dùng danh sách truyện từ bộ nhớ máy:", e);
