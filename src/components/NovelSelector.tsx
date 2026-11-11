@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { getNovels, createNovel } from '../services/firestoreService';
 import { Novel } from '../types';
-import { Book, Plus, Loader2 } from 'lucide-react';
+import { Book, Plus, Loader2, Trash2 } from 'lucide-react';
 import { auth } from '../services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { getScopedStorageItem, setScopedStorageItem, recoverAllCachedNovels } from '../services/storageNamespace';
@@ -10,9 +10,10 @@ import { db } from '../services/db';
 interface NovelSelectorProps {
   currentNovelId: string;
   onSelectNovel: (id: string) => void;
+  onDeleteNovel?: (id: string) => void;
 }
 
-export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, onSelectNovel }) => {
+export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, onSelectNovel, onDeleteNovel }) => {
   const [novels, setNovels] = useState<Novel[]>(() => {
     try {
       const uid = auth.currentUser?.uid;
@@ -141,7 +142,6 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, on
     if (uid) {
       setScopedStorageItem(`cached_novels_${uid}`, JSON.stringify(updatedNovels));
     }
-    setScopedStorageItem('cached_novels_list', JSON.stringify(updatedNovels));
 
     // 2. Đồng bộ lên Firestore nếu đã đăng nhập
     if (auth.currentUser) {
@@ -154,6 +154,15 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, on
       } finally {
         setLoading(false);
       }
+    }
+  };
+
+  const handleDelete = () => {
+    const current = novels.find(n => n.id === currentNovelId);
+    if (!current) return;
+    const confirmDelete = window.confirm(`Bạn có chắc chắn muốn xóa bộ truyện "${current.name}" khỏi tài khoản không?`);
+    if (confirmDelete && onDeleteNovel) {
+      onDeleteNovel(current.id);
     }
   };
 
@@ -174,13 +183,25 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, on
         {loading ? (
           <Loader2 size={12} className="animate-spin ml-0.5 text-[#8D6E63]" />
         ) : (
-          <button 
-            onClick={handleCreate} 
-            className="ml-1 transition-colors text-[#8D6E63] hover:text-[#3E2723]" 
-            title="Tạo truyện mới"
-          >
-            <Plus size={12} />
-          </button>
+          <div className="flex items-center gap-1 ml-0.5">
+            <button 
+              onClick={handleCreate} 
+              className="transition-colors text-[#8D6E63] hover:text-[#3E2723]" 
+              title="Tạo truyện mới"
+            >
+              <Plus size={12} />
+            </button>
+
+            {onDeleteNovel && (novels.length > 1 || currentNovelId !== 'default') && (
+              <button
+                onClick={handleDelete}
+                className="transition-colors text-[#A1887F] hover:text-red-700 ml-0.5"
+                title="Xóa bộ truyện này"
+              >
+                <Trash2 size={11} />
+              </button>
+            )}
+          </div>
         )}
       </div>
 

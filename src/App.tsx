@@ -480,8 +480,13 @@ function AppContent() {
     nextCurrentId = finalNovels[0].id;
     
     setNovels(finalNovels);
-    await db.saveNovels(finalNovels);
-    setScopedStorageItem('cached_novels_list', JSON.stringify(finalNovels));
+    const uid = auth.currentUser?.uid;
+    await db.saveNovels(finalNovels, uid);
+    if (uid) {
+      setScopedStorageItem(`cached_novels_${uid}`, JSON.stringify(finalNovels));
+    } else {
+      setScopedStorageItem('cached_novels_list', JSON.stringify(finalNovels));
+    }
 
     setSession(prev => ({
       ...prev,
@@ -2099,6 +2104,7 @@ useEffect(() => {
               <NovelSelector 
                 currentNovelId={session.currentNovelId || ''} 
                 onSelectNovel={handleSelectNovel}
+                onDeleteNovel={handleDeleteNovel}
               />
               <button 
                 onClick={() => setShowShortcuts(true)} 

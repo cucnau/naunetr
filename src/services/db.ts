@@ -171,10 +171,8 @@ export const db = {
             return new Promise((resolve, reject) => {
                 const tx = db.transaction(STORE_SETTINGS, 'readwrite');
                 const store = tx.objectStore(STORE_SETTINGS);
-                if (targetUid) {
-                    store.put(cleanNovels, `${KEY_NOVELS}_${targetUid}`);
-                }
-                const req = store.put(cleanNovels, KEY_NOVELS);
+                const storeKey = targetUid ? `${KEY_NOVELS}_${targetUid}` : KEY_NOVELS;
+                const req = store.put(cleanNovels, storeKey);
                 req.onsuccess = () => resolve();
                 req.onerror = () => reject(req.error);
             });
@@ -219,11 +217,14 @@ export const db = {
             ? Array.from(novelMap.values()) 
             : [{ id: 'default', name: 'Truyện mặc định' }];
 
-        // Lưu đồng bộ lại cho tài khoản này
+        // Lưu đồng bộ lại cho tài khoản này (không ghi đè vào key chung)
         try {
             await this.saveNovels(finalList, targetUid);
-            const saveKey = targetUid ? `cached_novels_${targetUid}` : 'cached_novels_list';
-            setScopedStorageItem(saveKey, JSON.stringify(finalList));
+            if (targetUid) {
+                setScopedStorageItem(`cached_novels_${targetUid}`, JSON.stringify(finalList));
+            } else {
+                setScopedStorageItem('cached_novels_list', JSON.stringify(finalList));
+            }
         } catch (_) {}
 
         return finalList;
