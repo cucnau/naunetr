@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { AppStatus, TranslationSession, HistoryItem, TranslationResponse, Chapter, TranslationSegment, Character, Relationship, CustomTerm } from './types';
 import { exportToExcel } from './services/excelService';
-import { getNovels, createNovel, deleteNovel, getChaptersFromCloud, saveChapterToCloud, bulkSaveChaptersToCloud, deleteChapterFromCloud, clearNovelChaptersFromCloud, syncFirestoreData, subscribeToChapters, subscribeToUserLiveWorkspace, saveUserLiveWorkspaceToCloud, getDeviceId } from './services/firestoreService';
+import { getNovels, createNovel, deleteNovel, getChaptersFromCloud, saveChapterToCloud, bulkSaveChaptersToCloud, deleteChapterFromCloud, clearNovelChaptersFromCloud, syncFirestoreData, subscribeToChapters, subscribeToUserLiveWorkspace, saveUserLiveWorkspaceToCloud, getUserLiveWorkspaceFromCloud, isCloudQuotaExhausted, getDeviceId } from './services/firestoreService';
 import { auth } from './services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { vietphraseEngine } from './services/vietphraseService';
@@ -24,6 +24,7 @@ import { checkAndApplyShortcut, getStoredShortcuts, isShortcutsEnabled, syncShor
 import { handleSmartQuotesKeyDown, convertStraightToSmartQuotes } from './services/quoteUtils';
 import { getScopedStorageItem, setScopedStorageItem, recoverAllCachedNovels } from './services/storageNamespace';
 import { normalizeVietnameseText } from './services/vietnameseUtils';
+import { deepScanAndRecoverFromLocal } from './services/localRecoveryService';
 
 const EXAMPLE_TEXT = "路遥知马力，日久见人心。";
 
@@ -390,66 +391,127 @@ function AppContent() {
     return () => { isMounted = false; };
   }, []);
 
-  // Tự động ĐỒNG BỘ DỮ LIỆU TỪ FIRESTORE TRƯỚC TIÊN cho từng tài khoản và khôi phục ĐÚNG TIẾN ĐỘ THỰC TẾ
+  // Tự động ĐỒNG BỘ DỮ LIỆU TỪ LOCAL TRƯỚC VÀ FIRESTORE TIẾP THEO cho từng tài khoản và khôi phục ĐÚNG TIẾN ĐỘ THỰC TẾ
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
       if (user) {
         try {
-          // 1. ĐỒNG BỘ 2 CHIỀU DANH SÁCH BỘ TRUYỆN GIỮA FIRESTORE VÀ LOCAL
-          const cloudNovels = await getNovels();
+          // BƯỚC 1: NẠP DỮ LIỆU CỤC BỘ TRƯỚC TIÊN (Local First - đảm bảo không bao giờ bị trắng màn hình hay mất dữ liệu khi Firestore hết quota)
           const userLocal = await db.autoRecoverNovels(user.uid);
-          const novelMap = new Map<string, Novel>();
+          let cloudNovels: Novel[] = [];
+          if (!isCloudQuotaExhausted()) {
+            try {
+              cloudNovels = await getNovels();
+            } catch (err) {
+              console.warn("Không thể lấy danh sách truyện từ Cloud (sử dụng bản lưu máy):", err);
+            }
+          }
 
-          // Nạp truyện từ Cloud Firestore
+          const novelMap = new Map<string, Novel>();
+          // Ưu tiên nạp truyện của tài khoản này từ Local
+          (userLocal || []).forEach(n => {
+            if (n && n.id && n.name) novelMap.set(n.id, n);
+          });
+          // Bổ sung truyện từ Cloud Firestore nếu có
           (cloudNovels || []).forEach(n => {
             if (n && n.id && n.name) novelMap.set(n.id, n);
           });
 
-          // Tự động đẩy các bộ truyện ở Local chưa có trên Cloud lên Firestore
-          (userLocal || []).forEach(n => {
-            if (n && n.id && n.name && !novelMap.has(n.id)) {
-              novelMap.set(n.id, n);
-              if (n.id !== 'default') {
-                createNovel(n.id, n.name).catch(console.warn);
+          // Tự động đẩy các bộ truyện ở Local chưa có trên Cloud lên Firestore (nếu cloud chưa hết quota)
+          if (!isCloudQuotaExhausted()) {
+            (userLocal || []).forEach(n => {
+              if (n && n.id && n.name && !cloudNovels.some(cn => cn.id === n.id)) {
+                if (n.id !== 'default') {
+                  createNovel(n.id, n.name).catch(console.warn);
+                }
               }
-            }
+            });
+          }
+
+          let effectiveNovels = Array.from(novelMap.values());
+          let currentTargetNovelId = session.currentNovelId;
+
+          // Nếu danh sách hiện tại chưa có 3 bộ truyện của bạn (Thao tác, Làm culi, Kiêu ngạo), tự động quét sâu bộ nhớ máy để phục hồi
+          const hasUserNovels = effectiveNovels.some(n => {
+            const l = (n.name || '').toLowerCase();
+            return l.includes('thao tác') || l.includes('culi') || l.includes('kiêu ngạo');
           });
 
-          const effectiveNovels = Array.from(novelMap.values());
+          if (!hasUserNovels) {
+            try {
+              const deepReport = await deepScanAndRecoverFromLocal();
+              if (deepReport.recoveredNovels.length > 0) {
+                effectiveNovels = deepReport.recoveredNovels;
+              }
+            } catch (_) {}
+          }
+
           if (effectiveNovels.length > 0) {
             setNovels(effectiveNovels);
             await db.saveNovels(effectiveNovels, user.uid);
             setScopedStorageItem(`cached_novels_${user.uid}`, JSON.stringify(effectiveNovels));
             setScopedStorageItem('cached_novels_list', JSON.stringify(effectiveNovels));
+
+            // Chọn bộ truyện thực tế hợp lệ của tài khoản này
+            const targetUserNovel = effectiveNovels.find(n => {
+              const l = (n.name || '').toLowerCase();
+              return l.includes('thao tác') || l.includes('culi') || l.includes('kiêu ngạo');
+            });
+            const nonDefault = effectiveNovels.find(n => n.id !== 'default');
+            const targetId = (session.currentNovelId && session.currentNovelId !== 'default' && effectiveNovels.some(n => n.id === session.currentNovelId))
+              ? session.currentNovelId
+              : (targetUserNovel ? targetUserNovel.id : (nonDefault ? nonDefault.id : effectiveNovels[0].id));
+            currentTargetNovelId = targetId;
           }
 
-          // 2. ĐỒNG BỘ TIẾN ĐỘ THỰC TẾ (Bản thảo đang edit/beta dở)
-          const liveWorkspace = await getUserLiveWorkspaceFromCloud();
-          let currentTargetNovelId = session.currentNovelId;
+          // BƯỚC 2: KHÔI PHỤC TIẾN ĐỘ THỰC TẾ (Bản thảo đang edit/beta dở)
+          // Kiểm tra xem Local hiện tại hoặc db.getActiveSession có bản thảo dở dang không
+          const savedLocalSession = await db.getActiveSession();
+          let liveWorkspace: any = null;
 
-          const hasLocalWork = Boolean((session.inputText && session.inputText.trim().length > 0) || (session.result?.segments && session.result.segments.length > 0) || (session.preEditedText && session.preEditedText.trim().length > 0));
+          if (!isCloudQuotaExhausted()) {
+            try {
+              liveWorkspace = await getUserLiveWorkspaceFromCloud();
+            } catch (err) {
+              console.warn("Không thể tải Live Workspace từ Cloud (sử dụng bản lưu máy):", err);
+            }
+          }
+
+          const activeInput = session.inputText?.trim() || savedLocalSession?.inputText?.trim() || '';
+          const activeSegments = session.result?.segments?.length || savedLocalSession?.result?.segments?.length || 0;
+          const hasLocalWork = Boolean(activeInput.length > 0 || activeSegments > 0);
           const hasCloudWork = Boolean((liveWorkspace?.inputText && liveWorkspace.inputText.trim().length > 0) || (liveWorkspace?.result?.segments && liveWorkspace.result.segments.length > 0));
 
           if (hasLocalWork && (!hasCloudWork || (liveWorkspace?.updatedAt && Date.now() > liveWorkspace.updatedAt))) {
-            // Trường hợp A: Local đang có bản thảo mới gõ dở -> Giữ nguyên Local và TỰ ĐỘNG ĐẨY LÊN FIRESTORE!
-            if (session.currentNovelId) {
-              currentTargetNovelId = session.currentNovelId;
-              saveUserLiveWorkspaceToCloud({
-                novelId: session.currentNovelId,
-                chapterId: session.currentChapterId,
-                inputText: session.inputText,
-                deeplText: session.deeplText,
-                preEditedText: session.preEditedText,
-                result: session.result,
-                completedSegments: session.completedSegments,
-                status: session.status
-              }, true).catch(console.warn);
+            // Giữ nguyên bản thảo ở máy và đồng bộ lên Cloud nếu chưa hết quota
+            const effectiveSession = (session.inputText?.trim().length > 0 || session.result?.segments?.length) ? session : savedLocalSession;
+            if (effectiveSession) {
+              if (currentTargetNovelId && effectiveSession.currentNovelId !== currentTargetNovelId) {
+                effectiveSession.currentNovelId = currentTargetNovelId;
+              }
+              setSession(prev => ({
+                ...prev,
+                ...effectiveSession,
+                currentNovelId: currentTargetNovelId || prev.currentNovelId
+              }));
+              if (!isCloudQuotaExhausted() && currentTargetNovelId) {
+                saveUserLiveWorkspaceToCloud({
+                  novelId: currentTargetNovelId,
+                  chapterId: effectiveSession.currentChapterId,
+                  inputText: effectiveSession.inputText,
+                  deeplText: effectiveSession.deeplText,
+                  preEditedText: effectiveSession.preEditedText,
+                  result: effectiveSession.result,
+                  completedSegments: effectiveSession.completedSegments,
+                  status: effectiveSession.status
+                }, true).catch(console.warn);
+              }
             }
           } else if (hasCloudWork && liveWorkspace) {
-            // Trường hợp B: Cloud có bản thảo đang làm dở mới hơn -> Khôi phục từ Cloud về màn hình
+            // Khôi phục từ Cloud về màn hình
             const targetNovel = (liveWorkspace.novelId && effectiveNovels.some(n => n.id === liveWorkspace.novelId))
               ? liveWorkspace.novelId
-              : (effectiveNovels[0]?.id || liveWorkspace.novelId || 'default');
+              : (currentTargetNovelId || 'default');
             
             currentTargetNovelId = targetNovel;
 
@@ -457,9 +519,9 @@ function AppContent() {
             if (!restoredResult && liveWorkspace.segments && liveWorkspace.segments.length > 0) {
               restoredResult = {
                 segments: liveWorkspace.segments,
-                naturalTranslation: liveWorkspace.segments.map(s => s.natural).join('\n'),
-                quickTrans: liveWorkspace.segments.map(s => s.quick).join('\n'),
-                deeplTranslation: liveWorkspace.segments.map(s => s.deepl).join('\n'),
+                naturalTranslation: liveWorkspace.segments.map((s: any) => s.natural).join('\n'),
+                quickTrans: liveWorkspace.segments.map((s: any) => s.quick).join('\n'),
+                deeplTranslation: liveWorkspace.segments.map((s: any) => s.deepl).join('\n'),
                 vocabulary: []
               };
             }
@@ -478,21 +540,23 @@ function AppContent() {
 
             setSession(restoredSession);
             db.saveActiveSession(restoredSession).catch(console.error);
-          } else if (effectiveNovels.length > 0) {
-            // Trường hợp C: Chọn bộ truyện thực tế hợp lệ
-            const nonDefault = effectiveNovels.find(n => n.id !== 'default');
-            const targetId = (session.currentNovelId && session.currentNovelId !== 'default' && effectiveNovels.some(n => n.id === session.currentNovelId))
-              ? session.currentNovelId
-              : (nonDefault ? nonDefault.id : effectiveNovels[0].id);
-            currentTargetNovelId = targetId;
-            setSession(prev => ({ ...prev, currentNovelId: targetId }));
+          } else if (currentTargetNovelId) {
+            setSession(prev => ({ ...prev, currentNovelId: currentTargetNovelId }));
           }
 
-          // 3. ĐỒNG BỘ 2 CHIỀU KHO CHƯƠNG (Tự động đẩy toàn bộ chương ở Local chưa có lên Firestore)
+          // BƯỚC 3: ĐỒNG BỘ KHO CHƯƠNG (Nạp từ Local trước, sau đó đồng bộ với Cloud)
           if (currentTargetNovelId && currentTargetNovelId !== 'default') {
-            const cloudChaps = await getChaptersFromCloud(currentTargetNovelId);
             const allLocalChaps = await db.getAllChapters();
             const localChaps = (allLocalChaps || []).filter(c => !c.novelId || c.novelId === currentTargetNovelId);
+
+            let cloudChaps: Chapter[] = [];
+            if (!isCloudQuotaExhausted()) {
+              try {
+                cloudChaps = await getChaptersFromCloud(currentTargetNovelId);
+              } catch (err) {
+                console.warn("Không thể tải chương từ Cloud:", err);
+              }
+            }
 
             const mergedMap = new Map<string, Chapter>();
             const chapsToUpload: Chapter[] = [];
@@ -501,7 +565,7 @@ function AppContent() {
             const localMap = new Map<string, Chapter>();
             localChaps.forEach(c => localMap.set(c.id, c));
 
-            // So sánh từng chương giữa Cloud và Local
+            // Nạp từ Cloud nếu có
             (cloudChaps || []).forEach(cloudCh => {
               const localCh = localMap.get(cloudCh.id);
               const { selected, shouldSyncToCloud } = resolveChapterConflict(localCh, cloudCh);
@@ -513,7 +577,7 @@ function AppContent() {
               }
             });
 
-            // Tự động đẩy mọi chương có ở Local mà Cloud chưa có lên Firestore (đúng truyện, đúng chương)!
+            // Tự động giữ nguyên mọi chương có ở Local (kể cả khi Cloud lỗi hay hết quota)
             localChaps.forEach(localCh => {
               if (!mergedMap.has(localCh.id)) {
                 const chapToSave: Chapter = { ...localCh, novelId: currentTargetNovelId };
@@ -527,8 +591,8 @@ function AppContent() {
               await db.saveChapter(ch);
             }
 
-            // Tự động đẩy lên Cloud Firestore
-            if (chapsToUpload.length > 0) {
+            // Tự động đẩy lên Cloud Firestore nếu chưa hết quota
+            if (chapsToUpload.length > 0 && !isCloudQuotaExhausted()) {
               bulkSaveChaptersToCloud(chapsToUpload).catch(console.warn);
             }
 
@@ -545,6 +609,7 @@ function AppContent() {
                 const latestChapter = finalChaps[0];
                 return {
                   ...prev,
+                  currentNovelId: currentTargetNovelId,
                   currentChapterId: latestChapter.id,
                   inputText: latestChapter.inputText || '',
                   deeplText: latestChapter.deeplText || '',
@@ -559,7 +624,7 @@ function AppContent() {
           }
 
         } catch (e) {
-          console.warn("Lỗi khởi tạo đồng bộ dữ liệu từ Firestore:", e);
+          console.warn("Lỗi khởi tạo đồng bộ dữ liệu:", e);
         }
       }
     });

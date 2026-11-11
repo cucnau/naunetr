@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { getNovels, createNovel } from '../services/firestoreService';
 import { Novel } from '../types';
-import { Book, Plus, Loader2, Trash2 } from 'lucide-react';
+import { Book, Plus, Loader2, Trash2, RotateCcw } from 'lucide-react';
 import { auth } from '../services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { getScopedStorageItem, setScopedStorageItem, recoverAllCachedNovels } from '../services/storageNamespace';
 import { db } from '../services/db';
+import { deepScanAndRecoverFromLocal } from '../services/localRecoveryService';
 
 interface NovelSelectorProps {
   currentNovelId: string;
@@ -167,10 +168,31 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, on
     }
   };
 
+  const handleDeepScan = async () => {
+    setLoading(true);
+    try {
+      const res = await deepScanAndRecoverFromLocal();
+      if (res.recoveredNovels.length > 0) {
+        setNovels(res.recoveredNovels);
+        const target = res.recoveredNovels.find(n => 
+          n.name.toLowerCase().includes('thao tác') || 
+          n.name.toLowerCase().includes('culi') || 
+          n.name.toLowerCase().includes('kiêu ngạo')
+        ) || res.recoveredNovels[0];
+        onSelectNovel(target.id);
+        alert(res.message);
+      }
+    } catch (e: any) {
+      alert("Lỗi quét bộ nhớ máy: " + (e?.message || e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleDelete = () => {
     const current = novels.find(n => n.id === currentNovelId);
     if (!current) return;
-    const confirmDelete = window.confirm(`Bạn có chắc chắn muốn xóa bộ truyện "${current.name}" khỏi tài khoản không?`);
+    const confirmDelete = window.confirm(`Bạn có chắc chắn muốn xóa bộ truyện "${current.name}" khỏi danh sách hiển thị trên máy không? (Dữ liệu của người khác trên Cloud sẽ không bị ảnh hưởng)`);
     if (confirmDelete && onDeleteNovel) {
       onDeleteNovel(current.id);
     }
@@ -202,11 +224,19 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, on
               <Plus size={12} />
             </button>
 
+            <button 
+              onClick={handleDeepScan} 
+              className="transition-colors text-[#8D6E63] hover:text-[#2E7D32]" 
+              title="Quét bộ nhớ máy để khôi phục 3 truyện (Thao tác, Làm culi, Kiêu ngạo) và kho chương"
+            >
+              <RotateCcw size={11} />
+            </button>
+
             {onDeleteNovel && (novels.length > 1 || currentNovelId !== 'default') && (
               <button
                 onClick={handleDelete}
                 className="transition-colors text-[#A1887F] hover:text-red-700 ml-0.5"
-                title="Xóa bộ truyện này"
+                title="Gỡ bộ truyện này khỏi máy"
               >
                 <Trash2 size={11} />
               </button>

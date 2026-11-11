@@ -70,6 +70,20 @@ const sanitizeData = (obj: any): any => {
   return result;
 };
 
+let quotaExhaustedUntil: number = 0;
+
+export const isCloudQuotaExhausted = (): boolean => {
+  return Date.now() < quotaExhaustedUntil;
+};
+
+export const handleQuotaExhausted = (error: any) => {
+  const msg = String(error?.message || error || '').toLowerCase();
+  if (msg.includes('quota') || msg.includes('resource-exhausted') || msg.includes('resource_exhausted') || msg.includes('free daily read units')) {
+    quotaExhaustedUntil = Date.now() + 15 * 60 * 1000;
+    console.warn("Firestore đã đạt giới hạn miễn phí hàng ngày (Free daily read units). Ứng dụng tự động lưu trữ và phục hồi an toàn 100% từ IndexedDB/LocalStorage của thiết bị.");
+  }
+};
+
 const dbCache = new Map<string, Map<string, any>>(); // Global cache to prevent repeated getDocs on POST
 
 const withTimeout = <T>(promise: Promise<T>, ms: number = 8000, errorMsg: string = 'Thao tác Firestore quá thời gian'): Promise<T> => {
@@ -90,6 +104,16 @@ const withTimeout = <T>(promise: Promise<T>, ms: number = 8000, errorMsg: string
 export const getNovels = async (retryCount = 1): Promise<Novel[]> => {
   const user = auth.currentUser;
   if (!user) return [];
+  if (isCloudQuotaExhausted()) {
+    try {
+      const userCached = getScopedStorageItem(`cached_novels_${user.uid}`);
+      if (userCached) {
+        const parsed = JSON.parse(userCached);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (_) {}
+    return [];
+  }
   const path = 'novels';
   const currentScope = getAppScope();
   try {
@@ -110,7 +134,8 @@ export const getNovels = async (retryCount = 1): Promise<Novel[]> => {
 
     return myNovels;
   } catch (error) {
-    if (retryCount > 0) {
+    handleQuotaExhausted(error);
+    if (!isCloudQuotaExhausted() && retryCount > 0) {
       await new Promise(res => setTimeout(res, 1000));
       return getNovels(retryCount - 1);
     }
@@ -129,6 +154,9 @@ export const getNovels = async (retryCount = 1): Promise<Novel[]> => {
 export const createNovel = async (id: string, name: string): Promise<Novel> => {
   const user = auth.currentUser;
   if (!user) throw new Error('Bạn cần đăng nhập!');
+  if (isCloudQuotaExhausted()) {
+    return { id, name };
+  }
   const path = `novels/${id}`;
   const currentScope = getAppScope();
   try {
@@ -139,13 +167,15 @@ export const createNovel = async (id: string, name: string): Promise<Novel> => {
         appScope: currentScope, 
         name, 
         createdAt: Timestamp.now() 
-      }),
+      }, { merge: true }),
       7000,
       'Tạo truyện trên đám mây quá thời gian'
     );
     return { id, name };
   } catch (error) {
-    handleFirestoreError(error, OperationType.CREATE, path);
+    handleQuotaExhausted(error);
+    console.warn("Lỗi tạo truyện trên Firestore (đã lưu cục bộ):", error);
+    return { id, name };
   }
 };
 
@@ -248,127 +278,126 @@ export const syncFirestoreData = async <T extends { id: string, novelId?: string
   payload?: T[]
 ): Promise<T[]> => {
   const user = auth.currentUser;
-  if (!user) {
-    throw new Error('Bạn cần đăng nhập để đồng bộ dữ liệu!');
-  }
-  if (!novelId) {
-    throw new Error('Chưa chọn truyện!');
+  if (!user || !novelId || isCloudQuotaExhausted()) {
+    return (payload || []) as T[];
   }
 
-  const collectionName = type === 'vocab' ? 'customTerms' : type === 'char' ? 'characters' : type === 'rel' ? 'relationships' : type === 'shortcut' ? 'shortcuts' : 'chapters';
-  const collRef = collection(db, collectionName);
+  try {
+    const collectionName = type === 'vocab' ? 'customTerms' : type === 'char' ? 'characters' : type === 'rel' ? 'relationships' : type === 'shortcut' ? 'shortcuts' : 'chapters';
+    const collRef = collection(db, collectionName);
 
-  if (action === 'GET') {
-    const q = query(collRef, where('novelId', '==', novelId));
-    const querySnapshot = await getDocs(q);
-    const result: any[] = [];
-    const localMap = new Map<string, any>();
-    querySnapshot.forEach((doc) => {
-      const data = doc.data();
-      // Match strictly if belongs to this novelId
-      if (data.novelId === novelId) {
-        localMap.set(doc.id, data);
-        const { userId, createdAt, ...rest } = data;
-        result.push({ id: doc.id, ...rest, novelId: data.novelId });
-      }
-    });
-
-    dbCache.set(`${collectionName}_${novelId}`, localMap);
-    return result as T[];
-  } else if (action === 'POST' && payload) {
-    const cacheKey = `${collectionName}_${novelId}`;
-    let dbDocsMap = dbCache.get(cacheKey);
-    if (!dbDocsMap) {
+    if (action === 'GET') {
       const q = query(collRef, where('novelId', '==', novelId));
       const querySnapshot = await getDocs(q);
-      dbDocsMap = new Map<string, any>();
-      querySnapshot.forEach(doc => {
-        dbDocsMap!.set(doc.id, doc.data());
-      });
-      dbCache.set(cacheKey, dbDocsMap);
-    }
-    
-    const payloadIds = new Set(payload.map(item => item.id));
-
-    // Group all operations to chunk them into batches of max 500
-    const operations: { type: 'set' | 'delete', ref: any, data?: any }[] = [];
-
-    // Generic field comparison to check if write can be skipped
-    const areFieldsEqual = (localItem: any, dbItem: any) => {
-      const allKeys = new Set([
-        ...Object.keys(localItem),
-        ...Object.keys(dbItem)
-      ]);
-      for (const key of allKeys) {
-        if (key === 'createdAt' || key === 'userId') continue;
-        const localVal = localItem[key];
-        const dbVal = dbItem[key];
-        if (localVal !== dbVal) {
-          // If both values are falsy, treat them as equal (e.g. empty string vs undefined)
-          if (!localVal && !dbVal) continue;
-          return false;
+      const result: any[] = [];
+      const localMap = new Map<string, any>();
+      querySnapshot.forEach((doc) => {
+        const data = doc.data();
+        // Match strictly if belongs to this novelId
+        if (data.novelId === novelId) {
+          localMap.set(doc.id, data);
+          const { userId, createdAt, ...rest } = data;
+          result.push({ id: doc.id, ...rest, novelId: data.novelId });
         }
+      });
+
+      dbCache.set(`${collectionName}_${novelId}`, localMap);
+      return result as T[];
+    } else if (action === 'POST' && payload) {
+      const cacheKey = `${collectionName}_${novelId}`;
+      let dbDocsMap = dbCache.get(cacheKey);
+      if (!dbDocsMap) {
+        const q = query(collRef, where('novelId', '==', novelId));
+        const querySnapshot = await getDocs(q);
+        dbDocsMap = new Map<string, any>();
+        querySnapshot.forEach(doc => {
+          dbDocsMap!.set(doc.id, doc.data());
+        });
+        dbCache.set(cacheKey, dbDocsMap);
       }
-      return true;
-    };
-
-    // Filter payload to strictly only items of this novelId
-    const targetPayload = payload.filter(item => !item.novelId || item.novelId === novelId);
-
-    // Add/Update items only if they are new or modified
-    targetPayload.forEach(item => {
-      const dbItem = dbDocsMap!.get(item.id);
       
-      if (!dbItem || !areFieldsEqual(item, dbItem)) {
-        const rawData = {
-            ...item,
-            novelId,
-            userId: user.uid,
-            createdAt: dbItem?.createdAt || Timestamp.now()
-        };
-        const dataToSave = sanitizeData(rawData);
+      const payloadIds = new Set(payload.map(item => item.id));
+
+      // Group all operations to chunk them into batches of max 500
+      const operations: { type: 'set' | 'delete', ref: any, data?: any }[] = [];
+
+      // Generic field comparison to check if write can be skipped
+      const areFieldsEqual = (localItem: any, dbItem: any) => {
+        const allKeys = new Set([
+          ...Object.keys(localItem),
+          ...Object.keys(dbItem)
+        ]);
+        for (const key of allKeys) {
+          if (key === 'createdAt' || key === 'userId') continue;
+          const localVal = localItem[key];
+          const dbVal = dbItem[key];
+          if (localVal !== dbVal) {
+            // If both values are falsy, treat them as equal (e.g. empty string vs undefined)
+            if (!localVal && !dbVal) continue;
+            return false;
+          }
+        }
+        return true;
+      };
+
+      // Filter payload to strictly only items of this novelId
+      const targetPayload = payload.filter(item => !item.novelId || item.novelId === novelId);
+
+      // Add/Update items only if they are new or modified
+      targetPayload.forEach(item => {
+        const dbItem = dbDocsMap!.get(item.id);
         
-        // Final defensive check: strictly delete any undefined properties from the sanitized object
-        Object.keys(dataToSave).forEach(k => {
-          if (dataToSave[k] === undefined) {
-            delete dataToSave[k];
+        if (!dbItem || !areFieldsEqual(item, dbItem)) {
+          const rawData = {
+              ...item,
+              novelId,
+              userId: user.uid,
+              createdAt: dbItem?.createdAt || Timestamp.now()
+          };
+          const dataToSave = sanitizeData(rawData);
+          
+          // Final defensive check: strictly delete any undefined properties from the sanitized object
+          Object.keys(dataToSave).forEach(k => {
+            if (dataToSave[k] === undefined) {
+              delete dataToSave[k];
+            }
+          });
+
+          operations.push({
+            type: 'set',
+            ref: doc(collRef, item.id),
+            data: dataToSave
+          });
+          dbDocsMap!.set(item.id, dataToSave);
+        }
+      });
+
+      if (operations.length === 0) {
+        return payload;
+      }
+
+      // Commit operations in safe chunks of 80 to adhere strictly to Firestore 10MB payload and 500 write limits
+      const CHUNK_SIZE = 80;
+      for (let i = 0; i < operations.length; i += CHUNK_SIZE) {
+        const chunk = operations.slice(i, i + CHUNK_SIZE);
+        const batch = writeBatch(db);
+        chunk.forEach(op => {
+          if (op.type === 'delete') {
+            batch.delete(op.ref);
+          } else {
+            batch.set(op.ref, op.data, { merge: true });
           }
         });
-
-        operations.push({
-          type: 'set',
-          ref: doc(collRef, item.id),
-          data: dataToSave
-        });
-        dbDocsMap!.set(item.id, dataToSave);
+        await batch.commit();
       }
-    });
 
-    if (operations.length === 0) {
-      console.log(`Sync skipped for ${collectionName}: No changes detected.`);
       return payload;
     }
-
-    console.log(`Syncing ${collectionName}: Performing ${operations.length} writes (${operations.filter(op => op.type === 'set').length} updates/creates, ${operations.filter(op => op.type === 'delete').length} deletions)`);
-
-    // Commit operations in safe chunks of 80 to adhere strictly to Firestore 10MB payload and 500 write limits
-    const CHUNK_SIZE = 80;
-    for (let i = 0; i < operations.length; i += CHUNK_SIZE) {
-      const chunk = operations.slice(i, i + CHUNK_SIZE);
-      const batch = writeBatch(db);
-      chunk.forEach(op => {
-        if (op.type === 'delete') {
-          batch.delete(op.ref);
-        } else {
-          batch.set(op.ref, op.data, { merge: true });
-        }
-      });
-      await batch.commit();
-    }
-
-    return payload;
+  } catch (error) {
+    handleQuotaExhausted(error);
+    console.warn(`Lỗi đồng bộ ${type} Firestore (dùng dữ liệu bộ nhớ máy):`, error);
   }
-  return [];
+  return (payload || []) as T[];
 };
 
 export const restoreLeanChapter = (raw: any): Chapter => {
@@ -447,7 +476,7 @@ const prepareChapterForCloud = (chap: Chapter, userId: string): Record<string, a
 
 export const getChaptersFromCloud = async (novelId: string, retryCount = 1): Promise<Chapter[]> => {
   const user = auth.currentUser;
-  if (!user || !novelId) return [];
+  if (!user || !novelId || novelId === 'default' || isCloudQuotaExhausted()) return [];
   const path = 'chapters';
   try {
     const q = query(collection(db, path), where('novelId', '==', novelId));
@@ -466,26 +495,13 @@ export const getChaptersFromCloud = async (novelId: string, retryCount = 1): Pro
     chapters.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
     return chapters;
   } catch (error) {
-    if (retryCount > 0) {
+    handleQuotaExhausted(error);
+    if (!isCloudQuotaExhausted() && retryCount > 0) {
       await new Promise(res => setTimeout(res, 1200));
       return getChaptersFromCloud(novelId, retryCount - 1);
     }
     console.warn("Không thể tải chương từ đám mây (đang dùng cache cục bộ):", error);
     return [];
-  }
-};
-
-let quotaExhaustedUntil: number = 0;
-
-export const isCloudQuotaExhausted = (): boolean => {
-  return Date.now() < quotaExhaustedUntil;
-};
-
-const handleQuotaExhausted = (error: any) => {
-  const msg = String(error?.message || error || '').toLowerCase();
-  if (msg.includes('quota') || msg.includes('resource-exhausted') || msg.includes('resource_exhausted')) {
-    quotaExhaustedUntil = Date.now() + 5 * 60 * 1000;
-    console.warn("Firestore đã đạt giới hạn miễn phí hàng ngày (Resource Exhausted). Ứng dụng tự động lưu trữ an toàn 100% trên IndexedDB của thiết bị.");
   }
 };
 
@@ -695,7 +711,7 @@ export const subscribeToChapters = (
   onError?: (error: any) => void
 ): (() => void) => {
   const user = auth.currentUser;
-  if (!user || !novelId) {
+  if (!user || !novelId || novelId === 'default' || isCloudQuotaExhausted()) {
     return () => {};
   }
 
@@ -720,7 +736,8 @@ export const subscribeToChapters = (
       onUpdate(chapters);
     },
     (error) => {
-      console.warn("Lỗi lắng nghe thời gian thực chương Firestore:", error);
+      handleQuotaExhausted(error);
+      console.warn("Lỗi lắng nghe thời gian thực chương Firestore (dùng dữ liệu bộ nhớ máy):", error);
       onError?.(error);
     }
   );
@@ -735,7 +752,7 @@ export const subscribeToUserLiveWorkspace = (
   onError?: (error: any) => void
 ): (() => void) => {
   const user = auth.currentUser;
-  if (!user) {
+  if (!user || isCloudQuotaExhausted()) {
     return () => {};
   }
 
@@ -760,7 +777,8 @@ export const subscribeToUserLiveWorkspace = (
       }
     },
     (error) => {
-      console.warn("Lỗi lắng nghe thời gian thực Live Workspace:", error);
+      handleQuotaExhausted(error);
+      console.warn("Lỗi lắng nghe thời gian thực Live Workspace (dùng dữ liệu bộ nhớ máy):", error);
       onError?.(error);
     }
   );
@@ -771,7 +789,7 @@ export const subscribeToUserLiveWorkspace = (
  */
 export const getUserLiveWorkspaceFromCloud = async (): Promise<LiveSessionData | null> => {
   const user = auth.currentUser;
-  if (!user) return null;
+  if (!user || isCloudQuotaExhausted()) return null;
   const scope = getAppScope();
   try {
     const docRef = doc(db, 'activeSessions', `ws_${user.uid}_${scope}`);
@@ -796,7 +814,8 @@ export const getUserLiveWorkspaceFromCloud = async (): Promise<LiveSessionData |
       return fallbackSnap.data() as LiveSessionData;
     }
   } catch (e) {
-    console.warn("Lỗi đọc Live Workspace từ Cloud Firestore:", e);
+    handleQuotaExhausted(e);
+    console.warn("Lỗi đọc Live Workspace từ Cloud Firestore (sử dụng bản lưu bộ nhớ máy):", e);
   }
   return null;
 };
