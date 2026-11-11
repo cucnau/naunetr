@@ -1,5 +1,5 @@
 import { db, auth } from './firebase';
-import { collection, doc, setDoc, getDocs, deleteDoc, writeBatch, query, where, Timestamp, onSnapshot } from 'firebase/firestore';
+import { collection, doc, setDoc, getDoc, getDocs, deleteDoc, writeBatch, query, where, Timestamp, onSnapshot } from 'firebase/firestore';
 import { CustomTerm, Character, Relationship, Novel, Chapter, TextShortcut, TranslationSegment, TranslationResponse } from '../types';
 import { getAppNamespace, recoverAllCachedNovels } from './storageNamespace';
 
@@ -142,7 +142,17 @@ export const deleteNovel = async (id: string): Promise<void> => {
   if (!user) throw new Error('Bạn cần đăng nhập!');
   const path = `novels/${id}`;
   try {
-    await withTimeout(deleteDoc(doc(db, 'novels', id)), 7000);
+    const novelRef = doc(db, 'novels', id);
+    const snap = await getDoc(novelRef);
+    if (snap.exists()) {
+      const data = snap.data();
+      // Nếu bộ truyện này thuộc về tài khoản khác (chỉ hiển thị nhầm trên máy này), KHÔNG xóa trên Firestore của người kia!
+      if (data && data.userId && data.userId !== user.uid) {
+        console.warn("Bộ truyện này thuộc tài khoản khác, bảo toàn an toàn trên Cloud cho bạn.");
+        return;
+      }
+    }
+    await withTimeout(deleteDoc(novelRef), 7000);
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
   }
