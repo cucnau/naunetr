@@ -91,29 +91,24 @@ export const getNovels = async (retryCount = 1): Promise<Novel[]> => {
   const user = auth.currentUser;
   if (!user) return [];
   const path = 'novels';
+  const currentScope = getAppScope();
   try {
-    // Lấy toàn bộ truyện trên Firestore (bao gồm cả các truyện cũ chưa gắn userId)
     const snap = await withTimeout(getDocs(collection(db, path)), 8000, 'Tải danh sách truyện quá thời gian');
     const myNovels: Novel[] = [];
-    const unassignedNovels: Novel[] = [];
-    const allNovels: Novel[] = [];
     snap.forEach(d => {
       const data = d.data();
       if (data && data.name) {
-        const item: Novel = { id: d.id, name: data.name };
-        allNovels.push(item);
-        if (data.userId === user.uid) {
-          myNovels.push(item);
-        } else if (!data.userId) {
-          unassignedNovels.push(item);
-        }
+        // QUY TẮC PHÂN LẬP 1: acc nào acc đó dùng - Tuyệt đối không lấy truyện của tài khoản khác
+        if (data.userId && data.userId !== user.uid) return;
+
+        // QUY TẮC PHÂN LẬP 2: web nào web nấy dùng - Tuyệt đối không lấy truyện của web repo khác
+        if (data.appScope && data.appScope !== currentScope) return;
+
+        myNovels.push({ id: d.id, name: data.name });
       }
     });
 
-    if (myNovels.length > 0) {
-      return [...myNovels, ...unassignedNovels];
-    }
-    return allNovels;
+    return myNovels;
   } catch (error) {
     if (retryCount > 0) {
       await new Promise(res => setTimeout(res, 1000));
@@ -135,10 +130,16 @@ export const createNovel = async (id: string, name: string): Promise<Novel> => {
   const user = auth.currentUser;
   if (!user) throw new Error('Bạn cần đăng nhập!');
   const path = `novels/${id}`;
+  const currentScope = getAppScope();
   try {
     const novelRef = doc(db, 'novels', id);
     await withTimeout(
-      setDoc(novelRef, { userId: user.uid, name, createdAt: Timestamp.now() }),
+      setDoc(novelRef, { 
+        userId: user.uid, 
+        appScope: currentScope, 
+        name, 
+        createdAt: Timestamp.now() 
+      }),
       7000,
       'Tạo truyện trên đám mây quá thời gian'
     );
@@ -397,9 +398,12 @@ export const restoreLeanChapter = (raw: any): Chapter => {
 };
 
 const prepareChapterForCloud = (chap: Chapter, userId: string): Record<string, any> => {
+  const currentScope = getAppScope();
   const rawData: any = {
     ...chap,
     userId,
+    appScope: currentScope,
+    novelId: chap.novelId,
     createdAt: Timestamp.now()
   };
 
@@ -451,8 +455,13 @@ export const getChaptersFromCloud = async (novelId: string, retryCount = 1): Pro
     const chapters: Chapter[] = [];
     snap.forEach(d => {
       const data = d.data();
+      // ĐÚNG ACC: Tài khoản nào chỉ dùng chương của tài khoản đó
+      if (data.userId && data.userId !== user.uid) return;
+      // ĐÚNG CHƯƠNG CỦA TRUYỆN: Chỉ lấy chương của đúng bộ truyện này
+      if (data.novelId && data.novelId !== novelId) return;
+
       const { userId, ...rest } = data;
-      chapters.push(restoreLeanChapter({ id: d.id, ...rest }));
+      chapters.push(restoreLeanChapter({ id: d.id, ...rest, novelId }));
     });
     chapters.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
     return chapters;
@@ -702,8 +711,10 @@ export const subscribeToChapters = (
       const chapters: Chapter[] = [];
       snapshot.forEach((d) => {
         const data = d.data();
+        if (data.userId && data.userId !== user.uid) return;
+        if (data.novelId && data.novelId !== novelId) return;
         const { userId, ...rest } = data;
-        chapters.push(restoreLeanChapter({ id: d.id, ...rest }));
+        chapters.push(restoreLeanChapter({ id: d.id, ...rest, novelId }));
       });
       chapters.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
       onUpdate(chapters);
@@ -753,6 +764,41 @@ export const subscribeToUserLiveWorkspace = (
       onError?.(error);
     }
   );
+};
+
+/**
+ * Đọc tiến độ thực tế đang làm dở từ Cloud Firestore để khôi phục đúng chỗ đang làm khi đăng nhập/mở web
+ */
+export const getUserLiveWorkspaceFromCloud = async (): Promise<LiveSessionData | null> => {
+  const user = auth.currentUser;
+  if (!user) return null;
+  const scope = getAppScope();
+  try {
+    const docRef = doc(db, 'activeSessions', `ws_${user.uid}_${scope}`);
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      const raw = docSnap.data();
+      let data = raw as LiveSessionData;
+      if ((raw as any)._isLean && data.result?.segments && data.result.segments.length > 0) {
+        const segs = data.result.segments;
+        if (!data.inputText) data.inputText = segs.map(s => s.source || '').join('\n');
+        if (!data.deeplText) data.deeplText = segs.map(s => s.deepl || '').join('\n');
+        if (!data.result.naturalTranslation) data.result.naturalTranslation = segs.map(s => s.natural || '').join('\n');
+        if (!data.result.quickTrans) data.result.quickTrans = segs.map(s => s.quick || '').join('\n');
+        if (!data.result.deeplTranslation) data.result.deeplTranslation = segs.map(s => s.deepl || '').join('\n');
+      }
+      return data;
+    }
+    // Fallback: Tìm session với scope root hoặc default nếu chuyển đổi web
+    const fallbackRef = doc(db, 'activeSessions', `ws_${user.uid}_root_app`);
+    const fallbackSnap = await getDoc(fallbackRef);
+    if (fallbackSnap.exists()) {
+      return fallbackSnap.data() as LiveSessionData;
+    }
+  } catch (e) {
+    console.warn("Lỗi đọc Live Workspace từ Cloud Firestore:", e);
+  }
+  return null;
 };
 
 let liveWorkspaceDebounceTimer: any = null;

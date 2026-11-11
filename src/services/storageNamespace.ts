@@ -15,38 +15,26 @@ if (typeof window !== 'undefined' && window.localStorage) {
 }
 
 export function getAppNamespace(): string {
-  // 1. Ưu tiên biến môi trường do người dùng cấu hình (trong .env của từng repo: VITE_APP_INSTANCE=web1)
+  // 1. Biến môi trường do build/deploy quy định riêng cho từng repo
   if (import.meta.env.VITE_APP_INSTANCE) {
     return String(import.meta.env.VITE_APP_INSTANCE).trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
   }
 
-  // 2. Cho phép người dùng tùy chọn đặt namespace riêng trong localStorage nếu cần
-  if (typeof window !== 'undefined') {
-    try {
-      const custom = localStorage.getItem('app_workspace_scope');
-      if (custom && custom.trim()) {
-        return custom.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
-      }
-    } catch (_) {}
+  // 2. Nhận diện theo Base URL của Vite (được cấu hình riêng cho từng GitHub repo, ví dụ /repo1/ vs /repo2/)
+  if (import.meta.env.BASE_URL && import.meta.env.BASE_URL !== '/' && import.meta.env.BASE_URL !== './') {
+    const cleanBase = import.meta.env.BASE_URL.replace(/^\/|\/$/g, '').toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+    if (cleanBase) return cleanBase;
   }
 
-  // 3. Tự động nhận diện thông minh theo đường dẫn pathname trên GitHub Pages: https://username.github.io/<ten-repo>/...
+  // 3. Tự động nhận diện chính xác theo đường dẫn pathname trên GitHub Pages (https://username.github.io/<ten-repo>/...)
   if (typeof window !== 'undefined' && window.location) {
     const pathSegments = window.location.pathname.split('/').filter(Boolean);
-    // Nếu chạy trên GitHub Pages dạng /<ten-repo>/
     if (pathSegments.length > 0 && !pathSegments[0].includes('.')) {
       return pathSegments[0].toLowerCase().replace(/[^a-z0-9_-]/g, '_');
     }
-
-    // Nếu chạy ở host riêng (như Vercel, Netlify, custom domain, hoặc localhost)
-    const host = window.location.hostname.toLowerCase();
-    if (host && host !== 'localhost' && host !== '127.0.0.1') {
-      const cleanHost = host.replace(/[^a-z0-9_-]/g, '_').slice(0, 30);
-      if (cleanHost) return cleanHost;
-    }
   }
 
-  return 'default';
+  return 'root_app';
 }
 
 /**
@@ -58,49 +46,30 @@ export function getScopedStorageKey(key: string): string {
 }
 
 /**
- * Đọc dữ liệu từ localStorage theo phân vùng riêng của repo, tự động fallback và di trú từ mọi key cũ
+ * Đọc dữ liệu từ localStorage theo phân vùng riêng của repo (web nào chỉ đọc đúng của web đó)
  */
 export function getScopedStorageItem(key: string, legacyKey?: string): string | null {
   if (typeof window === 'undefined') return null;
   try {
     const scopedKey = getScopedStorageKey(key);
+    // 1. Đọc đúng scoped key của chính web này
     const value = localStorage.getItem(scopedKey);
     if (value !== null && value.trim().length > 0) {
       return value;
     }
 
-    // 1. Fallback tìm key gốc không có namespace
+    // 2. Chỉ fallback key gốc hoặc legacyKey nếu chưa từng được phân vùng
     const directVal = localStorage.getItem(key);
     if (directVal !== null && directVal.trim().length > 0) {
       try { localStorage.setItem(scopedKey, directVal); } catch (_) {}
       return directVal;
     }
 
-    // 2. Fallback legacyKey nếu có
     if (legacyKey) {
       const rawLegacyVal = localStorage.getItem(legacyKey);
       if (rawLegacyVal !== null && rawLegacyVal.trim().length > 0) {
         try { localStorage.setItem(scopedKey, rawLegacyVal); } catch (_) {}
         return rawLegacyVal;
-      }
-    }
-
-    // 3. Fallback key với hậu tố _default
-    const defaultVal = localStorage.getItem(`${key}_default`);
-    if (defaultVal !== null && defaultVal.trim().length > 0) {
-      try { localStorage.setItem(scopedKey, defaultVal); } catch (_) {}
-      return defaultVal;
-    }
-
-    // 4. Quét toàn bộ localStorage để tìm bất kỳ key nào chứa key
-    for (let i = 0; i < localStorage.length; i++) {
-      const storageKey = localStorage.key(i);
-      if (storageKey && (storageKey.startsWith(key) || storageKey.includes(key))) {
-        const foundVal = localStorage.getItem(storageKey);
-        if (foundVal !== null && foundVal.trim().length > 0) {
-          try { localStorage.setItem(scopedKey, foundVal); } catch (_) {}
-          return foundVal;
-        }
       }
     }
 
@@ -112,61 +81,28 @@ export function getScopedStorageItem(key: string, legacyKey?: string): string | 
 }
 
 /**
- * Tự động tìm kiếm và khôi phục danh sách truyện đúng cho tài khoản đang dùng (targetUid)
- * Ngăn chặn tuyệt đối việc khôi phục nhầm truyện của tài khoản khác
+ * Tự động tìm kiếm và khôi phục danh sách truyện đúng cho tài khoản đang dùng (targetUid) của chính web này
  */
 export function recoverAllCachedNovels(targetUid?: string): Array<{ id: string; name: string }> {
   if (typeof window === 'undefined') return [{ id: 'default', name: 'Truyện mặc định' }];
   
   const novelMap = new Map<string, { id: string; name: string }>();
+  const ns = getAppNamespace();
 
   try {
-    if (targetUid) {
-      // Khi đã đăng nhập: Quét cache của targetUid, nếu chưa có thì quét toàn bộ cache novels
-      const userKeyPrefix = `cached_novels_${targetUid}`;
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (k && (k.startsWith(userKeyPrefix) || k.startsWith('cached_novels_'))) {
-          try {
-            const raw = localStorage.getItem(k);
-            if (raw) {
-              const parsed = JSON.parse(raw);
-              if (Array.isArray(parsed)) {
-                parsed.forEach((item: any) => {
-                  if (item && typeof item === 'object' && item.id && item.name && typeof item.name === 'string') {
-                    const cleanName = item.name.trim();
-                    if (cleanName.length > 0) {
-                      novelMap.set(item.id, { id: String(item.id), name: cleanName });
-                    }
-                  }
-                });
-              }
+    const targetKey = targetUid ? `cached_novels_${targetUid}_${ns}` : `cached_novels_list_${ns}`;
+    const raw = localStorage.getItem(targetKey) || (targetUid ? localStorage.getItem(`cached_novels_${targetUid}`) : localStorage.getItem('cached_novels_list'));
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        parsed.forEach((item: any) => {
+          if (item && typeof item === 'object' && item.id && item.name && typeof item.name === 'string') {
+            const cleanName = item.name.trim();
+            if (cleanName.length > 0) {
+              novelMap.set(item.id, { id: String(item.id), name: cleanName });
             }
-          } catch (_) {}
-        }
-      }
-    } else {
-      // Khi chưa đăng nhập: Quét key cached_novels
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (k && (k === 'cached_novels_list' || k.startsWith('cached_novels_'))) {
-          try {
-            const raw = localStorage.getItem(k);
-            if (raw) {
-              const parsed = JSON.parse(raw);
-              if (Array.isArray(parsed)) {
-                parsed.forEach((item: any) => {
-                  if (item && typeof item === 'object' && item.id && item.name && typeof item.name === 'string') {
-                    const cleanName = item.name.trim();
-                    if (cleanName.length > 0) {
-                      novelMap.set(item.id, { id: String(item.id), name: cleanName });
-                    }
-                  }
-                });
-              }
-            }
-          } catch (_) {}
-        }
+          }
+        });
       }
     }
   } catch (e) {
