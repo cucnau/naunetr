@@ -1,6 +1,6 @@
 
-import { CustomTerm, Chapter, VietphraseFileItem, Character } from '../types';
-import { getScopedDbName } from './storageNamespace';
+import { CustomTerm, Chapter, VietphraseFileItem, Character, Novel } from '../types';
+import { getScopedDbName, recoverAllCachedNovels, setScopedStorageItem } from './storageNamespace';
 
 // IndexedDB Service duoc cach ly rieng cho tung repo / web
 const DB_NAME = getScopedDbName();
@@ -12,6 +12,7 @@ const STORE_CHAPTERS = 'chapters';
 export const KEY_VIETPHRASE = 'vietphrase_data';
 export const KEY_VIETPHRASE_FILES = 'vietphrase_files';
 export const KEY_CURRENT_NOVEL = 'current_novel_id';
+export const KEY_NOVELS = 'novels_list';
 export const KEY_CHARACTERS = 'characters_data';
 export const KEY_ACTIVE_SESSION = 'active_session_data';
 
@@ -135,6 +136,158 @@ export const db = {
         } catch (e) {
             console.error("DB Save Current Novel ID Error", e);
         }
+    },
+
+    async getNovels(): Promise<Novel[]> {
+        try {
+            const db = await dbPromise;
+            return new Promise((resolve) => {
+                const tx = db.transaction(STORE_SETTINGS, 'readonly');
+                const store = tx.objectStore(STORE_SETTINGS);
+                const req = store.get(KEY_NOVELS);
+                req.onsuccess = () => {
+                    const res = req.result;
+                    if (Array.isArray(res) && res.length > 0) {
+                        resolve(res);
+                    } else {
+                        resolve([]);
+                    }
+                };
+                req.onerror = () => resolve([]);
+            });
+        } catch (e) {
+            console.error("DB Get Novels Error", e);
+            return [];
+        }
+    },
+
+    async saveNovels(novels: Novel[]): Promise<void> {
+        try {
+            if (!Array.isArray(novels) || novels.length === 0) return;
+            const db = await dbPromise;
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(STORE_SETTINGS, 'readwrite');
+                const store = tx.objectStore(STORE_SETTINGS);
+                const req = store.put(novels, KEY_NOVELS);
+                req.onsuccess = () => resolve();
+                req.onerror = () => reject(req.error);
+            });
+        } catch (e) {
+            console.error("DB Save Novels Error", e);
+        }
+    },
+
+    async autoRecoverNovels(): Promise<Novel[]> {
+        const novelMap = new Map<string, Novel>();
+
+        // 1. Lấy từ IndexedDB settings hiện tại
+        try {
+            const currentDbNovels = await this.getNovels();
+            currentDbNovels.forEach(n => {
+                if (n && n.id && n.name) novelMap.set(n.id, n);
+            });
+        } catch (_) {}
+
+        // 2. Lấy từ localStorage quét đa tầng (kể cả key cũ, default, các domain cũ)
+        try {
+            const storageNovels = recoverAllCachedNovels();
+            storageNovels.forEach(n => {
+                if (n && n.id && n.name && !novelMap.has(n.id)) {
+                    novelMap.set(n.id, n);
+                }
+            });
+        } catch (_) {}
+
+        // 3. Tự động di trú từ các DB cũ (AppDB, AppDB_default, chiVietDB) nếu DB hiện tại thiếu dữ liệu
+        if (typeof window !== 'undefined' && window.indexedDB) {
+            const legacyDbNames = ['AppDB', 'AppDB_default', 'chiVietDB'];
+            for (const legacyName of legacyDbNames) {
+                if (legacyName === DB_NAME) continue;
+                try {
+                    await new Promise<void>((resolveLegacy) => {
+                        const openReq = window.indexedDB.open(legacyName);
+                        openReq.onerror = () => resolveLegacy();
+                        openReq.onsuccess = async () => {
+                            const oldDb = openReq.result;
+                            try {
+                                if (oldDb.objectStoreNames.contains(STORE_SETTINGS)) {
+                                    const tx = oldDb.transaction(STORE_SETTINGS, 'readonly');
+                                    const store = tx.objectStore(STORE_SETTINGS);
+                                    const reqNovels = store.get(KEY_NOVELS);
+                                    reqNovels.onsuccess = () => {
+                                        if (Array.isArray(reqNovels.result)) {
+                                            reqNovels.result.forEach((n: any) => {
+                                                if (n && n.id && n.name && !novelMap.has(n.id)) {
+                                                    novelMap.set(n.id, n);
+                                                }
+                                            });
+                                        }
+                                    };
+                                }
+
+                                if (oldDb.objectStoreNames.contains(STORE_CHAPTERS)) {
+                                    const tx = oldDb.transaction(STORE_CHAPTERS, 'readonly');
+                                    const store = tx.objectStore(STORE_CHAPTERS);
+                                    const reqCh = store.getAll();
+                                    reqCh.onsuccess = async () => {
+                                        const oldChapters: Chapter[] = reqCh.result || [];
+                                        if (oldChapters.length > 0) {
+                                            const currentChapters = await this.getAllChapters();
+                                            const currentIds = new Set(currentChapters.map(c => c.id));
+                                            for (const ch of oldChapters) {
+                                                if (!currentIds.has(ch.id)) {
+                                                    await this.saveChapter(ch);
+                                                }
+                                                if (ch.novelId && !novelMap.has(ch.novelId)) {
+                                                    novelMap.set(ch.novelId, {
+                                                        id: ch.novelId,
+                                                        name: ch.name ? `Truyện (${ch.name.slice(0, 30)})` : (ch.novelId === 'default' ? 'Truyện mặc định' : `Bộ truyện ${ch.novelId}`)
+                                                    });
+                                                }
+                                            }
+                                        }
+                                    };
+                                }
+                            } catch (_) {
+                            } finally {
+                                try { oldDb.close(); } catch (_) {}
+                                resolveLegacy();
+                            }
+                        };
+                    });
+                } catch (_) {}
+            }
+        }
+
+        // 4. Quét chính chapters trong DB hiện tại để cứu các bộ truyện mồ côi
+        try {
+            const currentChapters = await this.getAllChapters();
+            currentChapters.forEach(c => {
+                if (c.novelId && !novelMap.has(c.novelId)) {
+                    novelMap.set(c.novelId, {
+                        id: c.novelId,
+                        name: c.name ? `Truyện (${c.name.slice(0, 30)})` : (c.novelId === 'default' ? 'Truyện mặc định' : `Bộ truyện ${c.novelId}`)
+                    });
+                }
+            });
+        } catch (_) {}
+
+        // 5. Chuẩn hóa kết quả
+        if (novelMap.size > 1 && novelMap.has('default') && novelMap.get('default')?.name === 'Truyện mặc định') {
+            novelMap.delete('default');
+        }
+
+        const finalList = novelMap.size > 0 
+            ? Array.from(novelMap.values()) 
+            : [{ id: 'default', name: 'Truyện mặc định' }];
+
+        // Lưu đồng bộ lại cả vào IndexedDB và localStorage
+        try {
+            await this.saveNovels(finalList);
+            setScopedStorageItem('cached_novels_list', JSON.stringify(finalList));
+        } catch (_) {}
+
+        return finalList;
     },
 
     async getAllCustomTerms(): Promise<CustomTerm[]> {

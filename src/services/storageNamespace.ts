@@ -58,28 +58,48 @@ export function getScopedStorageKey(key: string): string {
 }
 
 /**
- * Đọc dữ liệu từ localStorage theo phân vùng riêng của repo
+ * Đọc dữ liệu từ localStorage theo phân vùng riêng của repo, tự động fallback và di trú từ mọi key cũ
  */
 export function getScopedStorageItem(key: string, legacyKey?: string): string | null {
   if (typeof window === 'undefined') return null;
   try {
     const scopedKey = getScopedStorageKey(key);
     const value = localStorage.getItem(scopedKey);
-    if (value !== null) {
+    if (value !== null && value.trim().length > 0) {
       return value;
     }
 
-    // Nếu repo chưa có dữ liệu riêng và đang ở 'default' mới đọc fallback key cũ
-    const ns = getAppNamespace();
-    if (ns === 'default') {
-      const directVal = localStorage.getItem(key);
-      if (directVal !== null) {
-        return directVal;
+    // 1. Fallback tìm key gốc không có namespace
+    const directVal = localStorage.getItem(key);
+    if (directVal !== null && directVal.trim().length > 0) {
+      try { localStorage.setItem(scopedKey, directVal); } catch (_) {}
+      return directVal;
+    }
+
+    // 2. Fallback legacyKey nếu có
+    if (legacyKey) {
+      const rawLegacyVal = localStorage.getItem(legacyKey);
+      if (rawLegacyVal !== null && rawLegacyVal.trim().length > 0) {
+        try { localStorage.setItem(scopedKey, rawLegacyVal); } catch (_) {}
+        return rawLegacyVal;
       }
-      if (legacyKey) {
-        const rawLegacyVal = localStorage.getItem(legacyKey);
-        if (rawLegacyVal !== null) {
-          return rawLegacyVal;
+    }
+
+    // 3. Fallback key với hậu tố _default
+    const defaultVal = localStorage.getItem(`${key}_default`);
+    if (defaultVal !== null && defaultVal.trim().length > 0) {
+      try { localStorage.setItem(scopedKey, defaultVal); } catch (_) {}
+      return defaultVal;
+    }
+
+    // 4. Quét toàn bộ localStorage để tìm bất kỳ key nào chứa key
+    for (let i = 0; i < localStorage.length; i++) {
+      const storageKey = localStorage.key(i);
+      if (storageKey && (storageKey.startsWith(key) || storageKey.includes(key))) {
+        const foundVal = localStorage.getItem(storageKey);
+        if (foundVal !== null && foundVal.trim().length > 0) {
+          try { localStorage.setItem(scopedKey, foundVal); } catch (_) {}
+          return foundVal;
         }
       }
     }
@@ -89,6 +109,55 @@ export function getScopedStorageItem(key: string, legacyKey?: string): string | 
     console.warn(`Lỗi đọc localStorage cho key ${key}:`, e);
     return null;
   }
+}
+
+/**
+ * Tự động tìm kiếm và khôi phục tất cả danh sách truyện từ mọi vùng nhớ cũ trong localStorage
+ */
+export function recoverAllCachedNovels(): Array<{ id: string; name: string }> {
+  if (typeof window === 'undefined') return [{ id: 'default', name: 'Truyện mặc định' }];
+  
+  const novelMap = new Map<string, { id: string; name: string }>();
+
+  try {
+    // Quét tất cả các key trong localStorage tìm các danh sách truyện đã từng lưu
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && (k.includes('novel') || k.includes('cached_novels'))) {
+        try {
+          const raw = localStorage.getItem(k);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+              parsed.forEach((item: any) => {
+                if (item && typeof item === 'object' && item.id && item.name && typeof item.name === 'string') {
+                  novelMap.set(item.id, { id: String(item.id), name: String(item.name).trim() });
+                }
+              });
+            }
+          }
+        } catch (_) {}
+      }
+    }
+  } catch (e) {
+    console.warn("Lỗi quét localStorage phục hồi novels:", e);
+  }
+
+  // Nếu tìm thấy danh sách truyện cũ
+  if (novelMap.size > 0) {
+    // Nếu có truyện thực tế, loại bỏ 'default' nếu chỉ là placeholder
+    if (novelMap.size > 1 && novelMap.has('default') && novelMap.get('default')?.name === 'Truyện mặc định') {
+      novelMap.delete('default');
+    }
+    const recovered = Array.from(novelMap.values());
+    try {
+      const scopedKey = getScopedStorageKey('cached_novels_list');
+      localStorage.setItem(scopedKey, JSON.stringify(recovered));
+    } catch (_) {}
+    return recovered;
+  }
+
+  return [{ id: 'default', name: 'Truyện mặc định' }];
 }
 
 /**
