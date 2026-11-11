@@ -362,10 +362,11 @@ function AppContent() {
 
 
 
-  // Danh sách Novels (tự động khôi phục từ mọi vùng nhớ cũ)
+  // Danh sách Novels (tự động khôi phục đúng cho tài khoản đang dùng)
   const [novels, setNovels] = useState<Novel[]>(() => {
     try {
-      const recovered = recoverAllCachedNovels();
+      const uid = auth.currentUser?.uid;
+      const recovered = recoverAllCachedNovels(uid);
       if (Array.isArray(recovered) && recovered.length > 0) return recovered;
       return [{ id: 'default', name: 'Truyện mặc định' }];
     } catch (_) {
@@ -373,10 +374,11 @@ function AppContent() {
     }
   });
 
-  // Tự động khôi phục và di trú dữ liệu toàn diện từ IndexedDB ngay khi ứng dụng khởi chạy
+  // Tự động khôi phục dữ liệu IndexedDB của đúng tài khoản ngay khi ứng dụng khởi chạy
   useEffect(() => {
     let isMounted = true;
-    db.autoRecoverNovels().then((recoveredList) => {
+    const uid = auth.currentUser?.uid;
+    db.autoRecoverNovels(uid).then((recoveredList) => {
       if (isMounted && Array.isArray(recoveredList) && recoveredList.length > 0) {
         setNovels(recoveredList);
         if (!session.currentNovelId) {

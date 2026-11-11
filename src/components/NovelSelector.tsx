@@ -15,7 +15,8 @@ interface NovelSelectorProps {
 export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, onSelectNovel }) => {
   const [novels, setNovels] = useState<Novel[]>(() => {
     try {
-      const recovered = recoverAllCachedNovels();
+      const uid = auth.currentUser?.uid;
+      const recovered = recoverAllCachedNovels(uid);
       if (Array.isArray(recovered) && recovered.length > 0) return recovered;
       return [{ id: 'default', name: 'Truyện mặc định' }];
     } catch (e) {
@@ -29,7 +30,8 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, on
   // Khôi phục bền vững từ IndexedDB ngay khi component mount
   useEffect(() => {
     let isMounted = true;
-    db.autoRecoverNovels().then((recoveredList) => {
+    const uid = auth.currentUser?.uid;
+    db.autoRecoverNovels(uid).then((recoveredList) => {
       if (isMounted && Array.isArray(recoveredList) && recoveredList.length > 0) {
         setNovels(recoveredList);
         if (!currentNovelId) {
@@ -51,14 +53,17 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, on
           if (userCache) {
             const parsed = JSON.parse(userCache);
             if (Array.isArray(parsed) && parsed.length > 0) {
-              setNovels(parsed);
-              if (!currentNovelId) onSelectNovel(parsed[0].id);
+              const clean = parsed.filter((n: any) => n && n.name && !n.name.startsWith('Truyện (') && !n.name.startsWith('Bộ truyện '));
+              if (clean.length > 0) {
+                setNovels(clean);
+                if (!currentNovelId) onSelectNovel(clean[0].id);
+              }
             }
           }
         } catch (_) {}
         fetchNovels(user.uid);
       } else {
-        // Khi không đăng nhập: Khôi phục danh sách từ IndexedDB & localStorage, tuyệt đối KHÔNG xoá truyện cũ
+        // Khi không đăng nhập: Khôi phục danh sách từ IndexedDB & localStorage của khách
         try {
           const recovered = await db.autoRecoverNovels();
           if (Array.isArray(recovered) && recovered.length > 0) {

@@ -120,6 +120,12 @@ export function recoverAllCachedNovels(targetUid?: string): Array<{ id: string; 
   
   const novelMap = new Map<string, { id: string; name: string }>();
 
+  const isJunkName = (name: string) => {
+    if (!name) return true;
+    const trimmed = name.trim();
+    return trimmed.startsWith('Truyện (') || trimmed.startsWith('Bộ truyện ');
+  };
+
   try {
     if (targetUid) {
       // Khi đã đăng nhập: CHỈ đọc cache của chính targetUid này
@@ -134,7 +140,10 @@ export function recoverAllCachedNovels(targetUid?: string): Array<{ id: string; 
               if (Array.isArray(parsed)) {
                 parsed.forEach((item: any) => {
                   if (item && typeof item === 'object' && item.id && item.name && typeof item.name === 'string') {
-                    novelMap.set(item.id, { id: String(item.id), name: String(item.name).trim() });
+                    const cleanName = item.name.trim();
+                    if (!isJunkName(cleanName)) {
+                      novelMap.set(item.id, { id: String(item.id), name: cleanName });
+                    }
                   }
                 });
               }
@@ -143,7 +152,7 @@ export function recoverAllCachedNovels(targetUid?: string): Array<{ id: string; 
         }
       }
     } else {
-      // Khi chưa đăng nhập (khách): Chỉ đọc key cached_novels_list, TUYỆT ĐỐI BỎ QUA các key của tài khoản khác (cached_novels_<uid>)
+      // Khi chưa đăng nhập: Chỉ đọc key cached_novels_list
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
         if (k && (k === 'cached_novels_list' || k.startsWith('cached_novels_list_'))) {
@@ -154,7 +163,10 @@ export function recoverAllCachedNovels(targetUid?: string): Array<{ id: string; 
               if (Array.isArray(parsed)) {
                 parsed.forEach((item: any) => {
                   if (item && typeof item === 'object' && item.id && item.name && typeof item.name === 'string') {
-                    novelMap.set(item.id, { id: String(item.id), name: String(item.name).trim() });
+                    const cleanName = item.name.trim();
+                    if (!isJunkName(cleanName)) {
+                      novelMap.set(item.id, { id: String(item.id), name: cleanName });
+                    }
                   }
                 });
               }
@@ -167,7 +179,7 @@ export function recoverAllCachedNovels(targetUid?: string): Array<{ id: string; 
     console.warn("Lỗi quét localStorage phục hồi novels:", e);
   }
 
-  // Nếu tìm thấy danh sách truyện của chính tài khoản này
+  // Nếu tìm thấy danh sách truyện hợp lệ của chính tài khoản này
   if (novelMap.size > 0) {
     if (novelMap.size > 1 && novelMap.has('default') && novelMap.get('default')?.name === 'Truyện mặc định') {
       novelMap.delete('default');
