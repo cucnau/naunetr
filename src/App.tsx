@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { AppStatus, TranslationSession, HistoryItem, TranslationResponse, Chapter, TranslationSegment, Character, Relationship, CustomTerm, Novel } from './types';
 import { exportToExcel } from './services/excelService';
-import { getNovels, createNovel, deleteNovel, getChaptersFromCloud, saveChapterToCloud, bulkSaveChaptersToCloud, deleteChapterFromCloud, clearNovelChaptersFromCloud, syncFirestoreData, subscribeToChapters, subscribeToUserLiveWorkspace, saveUserLiveWorkspaceToCloud, getUserLiveWorkspaceFromCloud, isCloudQuotaExhausted, getDeviceId, RecoveredCloudData } from './services/firestoreService';
+import { getNovels, createNovel, deleteNovel, getChaptersFromCloud, bulkSaveChaptersToCloud, deleteChapterFromCloud, clearNovelChaptersFromCloud, syncFirestoreData, saveUserLiveWorkspaceToCloud, getUserLiveWorkspaceFromCloud, isCloudQuotaExhausted, RecoveredCloudData } from './services/firestoreService';
 import { SelectedLocalRestoreData } from './services/localExtractService';
 import { auth } from './services/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
@@ -20,7 +20,7 @@ import { AuthPanel } from './components/AuthPanel';
 import { NovelSelector } from './components/NovelSelector';
 import { FontSelectorModal } from './components/FontSelectorModal';
 import { initFont } from './services/fontService';
-import { BookOpen, Loader2, Eraser, Quote, Layout, History, AlertTriangle, Layers, FolderOpen, Keyboard, BookA, Users, X, Wifi, Scissors, CheckSquare, Square, Type, ExternalLink, FileText, Cloud, Check, Star, ChevronDown, CheckCircle2, RefreshCw } from 'lucide-react';
+import { BookOpen, Loader2, Eraser, Quote, Layout, History, AlertTriangle, Layers, FolderOpen, Keyboard, BookA, Users, X, Scissors, CheckSquare, Square, Type, ExternalLink, FileText, Cloud, Check, Star, ChevronDown, CheckCircle2, RefreshCw } from 'lucide-react';
 import { checkAndApplyShortcut, getStoredShortcuts, saveStoredShortcuts, isShortcutsEnabled, syncShortcutsFromCloud } from './services/shortcutService';
 import { handleSmartQuotesKeyDown, convertStraightToSmartQuotes } from './services/quoteUtils';
 import { getScopedStorageItem, setScopedStorageItem, recoverAllCachedNovels } from './services/storageNamespace';
@@ -325,17 +325,16 @@ function AppContent() {
 
   useEffect(() => {
     setShortcuts(getStoredShortcuts(session.currentNovelId));
-    if (session.currentNovelId) {
-      syncShortcutsFromCloud(session.currentNovelId).then(cloudList => {
-        if (cloudList) setShortcuts(cloudList);
-      }).catch(console.warn);
-    }
   }, [session.currentNovelId]);
 
   useEffect(() => {
-    const handleUpdate = () => {
+    const handleUpdate = (e: Event) => {
       setShortcuts(getStoredShortcuts(session.currentNovelId));
       setShortcutsEnabled(isShortcutsEnabled());
+      const detail = (e as CustomEvent)?.detail;
+      if (detail?.isLocalEdit) {
+        markLocalWorkspaceDirty();
+      }
     };
     window.addEventListener('shortcuts_updated', handleUpdate);
     window.addEventListener('shortcuts_toggle', handleUpdate);
@@ -363,9 +362,40 @@ function AppContent() {
   const localWorkspaceUpdatedAtRef = useRef<number>(
     Number(getScopedStorageItem('local_workspace_updated_at') || '0')
   );
-  const deletedChapterIdsRef = useRef<Set<string>>(new Set());
 
-  const [hasUnsyncedChanges, setHasUnsyncedChanges] = useState<boolean>(false);
+  const loadIdSetFromStorage = (key: string): Set<string> => {
+    try {
+      const raw = getScopedStorageItem(key);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return new Set(parsed.map(String));
+      }
+    } catch (_) {}
+    return new Set<string>();
+  };
+
+  const deletedChapterIdsRef = useRef<Set<string>>(loadIdSetFromStorage('deleted_chapter_ids'));
+  const deletedNovelIdsRef = useRef<Set<string>>(loadIdSetFromStorage('deleted_novel_ids'));
+
+  const persistDeletedIds = () => {
+    try {
+      setScopedStorageItem('deleted_chapter_ids', JSON.stringify(Array.from(deletedChapterIdsRef.current)));
+      setScopedStorageItem('deleted_novel_ids', JSON.stringify(Array.from(deletedNovelIdsRef.current)));
+    } catch (_) {}
+  };
+
+  const [hasUnsyncedChanges, setHasUnsyncedChanges] = useState<boolean>(() => {
+    try {
+      return getScopedStorageItem('has_unsynced_changes') === 'true';
+    } catch (_) {
+      return false;
+    }
+  });
+  const hasUnsyncedChangesRef = useRef<boolean>(hasUnsyncedChanges);
+  useEffect(() => {
+    hasUnsyncedChangesRef.current = hasUnsyncedChanges;
+  }, [hasUnsyncedChanges]);
+
   const [isSyncingToCloud, setIsSyncingToCloud] = useState<boolean>(false);
   const [syncToastMessage, setSyncToastMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
@@ -373,27 +403,56 @@ function AppContent() {
     const ts = timestamp || Date.now();
     lastLocalEditTimeRef.current = ts;
     localWorkspaceUpdatedAtRef.current = ts;
+    hasUnsyncedChangesRef.current = true;
     try {
       setScopedStorageItem('local_workspace_updated_at', String(ts));
+      setScopedStorageItem('has_unsynced_changes', 'true');
     } catch (_) {}
     setHasUnsyncedChanges(true);
   };
 
-  // Cảnh báo khi người dùng đóng tab mà quên chưa nhấn nút đồng bộ (không tự ý ghi đè 1 chiều)
+  const clearUnsyncedChanges = () => {
+    hasUnsyncedChangesRef.current = false;
+    try {
+      setScopedStorageItem('has_unsynced_changes', 'false');
+    } catch (_) {}
+    setHasUnsyncedChanges(false);
+  };
+
+  // Nhắc nhở người dùng nhấn nút đồng bộ khi định đóng tab / đóng app / tắt máy
   useEffect(() => {
+    const warnMsg = 'Bạn có thay đổi chưa được đồng bộ với Firestore! Hãy nhấn nút "Đồng bộ Firestore" trước khi đóng tab, thoát app hoặc tắt máy.';
+
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (hasUnsyncedChanges && (currentUser || auth.currentUser)) {
+      if (hasUnsyncedChangesRef.current) {
         e.preventDefault();
-        e.returnValue = 'Bạn có dữ liệu chưa được đồng bộ với Firestore! Hãy nhấn nút "Đồng bộ Firestore" trước khi đóng tab.';
-        return e.returnValue;
+        e.returnValue = warnMsg;
+        return warnMsg;
+      }
+    };
+
+    const handleVisibilityOrPageHide = () => {
+      if (document.visibilityState === 'hidden') {
+        try {
+          setScopedStorageItem('has_unsynced_changes', hasUnsyncedChangesRef.current ? 'true' : 'false');
+        } catch (_) {}
+      } else if (document.visibilityState === 'visible' && hasUnsyncedChangesRef.current) {
+        setSyncToastMessage({
+          type: 'info',
+          text: 'Nhắc nhở: Bạn vẫn còn dữ liệu chưa đồng bộ lên Firestore. Hãy nhấn "Đồng bộ Firestore" trước khi thoát app hoặc tắt máy!'
+        });
       }
     };
 
     window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('pagehide', handleVisibilityOrPageHide);
+    document.addEventListener('visibilitychange', handleVisibilityOrPageHide);
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('pagehide', handleVisibilityOrPageHide);
+      document.removeEventListener('visibilitychange', handleVisibilityOrPageHide);
     };
-  }, [hasUnsyncedChanges, currentUser]);
+  }, []);
   const [novels, setNovels] = useState<Novel[]>(() => {
     try {
       const uid = auth.currentUser?.uid;
@@ -421,234 +480,39 @@ function AppContent() {
     return () => { isMounted = false; };
   }, []);
 
-  // Tự động ĐỒNG BỘ 2 CHIỀU giữa Local và Firestore cho từng tài khoản và khôi phục ĐÚNG TIẾN ĐỘ THỰC TẾ
+  // Chỉ nạp dữ liệu CỤC BỘ theo đúng tài khoản khi đăng nhập/khởi chạy (KHÔNG tự động gọi Firestore để tiết kiệm quota)
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
       if (user) {
         try {
-          // BƯỚC 1: HỢP NHẤT 2 CHIỀU DANH SÁCH TRUYỆN (Local <-> Cloud Firestore)
           const userLocal = await db.autoRecoverNovels(user.uid);
-          let cloudNovels: Novel[] = [];
-          if (!isCloudQuotaExhausted()) {
-            try {
-              cloudNovels = await getNovels();
-            } catch (err) {
-              console.warn("Không thể lấy danh sách truyện từ Cloud (sử dụng bản lưu máy):", err);
+          const filteredLocal = (userLocal || []).filter((n) => n && n.id && n.name && !deletedNovelIdsRef.current.has(n.id));
+          if (filteredLocal.length > 0) {
+            setNovels(filteredLocal);
+            const nonDefault = filteredLocal.find((n) => n.id !== 'default');
+            const targetId =
+              session.currentNovelId &&
+              session.currentNovelId !== 'default' &&
+              filteredLocal.some((n) => n.id === session.currentNovelId)
+                ? session.currentNovelId
+                : nonDefault
+                ? nonDefault.id
+                : filteredLocal[0].id;
+            if (targetId && targetId !== session.currentNovelId) {
+              setSession((prev) => ({ ...prev, currentNovelId: targetId }));
+              db.saveCurrentNovelId(targetId).catch(console.error);
             }
           }
-
-          const novelMap = new Map<string, Novel>();
-          (userLocal || []).forEach(n => {
-            if (n && n.id && n.name) novelMap.set(n.id, n);
-          });
-          (cloudNovels || []).forEach(n => {
-            if (n && n.id && n.name) novelMap.set(n.id, n);
-          });
-
-          if (novelMap.size > 1 && novelMap.has('default')) {
-            novelMap.delete('default');
-          }
-
-          // Đẩy các bộ truyện chỉ có ở Local lên Firestore (nếu cloud chưa hết quota)
-          if (!isCloudQuotaExhausted()) {
-            (userLocal || []).forEach(n => {
-              if (n && n.id && n.name && !cloudNovels.some(cn => cn.id === n.id)) {
-                if (n.id !== 'default') {
-                  createNovel(n.id, n.name).catch(console.warn);
-                }
-              }
-            });
-          }
-
-          const effectiveNovels = Array.from(novelMap.values());
-          let currentTargetNovelId = session.currentNovelId;
-
-          if (effectiveNovels.length > 0) {
-            setNovels(effectiveNovels);
-            await db.saveNovels(effectiveNovels, user.uid);
-            setScopedStorageItem(`cached_novels_${user.uid}`, JSON.stringify(effectiveNovels));
-            setScopedStorageItem('cached_novels_list', JSON.stringify(effectiveNovels));
-
-            const nonDefault = effectiveNovels.find(n => n.id !== 'default');
-            const targetId = (session.currentNovelId && session.currentNovelId !== 'default' && effectiveNovels.some(n => n.id === session.currentNovelId))
-              ? session.currentNovelId
-              : (nonDefault ? nonDefault.id : effectiveNovels[0].id);
-            currentTargetNovelId = targetId;
-          }
-
-          // BƯỚC 2: HỢP NHẤT 2 CHIỀU TIẾN ĐỘ THỰC TẾ (Local <-> Cloud theo timestamp thật)
-          const savedLocalSession = await db.getActiveSession();
-          let liveWorkspace: any = null;
-
-          if (!isCloudQuotaExhausted()) {
-            try {
-              liveWorkspace = await getUserLiveWorkspaceFromCloud();
-            } catch (err) {
-              console.warn("Không thể tải Live Workspace từ Cloud (sử dụng bản lưu máy):", err);
-            }
-          }
-
-          const activeInput = session.inputText?.trim() || savedLocalSession?.inputText?.trim() || '';
-          const activeSegments = session.result?.segments?.length || savedLocalSession?.result?.segments?.length || 0;
-          const hasLocalWork = Boolean(activeInput.length > 0 || activeSegments > 0);
-          const hasCloudWork = Boolean((liveWorkspace?.inputText && liveWorkspace.inputText.trim().length > 0) || (liveWorkspace?.result?.segments && liveWorkspace.result.segments.length > 0));
-
-          const localTime = localWorkspaceUpdatedAtRef.current || 0;
-          const cloudTime = liveWorkspace?.updatedAt || 0;
-
-          if (hasCloudWork && liveWorkspace && (!hasLocalWork || cloudTime > localTime)) {
-            // Cloud mới hơn hoặc Local đang trống -> Kéo từ Cloud về
-            const targetNovel = (liveWorkspace.novelId && effectiveNovels.some(n => n.id === liveWorkspace.novelId))
-              ? liveWorkspace.novelId
-              : (currentTargetNovelId || 'default');
-            
-            currentTargetNovelId = targetNovel;
-
-            let restoredResult = liveWorkspace.result ? sanitizeResult(liveWorkspace.result) : null;
-            if (!restoredResult && liveWorkspace.segments && liveWorkspace.segments.length > 0) {
-              restoredResult = {
-                segments: liveWorkspace.segments,
-                naturalTranslation: liveWorkspace.segments.map((s: any) => s.natural).join('\n'),
-                quickTrans: liveWorkspace.segments.map((s: any) => s.quick).join('\n'),
-                sinoVietnamese: '',
-                deeplTranslation: liveWorkspace.segments.map((s: any) => s.deepl).join('\n'),
-                vocabulary: []
-              };
-            }
-
-            const restoredSession: TranslationSession = {
-              ...session,
-              currentNovelId: targetNovel,
-              currentChapterId: liveWorkspace.chapterId || undefined,
-              inputText: liveWorkspace.inputText || '',
-              deeplText: liveWorkspace.deeplText || '',
-              preEditedText: liveWorkspace.preEditedText || '',
-              result: restoredResult,
-              status: (liveWorkspace.status as AppStatus) || (restoredResult ? AppStatus.SUCCESS : AppStatus.IDLE),
-              completedSegments: liveWorkspace.completedSegments || []
-            };
-
-            localWorkspaceUpdatedAtRef.current = cloudTime || Date.now();
-            try {
-              setScopedStorageItem('local_workspace_updated_at', String(localWorkspaceUpdatedAtRef.current));
-            } catch (_) {}
-
-            setSession(restoredSession);
-            db.saveActiveSession(restoredSession).catch(console.error);
-          } else if (hasLocalWork && (!hasCloudWork || localTime > cloudTime)) {
-            // Local có chỉnh sửa mới hơn hoặc Cloud trống -> Giữ Local và đẩy lên Cloud
-            const effectiveSession = (session.inputText?.trim().length > 0 || session.result?.segments?.length) ? session : savedLocalSession;
-            if (effectiveSession) {
-              if (currentTargetNovelId && effectiveSession.currentNovelId !== currentTargetNovelId) {
-                effectiveSession.currentNovelId = currentTargetNovelId;
-              }
-              setSession(prev => ({
-                ...prev,
-                ...effectiveSession,
-                currentNovelId: currentTargetNovelId || prev.currentNovelId
-              }));
-              if (!isCloudQuotaExhausted() && currentTargetNovelId) {
-                saveUserLiveWorkspaceToCloud({
-                  novelId: currentTargetNovelId,
-                  chapterId: effectiveSession.currentChapterId,
-                  inputText: effectiveSession.inputText,
-                  deeplText: effectiveSession.deeplText,
-                  preEditedText: effectiveSession.preEditedText,
-                  result: effectiveSession.result,
-                  completedSegments: effectiveSession.completedSegments,
-                  status: effectiveSession.status,
-                  updatedAt: localTime || Date.now()
-                }, true).catch(console.warn);
-              }
-            }
-          } else if (currentTargetNovelId) {
-            setSession(prev => ({ ...prev, currentNovelId: currentTargetNovelId }));
-          }
-
-          // BƯỚC 3: ĐỒNG BỘ 2 CHIỀU KHO CHƯƠNG (Local <-> Cloud)
-          if (currentTargetNovelId && currentTargetNovelId !== 'default') {
-            const allLocalChaps = await db.getAllChapters();
-            const localChaps = (allLocalChaps || []).filter(c => !c.novelId || c.novelId === currentTargetNovelId);
-
-            let cloudChaps: Chapter[] = [];
-            if (!isCloudQuotaExhausted()) {
-              try {
-                cloudChaps = await getChaptersFromCloud(currentTargetNovelId);
-              } catch (err) {
-                console.warn("Không thể tải chương từ Cloud:", err);
-              }
-            }
-
-            const mergedMap = new Map<string, Chapter>();
-            const chapsToUpload: Chapter[] = [];
-            const chapsToSaveDb: Chapter[] = [];
-
-            const localMap = new Map<string, Chapter>();
-            localChaps.forEach(c => localMap.set(c.id, c));
-
-            (cloudChaps || []).forEach(cloudCh => {
-              const localCh = localMap.get(cloudCh.id);
-              const { selected, shouldSyncToCloud } = resolveChapterConflict(localCh, cloudCh);
-              mergedMap.set(cloudCh.id, selected);
-              if (selected === cloudCh && (!localCh || (cloudCh.timestamp || 0) > (localCh.timestamp || 0) || (cloudCh.result?.segments?.length || 0) > (localCh.result?.segments?.length || 0))) {
-                chapsToSaveDb.push(cloudCh);
-              } else if (shouldSyncToCloud) {
-                chapsToUpload.push(selected);
-              }
-            });
-
-            localChaps.forEach(localCh => {
-              if (!mergedMap.has(localCh.id)) {
-                const chapToSave: Chapter = { ...localCh, novelId: currentTargetNovelId };
-                mergedMap.set(localCh.id, chapToSave);
-                chapsToUpload.push(chapToSave);
-              }
-            });
-
-            for (const ch of chapsToSaveDb) {
-              await db.saveChapter(ch);
-            }
-
-            if (chapsToUpload.length > 0 && !isCloudQuotaExhausted()) {
-              bulkSaveChaptersToCloud(chapsToUpload).catch(console.warn);
-            }
-
-            const finalChaps = Array.from(mergedMap.values()).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-            setChapters(prev => {
-              const others = prev.filter(c => c.novelId && c.novelId !== currentTargetNovelId);
-              return [...finalChaps, ...others];
-            });
-
-            setSession(prev => {
-              const hasWork = Boolean((prev.inputText && prev.inputText.trim().length > 0) || (prev.result?.segments && prev.result.segments.length > 0));
-              if (!hasWork && finalChaps.length > 0) {
-                const latestChapter = finalChaps[0];
-                return {
-                  ...prev,
-                  currentNovelId: currentTargetNovelId,
-                  currentChapterId: latestChapter.id,
-                  inputText: latestChapter.inputText || '',
-                  deeplText: latestChapter.deeplText || '',
-                  preEditedText: latestChapter.preEditedText || '',
-                  result: latestChapter.result ? sanitizeResult(latestChapter.result) : null,
-                  status: latestChapter.result ? AppStatus.SUCCESS : AppStatus.IDLE,
-                  completedSegments: latestChapter.completedSegments || []
-                };
-              }
-              return prev;
-            });
-          }
-
-          setTimeout(() => setHasUnsyncedChanges(false), 500);
         } catch (e) {
-          console.warn("Lỗi khởi tạo đồng bộ dữ liệu:", e);
+          console.warn("Lỗi nạp dữ liệu cục bộ cho tài khoản:", e);
         }
       } else {
         try {
           const guestNovels = await db.autoRecoverNovels();
-          if (Array.isArray(guestNovels) && guestNovels.length > 0) {
-            setNovels(guestNovels);
+          const filteredGuest = (guestNovels || []).filter((n) => n && n.id && n.name && !deletedNovelIdsRef.current.has(n.id));
+          if (filteredGuest.length > 0) {
+            setNovels(filteredGuest);
           }
         } catch (_) {}
       }
@@ -656,13 +520,17 @@ function AppContent() {
     return () => unsub();
   }, []);
 
-  // Handler tạo truyện mới
+  // Handler tạo truyện mới (chỉ lưu cục bộ, đồng bộ lên Firestore khi người dùng nhấn nút Đồng bộ)
   const handleCreateNovel = async (name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
     const newId = `novel_${Date.now()}`;
-    const newNovel: Novel = { id: newId, name };
+    const newNovel: Novel = { id: newId, name: trimmed };
     const filteredOld = novels.filter(n => !(n.id === 'default' && n.name === 'Truyện mặc định' && novels.length === 1));
     const updatedNovels = [...filteredOld, newNovel];
 
+    deletedNovelIdsRef.current.delete(newId);
+    persistDeletedIds();
     markLocalWorkspaceDirty();
     setNovels(updatedNovels);
     setSession(prev => ({
@@ -675,75 +543,103 @@ function AppContent() {
       preEditedText: ''
     }));
 
-    // Lưu bền vững vào cả IndexedDB lẫn LocalStorage theo tài khoản này
     const uid = auth.currentUser?.uid;
     await db.saveNovels(updatedNovels, uid);
+    await db.saveNovels(updatedNovels);
     await db.saveCurrentNovelId(newId);
     if (uid) {
       setScopedStorageItem(`cached_novels_${uid}`, JSON.stringify(updatedNovels));
     }
     setScopedStorageItem('cached_novels_list', JSON.stringify(updatedNovels));
-
-    try {
-      if (auth.currentUser) {
-        await createNovel(newId, name);
-      }
-    } catch (e) {
-      console.warn("Lưu truyện lên Cloud lỗi, đã lưu an toàn trên máy:", e);
-    }
   };
 
+  // Handler đổi tên truyện (chỉ lưu cục bộ, đồng bộ lên Firestore khi người dùng nhấn nút Đồng bộ)
   const handleRenameNovel = async (id: string, newName: string) => {
+    const trimmed = newName.trim();
+    if (!trimmed) return;
     markLocalWorkspaceDirty();
-    const updated = novels.map(n => n.id === id ? { ...n, name: newName } : n);
+    const updated = novels.map(n => n.id === id ? { ...n, name: trimmed } : n);
     setNovels(updated);
-    await db.saveNovels(updated, auth.currentUser?.uid);
+    const uid = auth.currentUser?.uid;
+    await db.saveNovels(updated, uid);
+    await db.saveNovels(updated);
+    if (uid) {
+      setScopedStorageItem(`cached_novels_${uid}`, JSON.stringify(updated));
+    }
     setScopedStorageItem('cached_novels_list', JSON.stringify(updated));
-
-    try {
-      if (auth.currentUser && id !== 'default') {
-        await createNovel(id, newName);
-      }
-    } catch (_) {}
   };
 
+  // Handler xóa truyện triệt để trên máy (xóa danh sách + xóa toàn bộ chương trong IndexedDB để không tự phục hồi)
   const handleDeleteNovel = async (id: string) => {
     markLocalWorkspaceDirty();
-    let nextCurrentId = session.currentNovelId;
+
+    if (id && id !== 'default') {
+      deletedNovelIdsRef.current.add(id);
+    }
+
+    // Xóa toàn bộ chương của truyện này khỏi IndexedDB và đánh dấu để đồng bộ xóa lên Firestore khi bấm Đồng bộ
+    try {
+      const allDbChapters = await db.getAllChapters();
+      const chapsOfNovel = (allDbChapters || []).filter(
+        c => c.novelId === id || (id === 'default' && !c.novelId)
+      );
+      for (const ch of chapsOfNovel) {
+        deletedChapterIdsRef.current.add(ch.id);
+        await db.deleteChapter(ch.id);
+      }
+    } catch (e) {
+      console.warn("Lỗi xóa chương của truyện trong IndexedDB:", e);
+    }
+    persistDeletedIds();
+
     const remaining = novels.filter(n => n.id !== id);
-    const finalNovels = remaining.length > 0 ? remaining : [{ id: `novel_${Date.now()}`, name: 'Thư mục mới' }];
-    nextCurrentId = finalNovels[0].id;
-    
+    const finalNovels: Novel[] = remaining.length > 0 ? remaining : [{ id: 'default', name: 'Truyện mặc định' }];
+    const nextCurrentId = session.currentNovelId === id ? finalNovels[0].id : (session.currentNovelId || finalNovels[0].id);
+
     setNovels(finalNovels);
     const uid = auth.currentUser?.uid;
     await db.saveNovels(finalNovels, uid);
+    await db.saveNovels(finalNovels);
+    await db.saveCurrentNovelId(nextCurrentId);
     if (uid) {
       setScopedStorageItem(`cached_novels_${uid}`, JSON.stringify(finalNovels));
-    } else {
-      setScopedStorageItem('cached_novels_list', JSON.stringify(finalNovels));
     }
+    setScopedStorageItem('cached_novels_list', JSON.stringify(finalNovels));
 
-    setSession(prev => ({
-      ...prev,
-      currentNovelId: nextCurrentId,
-      currentChapterId: undefined,
-      result: null,
-      inputText: '',
-      deeplText: '',
-      preEditedText: ''
-    }));
+    // Dọn các dữ liệu phụ thuộc truyện vừa xóa trong bộ nhớ cục bộ
+    const remainingTerms = (session.customTerms || []).filter(t => t.novelId !== id && (id !== 'default' || t.novelId));
+    const remainingChars = (session.characters || []).filter(c => c.novelId !== id && (id !== 'default' || c.novelId));
+    const remainingRels = (session.relationships || []).filter(r => r.novelId !== id && (id !== 'default' || r.novelId));
+    await db.bulkSaveCustomTerms(remainingTerms).catch(console.warn);
+    await db.saveCharacters(remainingChars).catch(console.warn);
+    saveStoredShortcuts([], id, true);
 
-    // Cập nhật danh sách chương: xóa các chương thuộc truyện bị xóa
-    setChapters(prev => {
-      const remainingChaps = prev.filter(c => c.novelId !== id && (id !== 'default' || c.novelId));
-      return remainingChaps;
-    });
+    setChapters(prev => prev.filter(c => c.novelId !== id && (id !== 'default' || c.novelId)));
 
-    try {
-      if (auth.currentUser && id !== 'default') {
-        await deleteNovel(id);
-      }
-    } catch (_) {}
+    if (session.currentNovelId === id) {
+      setSession(prev => ({
+        ...prev,
+        currentNovelId: nextCurrentId,
+        currentChapterId: undefined,
+        currentHistoryId: undefined,
+        result: null,
+        inputText: '',
+        deeplText: '',
+        preEditedText: '',
+        completedSegments: [],
+        status: AppStatus.IDLE,
+        customTerms: remainingTerms,
+        characters: remainingChars,
+        relationships: remainingRels
+      }));
+    } else {
+      setSession(prev => ({
+        ...prev,
+        customTerms: remainingTerms,
+        characters: remainingChars,
+        relationships: remainingRels
+      }));
+    }
   };
 
 
@@ -877,264 +773,8 @@ useEffect(() => {
     vietphraseEngine.setGlobalCustomMap(map);
   }, [session.characters, session.customTerms, currentNovelCharacters, currentNovelTerms]);
 
-  // Tự động tải và ĐỒNG BỘ THỜI GIAN THỰC (Real-time) Toàn bộ Không gian làm việc (Truyện đang chọn, Bảng edit chương kể cả chưa lưu kho)
-  useEffect(() => {
-    let isMounted = true;
-    let unsubscribeChaptersRealtime: (() => void) | null = null;
-    let unsubscribeUserLiveWorkspace: (() => void) | null = null;
-
-    const setupRealtimeSync = async () => {
-      const user = auth.currentUser;
-      if (!user) return;
-
-      try {
-        // 1. LẮNG NGHE TOÀN DIỆN KHÔNG GIAN LÀM VIỆC CỦA NGƯỜI DÙNG (Active Novel + Active Editing Table)
-        if (unsubscribeUserLiveWorkspace) unsubscribeUserLiveWorkspace();
-        unsubscribeUserLiveWorkspace = subscribeToUserLiveWorkspace((liveData) => {
-          if (!isMounted) return;
-
-          // Chỉ áp dụng khi thay đổi đến từ THIẾT BỊ KHÁC (Laptop ⇄ Điện thoại)
-          if (liveData.deviceId && liveData.deviceId !== getDeviceId()) {
-            // Nếu người dùng trên thiết bị này vừa bấm gõ trong vòng 350ms, tránh giật lag con trỏ
-            if (Date.now() - lastLocalEditTimeRef.current < 350) return;
-
-            setLastRemoteSyncTime(Date.now());
-            const remoteTs = liveData.updatedAt || Date.now();
-            localWorkspaceUpdatedAtRef.current = remoteTs;
-            try {
-              setScopedStorageItem('local_workspace_updated_at', String(remoteTs));
-            } catch (_) {}
-
-            // Tự động chuyển bộ truyện nếu thiết bị khác vừa chuyển bộ truyện
-            if (liveData.novelId) {
-              db.saveCurrentNovelId(liveData.novelId).catch(console.error);
-            }
-
-            setSession(prev => {
-              // BẢO VỆ TUYỆT ĐỐI BẢN THẢO ĐANG EDIT / BETA CỤC BỘ
-              const hasLocalWork = Boolean((prev.inputText && prev.inputText.trim().length > 0) || (prev.result?.segments && prev.result.segments.length > 0) || (prev.preEditedText && prev.preEditedText.trim().length > 0));
-              const hasRemoteWork = Boolean((liveData.inputText && liveData.inputText.trim().length > 0) || (liveData.result?.segments && liveData.result.segments.length > 0) || (liveData.preEditedText && liveData.preEditedText.trim().length > 0));
-
-              // Nếu máy này đang có bản thảo đang edit/beta dở mà dữ liệu từ xa gửi tới lại rỗng:
-              // TUYỆT ĐỐI KHÔNG ĐÈ LÊN LÀM MẤT BẢN THẢO CỤC BỘ!
-              if (hasLocalWork && !hasRemoteWork) {
-                return prev;
-              }
-
-              // Nếu dữ liệu từ xa gửi tới thuộc bộ truyện khác nhưng máy này đang có bản thảo chưa lưu:
-              // Giữ nguyên bản thảo hiện tại, không tự ý nhảy truyện
-              if (liveData.novelId && prev.currentNovelId && liveData.novelId !== prev.currentNovelId && hasLocalWork) {
-                return prev;
-              }
-
-              const targetNovelId = liveData.novelId || prev.currentNovelId;
-              const targetChapterId = liveData.chapterId !== undefined ? (liveData.chapterId || undefined) : prev.currentChapterId;
-              const targetCompleted = liveData.completedSegments !== undefined ? liveData.completedSegments : prev.completedSegments;
-
-              let targetResult = prev.result;
-              if (liveData.result !== undefined) {
-                targetResult = liveData.result ? sanitizeResult(liveData.result) : null;
-              } else if (liveData.segments && liveData.segments.length > 0) {
-                if (prev.result) {
-                  targetResult = {
-                    ...prev.result,
-                    segments: liveData.segments,
-                    naturalTranslation: liveData.segments.map(s => s.natural).join('\n')
-                  };
-                }
-              }
-
-              let targetStatus = prev.status;
-              if (liveData.status) {
-                targetStatus = liveData.status as AppStatus;
-              } else if (targetResult) {
-                targetStatus = AppStatus.SUCCESS;
-              } else if (liveData.inputText) {
-                targetStatus = AppStatus.IDLE;
-              }
-
-              return {
-                ...prev,
-                currentNovelId: targetNovelId,
-                currentChapterId: targetChapterId,
-                inputText: liveData.inputText !== undefined ? liveData.inputText : prev.inputText,
-                deeplText: liveData.deeplText !== undefined ? liveData.deeplText : prev.deeplText,
-                preEditedText: liveData.preEditedText !== undefined ? liveData.preEditedText : prev.preEditedText,
-                result: targetResult,
-                status: targetStatus,
-                completedSegments: targetCompleted
-              };
-            });
-          }
-        });
-
-        // 2. Tải và lắng nghe thời gian thực Kho chương của bộ truyện đang chọn
-        const currentNovelId = session.currentNovelId;
-        if (currentNovelId) {
-          const cloudChapters = await getChaptersFromCloud(currentNovelId);
-          if (!isMounted) return;
-
-          const allCurrentChapters = await db.getAllChapters();
-          const localChaptersForNovel = (allCurrentChapters || []).filter(c => !c.novelId || c.novelId === currentNovelId);
-          const localMap = new Map<string, Chapter>();
-          localChaptersForNovel.forEach(c => localMap.set(c.id, c));
-
-          const mergedMap = new Map<string, Chapter>();
-          const chaptersToSaveToDb: Chapter[] = [];
-          const chaptersToSyncToCloud: Chapter[] = [];
-
-          // So sánh từng chương Cloud với Local để chọn bản đầy đủ và mới nhất
-          (cloudChapters || []).forEach(cloudCh => {
-            const localCh = localMap.get(cloudCh.id);
-            const { selected, shouldSyncToCloud } = resolveChapterConflict(localCh, cloudCh);
-            mergedMap.set(cloudCh.id, selected);
-            if (selected === cloudCh && !localCh) {
-              chaptersToSaveToDb.push(cloudCh);
-            } else if (shouldSyncToCloud && localCh) {
-              chaptersToSyncToCloud.push(localCh);
-            }
-          });
-
-          // Giữ lại các chương Local chưa có trên Cloud
-          localChaptersForNovel.forEach(localCh => {
-            if (!mergedMap.has(localCh.id)) {
-              mergedMap.set(localCh.id, localCh);
-              chaptersToSyncToCloud.push(localCh);
-            }
-          });
-
-          // Lưu các chương hợp lệ mới vào IndexedDB
-          for (const ch of chaptersToSaveToDb) {
-            await db.saveChapter(ch);
-          }
-          // Đẩy các chương Local đầy đủ hơn hoặc chưa có lên Cloud
-          if (chaptersToSyncToCloud.length > 0) {
-            bulkSaveChaptersToCloud(chaptersToSyncToCloud).catch(console.warn);
-          }
-
-          const mergedList = Array.from(mergedMap.values())
-            .filter(c => {
-              if (c.id.startsWith('auto_') && (!c.result?.segments || c.result.segments.length === 0)) {
-                db.deleteChapter(c.id).catch(() => {});
-                deleteChapterFromCloud(c.id).catch(() => {});
-                return false;
-              }
-              return true;
-            })
-            .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-
-          if (isMounted) {
-            setChapters(prev => {
-              const otherNovelsChapters = prev.filter(c => c.novelId && c.novelId !== currentNovelId);
-              return [...mergedList, ...otherNovelsChapters];
-            });
-          }
-
-          if (unsubscribeChaptersRealtime) unsubscribeChaptersRealtime();
-          unsubscribeChaptersRealtime = subscribeToChapters(currentNovelId, async (realtimeChapters) => {
-            if (!isMounted) return;
-
-            const currentDbChapters = await db.getAllChapters();
-            const localDbMap = new Map<string, Chapter>();
-            currentDbChapters.forEach(c => {
-              if (!c.novelId || c.novelId === currentNovelId) {
-                localDbMap.set(c.id, c);
-              }
-            });
-
-            const resolvedRealtimeMap = new Map<string, Chapter>();
-            const toSaveDb: Chapter[] = [];
-
-            realtimeChapters.forEach(cloudCh => {
-              if (deletedChapterIdsRef.current.has(cloudCh.id)) return;
-              const localCh = localDbMap.get(cloudCh.id);
-              const { selected } = resolveChapterConflict(localCh, cloudCh);
-              resolvedRealtimeMap.set(cloudCh.id, selected);
-
-              // Chỉ lưu vào IndexedDB nếu bản Cloud thực sự mới hơn bản Local
-              if (selected === cloudCh && (!localCh || (cloudCh.timestamp || 0) > (localCh.timestamp || 0))) {
-                toSaveDb.push(cloudCh);
-              }
-            });
-
-            // Bảo vệ 100% các chương có trong Local mà Cloud chưa nhận hoặc thiếu
-            localDbMap.forEach((localCh, id) => {
-              if (!resolvedRealtimeMap.has(id)) {
-                resolvedRealtimeMap.set(id, localCh);
-              }
-            });
-
-            for (const ch of toSaveDb) {
-              await db.saveChapter(ch);
-            }
-
-            setChapters(prev => {
-              const otherNovelsChapters = prev.filter(c => c.novelId && c.novelId !== currentNovelId);
-              const mergedCurrent = Array.from(resolvedRealtimeMap.values())
-                .filter(c => !deletedChapterIdsRef.current.has(c.id))
-                .filter(c => !(c.id.startsWith('auto_') && (!c.result?.segments || c.result.segments.length === 0)))
-                .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-              return [...mergedCurrent, ...otherNovelsChapters];
-            });
-          });
-        }
-
-      } catch (err) {
-        console.error("Lỗi khởi tạo đồng bộ thời gian thực:", err);
-      }
-    };
-
-    setupRealtimeSync();
-    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
-      if (user) setupRealtimeSync();
-    });
-
-    return () => {
-      isMounted = false;
-      if (unsubscribeChaptersRealtime) unsubscribeChaptersRealtime();
-      if (unsubscribeUserLiveWorkspace) unsubscribeUserLiveWorkspace();
-      unsubscribeAuth();
-    };
-  }, [session.currentNovelId]);
-
-  // Tự động tải và đồng bộ Từ vựng của truyện hiện tại từ Cloud Firestore
-  useEffect(() => {
-    let isMounted = true;
-    const fetchCloudVocab = async () => {
-      const user = auth.currentUser;
-      if (!user || !session.currentNovelId) return;
-      try {
-        const cloudTerms = await syncFirestoreData<any>('vocab', session.currentNovelId, 'GET');
-        if (!isMounted || !cloudTerms || cloudTerms.length === 0) return;
-        
-        setSession(prev => {
-          const currentId = session.currentNovelId;
-          const otherTerms = (prev.customTerms || []).filter(t => t.novelId && t.novelId !== currentId);
-          const localNovelTerms = (prev.customTerms || []).filter(t => t.novelId === currentId);
-          
-          const termMap = new Map<string, any>();
-          localNovelTerms.forEach(t => termMap.set(t.id, t));
-          cloudTerms.forEach(t => termMap.set(t.id, { ...t, novelId: currentId }));
-          
-          const merged = [...Array.from(termMap.values()), ...otherTerms];
-          db.bulkSaveCustomTerms(merged).catch(console.error);
-          return { ...prev, customTerms: merged };
-        });
-      } catch (err) {
-        console.warn("Auto sync vocab in App error:", err);
-      }
-    };
-
-    fetchCloudVocab();
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (user) fetchCloudVocab();
-    });
-
-    return () => {
-      isMounted = false;
-      unsubscribe();
-    };
-  }, [session.currentNovelId]);
+  // Đã tắt hoàn toàn lắng nghe thời gian thực / tự động tải Firestore để không tốn quota.
+  // Dữ liệu chỉ đồng bộ khi người dùng chủ động nhấn nút "Đồng bộ Firestore".
 
   // Tu dong khoi phuc lai cac dong doi chieu neu dang o tinh trang rong segments (chi khi da tung dich xong va co ban dich)
   useEffect(() => {
@@ -1254,6 +894,21 @@ useEffect(() => {
     setSyncToastMessage({ type: 'info', text: 'Đang đồng bộ 2 chiều giữa máy và Firestore...' });
 
     try {
+      // 0. XÓA TRÊN FIRESTORE CÁC TRUYỆN / CHƯƠNG MÀ NGƯỜI DÙNG ĐÃ XÓA CỤC BỘ
+      if (!isCloudQuotaExhausted()) {
+        for (const delNovelId of Array.from(deletedNovelIdsRef.current)) {
+          if (delNovelId && delNovelId !== 'default') {
+            await deleteNovel(delNovelId).catch(console.warn);
+            await clearNovelChaptersFromCloud(delNovelId).catch(console.warn);
+          }
+        }
+        for (const delChapId of Array.from(deletedChapterIdsRef.current)) {
+          if (delChapId) {
+            await deleteChapterFromCloud(delChapId).catch(console.warn);
+          }
+        }
+      }
+
       // 1. ĐỒNG BỘ 2 CHIỀU DANH SÁCH TRUYỆN
       const [cloudNovels, localDbNovels] = await Promise.all([
         getNovels().catch(() => [] as Novel[]),
@@ -1261,14 +916,15 @@ useEffect(() => {
       ]);
 
       const mergedNovelsMap = new Map<string, Novel>();
-      (novels || []).forEach(n => {
-        if (n && n.id && n.name) mergedNovelsMap.set(n.id, n);
-      });
       (localDbNovels || []).forEach(n => {
-        if (n && n.id && n.name) mergedNovelsMap.set(n.id, n);
+        if (n && n.id && n.name && !deletedNovelIdsRef.current.has(n.id)) mergedNovelsMap.set(n.id, n);
       });
       (cloudNovels || []).forEach(n => {
-        if (n && n.id && n.name) mergedNovelsMap.set(n.id, n);
+        if (n && n.id && n.name && !deletedNovelIdsRef.current.has(n.id)) mergedNovelsMap.set(n.id, n);
+      });
+      // Đặt danh sách hiện tại trên UI sau cùng để bảo toàn việc đổi tên truyện ở máy
+      (novels || []).forEach(n => {
+        if (n && n.id && n.name && !deletedNovelIdsRef.current.has(n.id)) mergedNovelsMap.set(n.id, n);
       });
 
       if (mergedNovelsMap.size > 1 && mergedNovelsMap.has('default')) {
@@ -1279,13 +935,15 @@ useEffect(() => {
       if (mergedNovels.length > 0) {
         setNovels(mergedNovels);
         await db.saveNovels(mergedNovels, user.uid);
+        await db.saveNovels(mergedNovels);
         setScopedStorageItem(`cached_novels_${user.uid}`, JSON.stringify(mergedNovels));
         setScopedStorageItem('cached_novels_list', JSON.stringify(mergedNovels));
 
-        // Đẩy lên Cloud những bộ truyện chỉ có ở Local
+        // Đẩy lên Cloud những bộ truyện mới hoặc vừa đổi tên ở Local
         if (!isCloudQuotaExhausted()) {
           for (const novel of mergedNovels) {
-            if (novel.id !== 'default' && !cloudNovels.some(cn => cn.id === novel.id)) {
+            const cloudMatch = cloudNovels.find(cn => cn.id === novel.id);
+            if (novel.id !== 'default' && (!cloudMatch || cloudMatch.name !== novel.name)) {
               await createNovel(novel.id, novel.name).catch(console.warn);
             }
           }
@@ -1304,7 +962,7 @@ useEffect(() => {
           mergedNovels
             .map(n => n.id)
             .concat(activeNovelId && activeNovelId !== 'default' ? [activeNovelId] : [])
-            .filter(id => id && id !== 'default')
+            .filter(id => id && id !== 'default' && !deletedNovelIdsRef.current.has(id))
         )
       );
 
@@ -1315,6 +973,7 @@ useEffect(() => {
       for (const nId of targetNovelIds) {
         const localForNovel = (allLocalChaps || []).filter(c =>
           !deletedChapterIdsRef.current.has(c.id) &&
+          !deletedNovelIdsRef.current.has(c.novelId || '') &&
           (c.novelId === nId || (!c.novelId && nId === activeNovelId))
         );
         const cloudForNovel = isCloudQuotaExhausted()
@@ -1327,7 +986,7 @@ useEffect(() => {
         const novelMergedMap = new Map<string, Chapter>();
 
         (cloudForNovel || []).forEach(cloudCh => {
-          if (deletedChapterIdsRef.current.has(cloudCh.id)) return;
+          if (deletedChapterIdsRef.current.has(cloudCh.id) || deletedNovelIdsRef.current.has(cloudCh.novelId || '')) return;
           const localCh = localMap.get(cloudCh.id);
           const { selected, shouldSyncToCloud } = resolveChapterConflict(localCh, cloudCh);
           const normalizedSelected: Chapter = { ...selected, novelId: nId };
@@ -1497,12 +1156,16 @@ useEffect(() => {
           relationships: allMergedRels
         }));
 
-        syncShortcutsFromCloud(effectiveNovelIdForData).then(cloudList => {
-          if (cloudList) setShortcuts(cloudList);
-        }).catch(console.warn);
+        const cloudList = await syncShortcutsFromCloud(effectiveNovelIdForData).catch(() => null);
+        if (cloudList) setShortcuts(cloudList);
       }
 
-      setHasUnsyncedChanges(false);
+      if (!isCloudQuotaExhausted()) {
+        deletedNovelIdsRef.current.clear();
+        deletedChapterIdsRef.current.clear();
+        persistDeletedIds();
+        clearUnsyncedChanges();
+      }
       setLastRemoteSyncTime(Date.now());
       setSyncToastMessage({
         type: isCloudQuotaExhausted() ? 'error' : 'success',
@@ -1680,7 +1343,7 @@ useEffect(() => {
       setShortcuts(getStoredShortcuts(nextNovelId));
     }
 
-    setHasUnsyncedChanges(false);
+    clearUnsyncedChanges();
     setLastRemoteSyncTime(Date.now());
     setSyncToastMessage({
       type: 'success',
@@ -1894,7 +1557,6 @@ useEffect(() => {
           timestamp: Date.now()
         };
         db.saveChapter(updated).catch(err => console.error("Auto-save chapter failed", err));
-        saveChapterToCloud(updated, false).catch(err => console.error("Auto-save cloud chapter failed", err));
         return updated;
       }
       return c;
@@ -1938,20 +1600,6 @@ useEffect(() => {
     updateSession({ result: newResult });
     autoSaveLinkedChapter(newResult);
 
-    saveUserLiveWorkspaceToCloud({
-      novelId: session.currentNovelId,
-      chapterId: session.currentChapterId,
-      status: session.status,
-      completedSegments: session.completedSegments,
-      segments: newSegments,
-      result: newResult,
-      inputText: session.inputText,
-      deeplText: session.deeplText,
-      preEditedText: session.preEditedText,
-      lastEditedIndex: index,
-      updatedAt: Date.now()
-    }, false);
-
     if (session.currentHistoryId) {
       setHistory(prev => prev.map(item => 
         item.id === session.currentHistoryId 
@@ -1993,19 +1641,6 @@ useEffect(() => {
     
     updateSession({ result: newResult });
     autoSaveLinkedChapter(newResult);
-
-    saveUserLiveWorkspaceToCloud({
-      novelId: session.currentNovelId,
-      chapterId: session.currentChapterId,
-      status: session.status,
-      completedSegments: session.completedSegments,
-      segments: newSegments,
-      result: newResult,
-      inputText: session.inputText,
-      deeplText: session.deeplText,
-      preEditedText: session.preEditedText,
-      updatedAt: Date.now()
-    }, false);
 
     if (session.currentHistoryId) {
       setHistory(prev => prev.map(item => 
@@ -2053,20 +1688,6 @@ useEffect(() => {
     });
     autoSaveLinkedChapter(newResult);
 
-    saveUserLiveWorkspaceToCloud({
-      novelId: session.currentNovelId,
-      chapterId: session.currentChapterId,
-      status: session.status,
-      completedSegments: session.completedSegments,
-      segments: newSegments,
-      result: newResult,
-      inputText: newInputText,
-      deeplText: newDeeplText,
-      preEditedText: session.preEditedText,
-      lastEditedIndex: index,
-      updatedAt: Date.now()
-    }, false);
-
     if (session.currentHistoryId) {
       setHistory(prev => prev.map(item => 
         item.id === session.currentHistoryId 
@@ -2104,19 +1725,6 @@ useEffect(() => {
       deeplText: newDeeplText
     });
     autoSaveLinkedChapter(newResult, newCompletedSegments);
-
-    saveUserLiveWorkspaceToCloud({
-      novelId: session.currentNovelId,
-      chapterId: session.currentChapterId,
-      status: session.status,
-      completedSegments: newCompletedSegments,
-      segments: newSegments,
-      result: newResult,
-      inputText: newInputText,
-      deeplText: newDeeplText,
-      preEditedText: session.preEditedText,
-      updatedAt: Date.now()
-    }, false);
 
     if (session.currentHistoryId) {
       setHistory(prev => prev.map(item => 
@@ -2203,19 +1811,6 @@ useEffect(() => {
     
     updateSession({ completedSegments: newCompleted });
     autoSaveLinkedChapter(session.result, newCompleted);
-
-    saveUserLiveWorkspaceToCloud({
-      novelId: session.currentNovelId,
-      chapterId: session.currentChapterId,
-      status: session.status,
-      completedSegments: newCompleted,
-      segments: session.result?.segments,
-      result: session.result,
-      inputText: session.inputText,
-      deeplText: session.deeplText,
-      preEditedText: session.preEditedText,
-      updatedAt: Date.now()
-    }, true);
 
     if (session.currentHistoryId) {
       setHistory(prev => prev.map(item => 
@@ -2332,7 +1927,6 @@ useEffect(() => {
         
         try {
           await db.saveChapter(autoChapter);
-          await saveChapterToCloud(autoChapter);
           setChapters(prev => [autoChapter, ...prev]);
           console.log("Auto-saved draft on clear:", autoName);
         } catch (e) {
@@ -2341,19 +1935,8 @@ useEffect(() => {
       }
     }
 
-    // Tiến hành xóa session
+    // Tiến hành xóa session cục bộ
     updateSession({ inputText: '', deeplText: '', preEditedText: '', result: null, status: AppStatus.IDLE, currentChapterId: undefined, currentHistoryId: undefined });
-    saveUserLiveWorkspaceToCloud({
-      novelId: session.currentNovelId,
-      chapterId: '',
-      status: AppStatus.IDLE,
-      result: null,
-      completedSegments: [],
-      inputText: '',
-      deeplText: '',
-      preEditedText: '',
-      updatedAt: Date.now()
-    }, true);
   };
 
   const handleTranslate = async (forceFastAlign = false) => {
@@ -2466,7 +2049,6 @@ useEffect(() => {
           completedSegments: []
         };
         db.saveChapter(newChapter).catch(console.warn);
-        saveChapterToCloud(newChapter).catch(console.warn);
         setChapters(prev => [newChapter, ...prev]);
         updateSession({ 
           name: autoName,
@@ -2511,20 +2093,7 @@ useEffect(() => {
           completedSegments: []
         };
         db.saveChapter(chapToSave).catch(console.warn);
-        saveChapterToCloud(chapToSave).catch(console.warn);
       }
-
-      saveUserLiveWorkspaceToCloud({
-        novelId: session.currentNovelId,
-        chapterId: currentChapId || '',
-        status: AppStatus.SUCCESS,
-        result: sanitized,
-        completedSegments: [],
-        inputText: session.inputText,
-        deeplText: session.deeplText,
-        preEditedText: session.preEditedText,
-        updatedAt: Date.now()
-      }, true);
       
       const newHistoryItem: HistoryItem = {
         id: historyId,
@@ -2559,18 +2128,6 @@ useEffect(() => {
       currentHistoryId: item.id
     });
     setShowHistory(false);
-
-    saveUserLiveWorkspaceToCloud({
-      novelId: session.currentNovelId,
-      chapterId: '',
-      status: AppStatus.SUCCESS,
-      result: restored,
-      completedSegments: completed,
-      inputText: item.sourceText,
-      deeplText: item.result?.deeplTranslation || "",
-      preEditedText: item.result?.naturalTranslation || "",
-      updatedAt: Date.now()
-    }, true);
   };
 
   const deleteHistoryItem = (id: string) => {
@@ -2618,8 +2175,8 @@ useEffect(() => {
       completedSegments: session.completedSegments
     };
 
+    markLocalWorkspaceDirty();
     await db.saveChapter(newChapter);
-    await saveChapterToCloud(newChapter, true);
     setChapters(prev => {
       const exists = prev.some(c => c.id === chapterId);
       if (exists) {
@@ -2634,20 +2191,6 @@ useEffect(() => {
       inputText: fullSourceText || session.inputText,
       preEditedText: fullNaturalText || session.preEditedText
     });
-
-    saveUserLiveWorkspaceToCloud({
-      novelId: session.currentNovelId,
-      chapterId,
-      chapterName: name,
-      status: session.status,
-      completedSegments: session.completedSegments,
-      segments: currentSegments,
-      result: cleanResult,
-      inputText: fullSourceText || session.inputText,
-      deeplText: fullDeeplText || session.deeplText,
-      preEditedText: fullNaturalText || session.preEditedText,
-      updatedAt: Date.now()
-    }, true);
   };
 
   const handleRestoreChapter = (chapter: Chapter) => {
@@ -2717,20 +2260,6 @@ useEffect(() => {
       currentNovelId: activeNovelId
     });
     setShowChapters(false);
-
-    saveUserLiveWorkspaceToCloud({
-      novelId: activeNovelId,
-      chapterId: chapter.id,
-      chapterName: chapter.name,
-      status: hasSegments ? AppStatus.SUCCESS : AppStatus.IDLE,
-      completedSegments: completed,
-      segments: restoredResult?.segments || [],
-      result: restoredResult,
-      inputText: sourceText,
-      deeplText: deeplText,
-      preEditedText: naturalText,
-      updatedAt: Date.now()
-    }, true);
   };
 
   // Tự động nạp nội dung chương nếu session có currentChapterId nhưng chưa có nội dung
@@ -2760,18 +2289,6 @@ useEffect(() => {
       status: AppStatus.IDLE
     }));
     db.saveCurrentNovelId(novelId).catch(console.error);
-
-    saveUserLiveWorkspaceToCloud({
-      novelId,
-      chapterId: '',
-      status: AppStatus.IDLE,
-      result: null,
-      completedSegments: [],
-      inputText: '',
-      deeplText: '',
-      preEditedText: '',
-      updatedAt: now
-    }, true);
   };
 
   const handleInputChange = (updates: Partial<TranslationSession>) => {
@@ -2787,23 +2304,12 @@ useEffect(() => {
       cleanUpdates.preEditedText = convertStraightToSmartQuotes(cleanUpdates.preEditedText);
     }
     updateSession(cleanUpdates);
-
-    saveUserLiveWorkspaceToCloud({
-      novelId: session.currentNovelId,
-      chapterId: session.currentChapterId,
-      status: session.status,
-      result: session.result,
-      completedSegments: session.completedSegments,
-      inputText: cleanUpdates.inputText !== undefined ? cleanUpdates.inputText : session.inputText,
-      deeplText: cleanUpdates.deeplText !== undefined ? cleanUpdates.deeplText : session.deeplText,
-      preEditedText: cleanUpdates.preEditedText !== undefined ? cleanUpdates.preEditedText : session.preEditedText,
-      updatedAt: Date.now()
-    }, false);
   };
 
   const handleDeleteChapter = async (id: string) => {
     markLocalWorkspaceDirty();
     deletedChapterIdsRef.current.add(id);
+    persistDeletedIds();
     // 1. Cập nhật state UI ngay lập tức
     setChapters(prev => prev.filter(c => c.id !== id));
 
@@ -2814,14 +2320,7 @@ useEffect(() => {
       console.warn("Lỗi xóa chương trong IndexedDB:", e);
     }
 
-    // 3. Xóa trên Cloud Firestore
-    try {
-      await deleteChapterFromCloud(id);
-    } catch (e) {
-      console.warn("Lỗi xóa chương trên Cloud:", e);
-    }
-
-    // 4. Nếu chương đang mở chính là chương vừa xóa, dọn sạch session
+    // 3. Nếu chương đang mở chính là chương vừa xóa, dọn sạch session
     if (session.currentChapterId === id) {
       updateSession({
         currentChapterId: undefined,
@@ -2848,41 +2347,33 @@ useEffect(() => {
 
     const updated: Chapter = { ...chapter, name: trimmed, timestamp: now };
 
-    // 1. Cập nhật UI ngay tức thì (Optimistic update)
+    // 1. Cập nhật UI ngay tức thì
     setChapters(prev => prev.map(c => c.id === id ? updated : c));
     if (session.currentChapterId === id) {
       updateSession({ name: trimmed });
     }
 
-    // 2. Lưu vĩnh viễn vào IndexedDB (Local - không bị ảnh hưởng bởi quota Cloud)
+    // 2. Lưu vĩnh viễn vào IndexedDB cục bộ
     await db.saveChapter(updated);
-
-    // 3. Cố gắng đồng bộ lên Cloud (bọc try-catch để nếu Cloud hết quota thì không crash và không bị rollback)
-    try {
-      await saveChapterToCloud(updated, true);
-    } catch (e) {
-      console.warn("Không thể lưu tên mới lên Cloud lúc này (hết quota hoặc offline):", e);
-    }
   };
 
   const handleClearAllChapters = async () => {
-    await db.clearAllChapters();
-    if (session.currentNovelId) {
-      await clearNovelChaptersFromCloud(session.currentNovelId);
+    markLocalWorkspaceDirty();
+    const targetNovelId = session.currentNovelId;
+    const toDelete = chapters.filter(c => c.novelId === targetNovelId || (!c.novelId && targetNovelId === 'default'));
+    for (const ch of toDelete) {
+      deletedChapterIdsRef.current.add(ch.id);
+      await db.deleteChapter(ch.id);
     }
-    setChapters([]);
+    persistDeletedIds();
+    setChapters(prev => prev.filter(c => c.novelId !== targetNovelId && (targetNovelId !== 'default' || Boolean(c.novelId))));
   };
 
   const handleExportExcel = async () => {
     let novelName = "Truyện";
     const currentId = session.currentNovelId;
-    try {
-      const allNovels = await getNovels();
-      const found = allNovels.find(n => n.id === currentId);
-      if (found) novelName = found.name;
-    } catch (e) {
-      console.warn("Could not fetch novel name for export", e);
-    }
+    const found = novels.find(n => n.id === currentId);
+    if (found) novelName = found.name;
 
     // Chỉ xuất dữ liệu của bộ truyện hiện tại
     const filteredTerms = (session.customTerms || []).filter(t => currentId && t.novelId === currentId);
@@ -2988,6 +2479,8 @@ useEffect(() => {
               <NovelSelector 
                 currentNovelId={session.currentNovelId || ''} 
                 onSelectNovel={handleSelectNovel}
+                onCreateNovel={handleCreateNovel}
+                onRenameNovel={handleRenameNovel}
                 onDeleteNovel={handleDeleteNovel}
                 novels={novels}
                 onNovelsChange={setNovels}
@@ -3027,28 +2520,33 @@ useEffect(() => {
                  <span className="hidden sm:inline">Lịch sử</span>
               </button>
 
-              {currentUser && (
-                <div 
-                  className={`flex items-center gap-1 text-[10px] px-2 py-1 rounded-full border transition-all ${
-                    Date.now() - lastRemoteSyncTime < 4000
-                      ? 'bg-emerald-100 text-emerald-800 border-emerald-400 shadow-sm animate-pulse'
-                      : 'text-[#5D4037] border-[#D7CCC8] bg-white shadow-2xs'
-                  }`}
-                  title={Date.now() - lastRemoteSyncTime < 4000 ? "Vừa đồng bộ tức thì từ thiết bị khác!" : "Đang kết nối đồng bộ thời gian thực (Laptop ⇄ Điện thoại)"}
-                >
-                  <Wifi size={11} className={Date.now() - lastRemoteSyncTime < 4000 ? "text-emerald-600" : "text-[#8D6E63]"} />
-                  <span className="hidden md:inline font-mono text-[9px]">
-                    {Date.now() - lastRemoteSyncTime < 4000 ? "Đã đồng bộ" : "Live"}
-                  </span>
-                </div>
-              )}
-
               <AuthPanel
                 onApplyCloudRecovery={handleApplyCloudRecovery}
                 onApplyLocalSelection={handleApplyLocalSelection}
               />
           </div>
         </header>
+
+      {/* THANH NHẮC ĐỒNG BỘ KHI CÓ THAY ĐỔI CHƯA ĐỒNG BỘ */}
+      {hasUnsyncedChanges && !isFocusMode && (
+        <div className="bg-[#FFF8E1] border-b border-[#FFE082] px-3 sm:px-4 py-1 flex flex-wrap items-center justify-between gap-2 text-[11px] text-[#E65100] shrink-0 z-10">
+          <div className="flex items-center gap-1.5 font-medium">
+            <AlertTriangle size={13} className="shrink-0 text-[#E65100]" />
+            <span>
+              Bạn có thay đổi mới chưa đồng bộ lên Firestore. Hãy nhấn <strong>Đồng bộ Firestore</strong> trước khi đóng tab, thoát app hoặc tắt máy!
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={handleManualSyncToFirestore}
+            disabled={isSyncingToCloud}
+            className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#E65100] hover:bg-[#BF360C] text-white text-[10px] font-bold transition-colors disabled:opacity-50 cursor-pointer shrink-0"
+          >
+            {isSyncingToCloud ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+            <span>{isSyncingToCloud ? 'Đang đồng bộ...' : 'Đồng bộ ngay'}</span>
+          </button>
+        </div>
+      )}
 
       {/* MAIN WORKSPACE */}
       <div className="flex-1 flex overflow-hidden relative">

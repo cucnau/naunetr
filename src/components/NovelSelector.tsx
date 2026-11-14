@@ -1,16 +1,17 @@
-import React, { useState, useEffect } from 'react';
-import { getNovels, createNovel } from '../services/firestoreService';
+import React, { useState, useEffect, useRef } from 'react';
 import { Novel } from '../types';
-import { Book, Plus, Loader2, Trash2 } from 'lucide-react';
+import { Book, Plus, Trash2, Pencil, Check, X } from 'lucide-react';
 import { auth } from '../services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import { getScopedStorageItem, setScopedStorageItem, recoverAllCachedNovels } from '../services/storageNamespace';
+import { setScopedStorageItem, recoverAllCachedNovels } from '../services/storageNamespace';
 import { db } from '../services/db';
 
 interface NovelSelectorProps {
   currentNovelId: string;
   onSelectNovel: (id: string) => void;
-  onDeleteNovel?: (id: string) => void;
+  onCreateNovel?: (name: string) => Promise<void> | void;
+  onRenameNovel?: (id: string, newName: string) => Promise<void> | void;
+  onDeleteNovel?: (id: string) => Promise<void> | void;
   novels?: Novel[];
   onNovelsChange?: (novels: Novel[]) => void;
 }
@@ -18,6 +19,8 @@ interface NovelSelectorProps {
 export const NovelSelector: React.FC<NovelSelectorProps> = ({
   currentNovelId,
   onSelectNovel,
+  onCreateNovel,
+  onRenameNovel,
   onDeleteNovel,
   novels: propNovels,
   onNovelsChange,
@@ -28,7 +31,7 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({
       const recovered = recoverAllCachedNovels(uid);
       if (Array.isArray(recovered) && recovered.length > 0) return recovered;
       return [{ id: 'default', name: 'Truyện mặc định' }];
-    } catch (e) {
+    } catch (_) {
       return [{ id: 'default', name: 'Truyện mặc định' }];
     }
   });
@@ -39,10 +42,23 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({
     onNovelsChange?.(list);
   };
 
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [actionMode, setActionMode] = useState<'idle' | 'create' | 'rename' | 'delete_confirm'>('idle');
+  const [nameInput, setNameInput] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  // Khôi phục bền vững từ IndexedDB chỉ khi component tự quản lý state (không nhận propNovels)
+  useEffect(() => {
+    if (actionMode === 'create' || actionMode === 'rename') {
+      setTimeout(() => inputRef.current?.focus(), 0);
+    }
+  }, [actionMode]);
+
+  // Reset inline action when switching novel
+  useEffect(() => {
+    setActionMode('idle');
+    setNameInput('');
+  }, [currentNovelId]);
+
+  // Khôi phục từ IndexedDB cục bộ chỉ khi component tự quản lý state (không nhận propNovels)
   useEffect(() => {
     if (propNovels !== undefined) return;
     let isMounted = true;
@@ -56,197 +72,202 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({
       }
     }).catch(console.error);
 
-    return () => { isMounted = false; };
-  }, []);
-
-  useEffect(() => {
-    if (propNovels !== undefined) return;
     const unsub = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        // Tải cache của user này nếu có
-        try {
-          const userCache = getScopedStorageItem(`cached_novels_${user.uid}`);
-          if (userCache) {
-            const parsed = JSON.parse(userCache);
-            if (Array.isArray(parsed) && parsed.length > 0) {
-              const clean = parsed.filter((n: any) => n && n.name && typeof n.name === 'string');
-              if (clean.length > 0) {
-                updateNovelsList(clean);
-                const nonDef = clean.find((n: any) => n.id !== 'default');
-                const target = nonDef ? nonDef.id : clean[0].id;
-                if ((!currentNovelId || currentNovelId === 'default') && target !== currentNovelId) {
-                  onSelectNovel(target);
-                }
-              }
-            }
-          }
-        } catch (_) {}
-        fetchNovels(user.uid);
-      } else {
-        // Khi không đăng nhập: Khôi phục danh sách từ IndexedDB & localStorage của khách
-        try {
-          const recovered = await db.autoRecoverNovels();
-          if (Array.isArray(recovered) && recovered.length > 0) {
-            updateNovelsList(recovered);
-            const nonDef = recovered.find(n => n.id !== 'default');
-            const target = nonDef ? nonDef.id : recovered[0].id;
-            if ((!currentNovelId || currentNovelId === 'default') && target !== currentNovelId) {
-              onSelectNovel(target);
-            }
-          }
-        } catch (_) {
-          const fallback = recoverAllCachedNovels();
-          updateNovelsList(fallback);
-          if (!currentNovelId && fallback.length > 0) onSelectNovel(fallback[0].id);
-        }
-      }
-    });
-    return () => unsub();
-  }, []);
-
-  useEffect(() => {
-    if (propNovels !== undefined) return;
-    if (!currentNovelId && novels.length > 0) {
-      onSelectNovel(novels[0].id);
-    }
-  }, [currentNovelId, novels, propNovels]);
-
-  const fetchNovels = async (uid?: string) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const currentUid = uid || auth.currentUser?.uid;
-      const [cloudData, localData] = await Promise.all([
-        getNovels().catch(() => [] as Novel[]),
-        db.autoRecoverNovels(currentUid).catch(() => [] as Novel[]),
-      ]);
-
-      // Hợp nhất 2 chiều giữa Cloud và Local (không ghi đè 1 chiều)
-      const mergedMap = new Map<string, Novel>();
-      (localData || []).forEach(n => {
-        if (n && n.id && n.name) mergedMap.set(n.id, n);
-      });
-      (cloudData || []).forEach(n => {
-        if (n && n.id && n.name) mergedMap.set(n.id, n);
-      });
-
-      if (mergedMap.size > 1 && mergedMap.has('default')) {
-        mergedMap.delete('default');
-      }
-
-      const merged = Array.from(mergedMap.values());
-      if (merged.length > 0) {
-        updateNovelsList(merged);
-        if (currentUid) {
-          setScopedStorageItem(`cached_novels_${currentUid}`, JSON.stringify(merged));
-          await db.saveNovels(merged, currentUid);
-        }
-        const nonDef = merged.find(n => n.id !== 'default');
-        const targetId = (currentNovelId && currentNovelId !== 'default' && merged.some(n => n.id === currentNovelId))
-          ? currentNovelId
-          : (nonDef ? nonDef.id : merged[0].id);
-        if (targetId && targetId !== currentNovelId) {
-          onSelectNovel(targetId);
-        }
-      }
-    } catch (e: any) {
-      console.warn("Đang dùng danh sách truyện từ bộ nhớ máy:", e);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleCreate = async () => {
-    const name = prompt('Nhập tên truyện mới:');
-    if (!name || !name.trim()) return;
-    
-    const trimmedName = name.trim();
-    const id = Date.now().toString();
-    const newNovel: Novel = { id, name: trimmedName };
-
-    // 1. Cập nhật giao diện ngay lập tức
-    const filteredOld = novels.filter(n => !(n.id === 'default' && n.name === 'Truyện mặc định' && novels.length === 1));
-    const updatedNovels = [...filteredOld, newNovel];
-    updateNovelsList(updatedNovels);
-    onSelectNovel(newNovel.id);
-    
-    // Lưu đồng thời vào cả IndexedDB lẫn LocalStorage theo đúng tài khoản này
-    const uid = auth.currentUser?.uid;
-    await db.saveNovels(updatedNovels, uid);
-    if (uid) {
-      setScopedStorageItem(`cached_novels_${uid}`, JSON.stringify(updatedNovels));
-    }
-
-    // 2. Đồng bộ lên Firestore nếu đã đăng nhập
-    if (auth.currentUser) {
       try {
-        setLoading(true);
-        setError(null);
-        await createNovel(id, trimmedName);
-      } catch (e: any) {
-        console.warn("Chưa đồng bộ lên đám mây được, đã lưu an toàn trên máy cục bộ:", e);
-      } finally {
-        setLoading(false);
-      }
-    }
+        const recovered = await db.autoRecoverNovels(user?.uid);
+        if (isMounted && Array.isArray(recovered) && recovered.length > 0) {
+          updateNovelsList(recovered);
+        }
+      } catch (_) {}
+    });
+
+    return () => {
+      isMounted = false;
+      unsub();
+    };
+  }, [propNovels]);
+
+  const currentNovel = novels.find((n) => n.id === currentNovelId) || novels[0];
+  const canDeleteCurrent = Boolean(
+    onDeleteNovel &&
+    currentNovel &&
+    (novels.length > 1 || currentNovel.id !== 'default')
+  );
+
+  const handleOpenCreate = () => {
+    setNameInput('');
+    setActionMode('create');
   };
 
-  const handleDelete = () => {
-    const current = novels.find(n => n.id === currentNovelId);
-    if (!current) return;
-    const confirmDelete = window.confirm(`Bạn có chắc chắn muốn xóa bộ truyện "${current.name}" khỏi danh sách không?`);
-    if (confirmDelete && onDeleteNovel) {
-      onDeleteNovel(current.id);
+  const handleOpenRename = () => {
+    if (!currentNovel) return;
+    setNameInput(currentNovel.name);
+    setActionMode('rename');
+  };
+
+  const handleSubmitName = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const trimmed = nameInput.trim();
+    if (!trimmed) return;
+
+    if (actionMode === 'create') {
+      if (onCreateNovel) {
+        await onCreateNovel(trimmed);
+      } else {
+        const id = `novel_${Date.now()}`;
+        const newNovel: Novel = { id, name: trimmed };
+        const filteredOld = novels.filter(
+          (n) => !(n.id === 'default' && n.name === 'Truyện mặc định' && novels.length === 1)
+        );
+        const updatedNovels = [...filteredOld, newNovel];
+        updateNovelsList(updatedNovels);
+        onSelectNovel(newNovel.id);
+        const uid = auth.currentUser?.uid;
+        await db.saveNovels(updatedNovels, uid);
+        if (uid) {
+          setScopedStorageItem(`cached_novels_${uid}`, JSON.stringify(updatedNovels));
+        }
+      }
+    } else if (actionMode === 'rename' && currentNovel) {
+      if (onRenameNovel) {
+        await onRenameNovel(currentNovel.id, trimmed);
+      } else {
+        const updated = novels.map((n) => (n.id === currentNovel.id ? { ...n, name: trimmed } : n));
+        updateNovelsList(updated);
+        const uid = auth.currentUser?.uid;
+        await db.saveNovels(updated, uid);
+        if (uid) {
+          setScopedStorageItem(`cached_novels_${uid}`, JSON.stringify(updated));
+        }
+      }
     }
+
+    setActionMode('idle');
+    setNameInput('');
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!currentNovel || !onDeleteNovel) return;
+    const targetId = currentNovel.id;
+    setActionMode('idle');
+    await onDeleteNovel(targetId);
   };
 
   return (
-    <div className="flex items-center gap-1.5 shrink-0">
-      <div className="flex items-center gap-1 rounded-md px-2 py-1 transition-colors bg-white hover:bg-[#FAF6F0] border border-[#D7CCC8] text-[#3E2723] shadow-2xs">
-        <Book size={12} className="text-[#5D4037]" />
-        <select 
-          value={currentNovelId || (novels[0]?.id || '')} 
-          onChange={(e) => onSelectNovel(e.target.value)}
-          className="bg-transparent font-medium text-[10px] outline-none max-w-[120px] cursor-pointer text-[#3E2723]"
+    <div className="relative flex items-center gap-1.5 shrink-0">
+      {actionMode === 'create' || actionMode === 'rename' ? (
+        <form
+          onSubmit={handleSubmitName}
+          className="flex items-center gap-1 rounded-md px-1.5 py-0.5 bg-white border border-[#8D6E63] text-[#3E2723] shadow-xs"
         >
-          {novels.length === 0 && <option value="" disabled>-- Chọn truyện --</option>}
-          {novels.map(n => (
-            <option key={n.id} value={n.id} className="text-black bg-white">{n.name}</option>
-          ))}
-        </select>
-        {loading ? (
-          <Loader2 size={12} className="animate-spin ml-0.5 text-[#8D6E63]" />
-        ) : (
+          <input
+            ref={inputRef}
+            type="text"
+            value={nameInput}
+            onChange={(e) => setNameInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                setActionMode('idle');
+                setNameInput('');
+              }
+            }}
+            placeholder={actionMode === 'create' ? 'Tên truyện mới...' : 'Tên truyện mới...'}
+            className="text-[10px] font-medium px-1 py-0.5 w-28 sm:w-36 outline-none bg-transparent text-[#3E2723]"
+          />
+          <button
+            type="submit"
+            disabled={!nameInput.trim()}
+            className="p-0.5 rounded text-emerald-700 hover:bg-emerald-50 disabled:opacity-40 cursor-pointer"
+            title="Lưu (Enter)"
+          >
+            <Check size={12} />
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setActionMode('idle');
+              setNameInput('');
+            }}
+            className="p-0.5 rounded text-[#8D6E63] hover:bg-[#EFEBE9] cursor-pointer"
+            title="Hủy (Esc)"
+          >
+            <X size={12} />
+          </button>
+        </form>
+      ) : actionMode === 'delete_confirm' && currentNovel ? (
+        <div className="flex items-center gap-1.5 rounded-md px-2 py-0.5 bg-red-50 border border-red-300 text-red-900 shadow-xs">
+          <span className="text-[10px] font-semibold max-w-[130px] truncate" title={`Xóa "${currentNovel.name}"?`}>
+            Xóa "{currentNovel.name}"?
+          </span>
+          <button
+            type="button"
+            onClick={handleConfirmDelete}
+            className="px-1.5 py-0.5 rounded bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold cursor-pointer"
+            title="Xác nhận xóa truyện và chương của truyện này"
+          >
+            Xóa
+          </button>
+          <button
+            type="button"
+            onClick={() => setActionMode('idle')}
+            className="px-1.5 py-0.5 rounded bg-white hover:bg-gray-100 border border-gray-300 text-[#5D4037] text-[10px] font-medium cursor-pointer"
+          >
+            Hủy
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-1 rounded-md px-2 py-1 transition-colors bg-white hover:bg-[#FAF6F0] border border-[#D7CCC8] text-[#3E2723] shadow-2xs">
+          <Book size={12} className="text-[#5D4037]" />
+          <select
+            value={currentNovelId || novels[0]?.id || ''}
+            onChange={(e) => onSelectNovel(e.target.value)}
+            className="bg-transparent font-medium text-[10px] outline-none max-w-[120px] cursor-pointer text-[#3E2723]"
+          >
+            {novels.length === 0 && (
+              <option value="" disabled>
+                -- Chọn truyện --
+              </option>
+            )}
+            {novels.map((n) => (
+              <option key={n.id} value={n.id} className="text-black bg-white">
+                {n.name}
+              </option>
+            ))}
+          </select>
+
           <div className="flex items-center gap-1 ml-0.5">
-            <button 
-              onClick={handleCreate} 
-              className="transition-colors text-[#8D6E63] hover:text-[#3E2723]" 
+            <button
+              type="button"
+              onClick={handleOpenCreate}
+              className="transition-colors text-[#8D6E63] hover:text-[#3E2723] cursor-pointer"
               title="Tạo truyện mới"
             >
               <Plus size={12} />
             </button>
 
-            {onDeleteNovel && (novels.length > 1 || currentNovelId !== 'default') && (
+            {currentNovel && (
               <button
-                onClick={handleDelete}
-                className="transition-colors text-[#A1887F] hover:text-red-700 ml-0.5"
+                type="button"
+                onClick={handleOpenRename}
+                className="transition-colors text-[#8D6E63] hover:text-[#3E2723] ml-0.5 cursor-pointer"
+                title="Đổi tên bộ truyện này"
+              >
+                <Pencil size={10} />
+              </button>
+            )}
+
+            {canDeleteCurrent && (
+              <button
+                type="button"
+                onClick={() => setActionMode('delete_confirm')}
+                className="transition-colors text-[#A1887F] hover:text-red-700 ml-0.5 cursor-pointer"
                 title="Xóa bộ truyện này"
               >
                 <Trash2 size={11} />
               </button>
             )}
           </div>
-        )}
-      </div>
-
-      {error && (
-        <span 
-          className="text-[9px] text-[#C62828] bg-red-50 border border-red-200 px-1.5 py-0.5 rounded cursor-pointer opacity-90 hover:opacity-100" 
-          title={`${error} - Bấm để tải lại từ Cloud`}
-          onClick={() => fetchNovels()}
-        >
-          Thử lại
-        </span>
+        </div>
       )}
     </div>
   );

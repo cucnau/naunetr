@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Character, Relationship } from '../types';
 import { Users, Network, Plus, Trash2, Search, Settings, Save, Download, Upload, Loader2, RefreshCw } from 'lucide-react';
-import { syncFirestoreData, deleteFirestoreDoc } from '../services/firestoreService';
+import { syncFirestoreData } from '../services/firestoreService';
 import { auth } from '../services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 
@@ -67,12 +67,6 @@ export const WorldInfoPanel: React.FC<WorldInfoPanelProps> = ({
     }
   }, [currentNovelId]);
 
-  // Auto Sync State
-  const [autoSync, setAutoSync] = useState<boolean>(() => {
-    const saved = localStorage.getItem('autoSync_world');
-    return saved === null ? true : saved === 'true';
-  });
-  const isInitialMount = useRef(true);
   const isPullingRef = useRef(false);
 
   useEffect(() => {
@@ -81,55 +75,6 @@ export const WorldInfoPanel: React.FC<WorldInfoPanelProps> = ({
     });
     return () => unsubscribe();
   }, []);
-
-  // Fetch when novel changes
-  useEffect(() => {
-      if (isSignedIn && currentNovelId) {
-          const timer = setTimeout(() => {
-              syncData('char', 'GET', true);
-              syncData('rel', 'GET', true);
-          }, 500);
-          return () => clearTimeout(timer);
-      }
-  }, [currentNovelId, isSignedIn]);
-
-  // Persist autoSync preference
-  useEffect(() => {
-    localStorage.setItem('autoSync_world', String(autoSync));
-  }, [autoSync]);
-
-  // AUTO SYNC LOGIC (Characters & Relationships)
-  useEffect(() => {
-    if (isInitialMount.current) {
-      isInitialMount.current = false;
-      return;
-    }
-
-    if (!autoSync || !isSignedIn || isPullingRef.current) return;
-
-    const timer = setTimeout(() => {
-    }, 2500);
-
-    return () => clearTimeout(timer);
-  }, [novelCharacters, novelRelationships, autoSync, isSignedIn]); 
-
-  // Dedicated Effect for Characters
-  useEffect(() => {
-    if (isInitialMount.current || !autoSync || !isSignedIn || isPullingRef.current) return;
-    const timer = setTimeout(() => {
-        syncData('char', 'POST', true);
-    }, 2000);
-    return () => clearTimeout(timer);
-  }, [novelCharacters, autoSync, isSignedIn]);
-
-  // Dedicated Effect for Relationships
-  useEffect(() => {
-    if (isInitialMount.current || !autoSync || !isSignedIn || isPullingRef.current) return;
-    const timer = setTimeout(() => {
-        syncData('rel', 'POST', true);
-    }, 2000);
-    return () => clearTimeout(timer);
-  }, [novelRelationships, autoSync, isSignedIn]);
 
 
   // --- SYNC HANDLERS ---
@@ -164,18 +109,12 @@ export const WorldInfoPanel: React.FC<WorldInfoPanelProps> = ({
              const hasLocal = charsRef.current.some(c => c.novelId === currentNovelId);
              if (hasLocal) {
                 console.log("Preserving local characters since cloud is empty");
-                if (autoSync) {
-                   setTimeout(() => { syncData('char', 'POST', true); }, 1000);
-                }
                 return;
              }
           } else if (type === 'rel' && relsRef.current.length > 0) {
              const hasLocal = relsRef.current.some(r => r.novelId === currentNovelId);
              if (hasLocal) {
                 console.log("Preserving local relationships since cloud is empty");
-                if (autoSync) {
-                   setTimeout(() => { syncData('rel', 'POST', true); }, 1000);
-                }
                 return;
              }
           }
@@ -239,7 +178,6 @@ export const WorldInfoPanel: React.FC<WorldInfoPanelProps> = ({
   };
 
   const deleteChar = (id: string) => {
-    deleteFirestoreDoc('char', id);
     onUpdateCharacters(novelCharacters.filter(c => c.id !== id));
   };
 
@@ -262,7 +200,6 @@ export const WorldInfoPanel: React.FC<WorldInfoPanelProps> = ({
   };
 
   const deleteRel = (id: string) => {
-    deleteFirestoreDoc('rel', id);
     onUpdateRelationships(novelRelationships.filter(r => r.id !== id));
   };
 
@@ -315,18 +252,8 @@ export const WorldInfoPanel: React.FC<WorldInfoPanelProps> = ({
         <div className="bg-[#EFEBE9] border-b border-[#D7CCC8]">
            {showSettings ? (
              <div className="p-2 animate-in slide-in-from-top-2">
-                 {/* Auto Sync Toggle */}
-                 <div className="flex items-center justify-between bg-white border border-[#D7CCC8] p-1.5 rounded">
-                   <div className="flex items-center gap-2">
-                     <RefreshCw size={12} className={autoSync ? "text-green-600 animate-spin-slow" : "text-[#A1887F]"} />
-                     <span className="text-[10px] font-medium text-[#5D4037]">Tự động đồng bộ</span>
-                   </div>
-                   <button 
-                     onClick={() => setAutoSync(!autoSync)}
-                     className={`w-7 h-3.5 rounded-full relative transition-colors ${autoSync ? 'bg-green-500' : 'bg-[#D7CCC8]'}`}
-                   >
-                     <div className={`absolute top-0.5 w-2.5 h-2.5 bg-white rounded-full transition-all ${autoSync ? 'left-4' : 'left-0.5'}`} style={{left: autoSync ? '16px' : '2px'}} />
-                   </button>
+                 <div className="bg-white border border-[#D7CCC8] p-1.5 rounded text-[10px] text-[#5D4037] leading-relaxed">
+                   Đã tắt tự động đồng bộ để tiết kiệm quota Firestore. Hãy nhấn nút Tải/Lưu đám mây hoặc <strong>Đồng bộ Firestore</strong> khi cần.
                  </div>
                  {!isSignedIn && <div className="text-[10px] text-red-500 mt-1">Đăng nhập để đồng bộ dữ liệu.</div>}
                  

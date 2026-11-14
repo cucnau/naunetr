@@ -183,7 +183,7 @@ export const createNovel = async (id: string, name: string): Promise<Novel> => {
 export const deleteNovel = async (id: string): Promise<void> => {
   const user = auth.currentUser;
   if (!user) throw new Error('Bạn cần đăng nhập!');
-  const path = `novels/${id}`;
+  if (isCloudQuotaExhausted()) return;
   try {
     const novelRef = doc(db, 'novels', id);
     const snap = await getDoc(novelRef);
@@ -194,10 +194,11 @@ export const deleteNovel = async (id: string): Promise<void> => {
         console.warn("Bộ truyện này thuộc tài khoản khác, bảo toàn an toàn trên Cloud cho bạn.");
         return;
       }
+      await withTimeout(deleteDoc(novelRef), 7000);
     }
-    await withTimeout(deleteDoc(novelRef), 7000);
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, path);
+    handleQuotaExhausted(error);
+    console.warn("Không thể xóa truyện trên Firestore:", error);
   }
 };
 
@@ -610,18 +611,26 @@ export const deleteChapterFromCloud = async (chapterId: string): Promise<void> =
 
 export const clearNovelChaptersFromCloud = async (novelId: string): Promise<void> => {
   const user = auth.currentUser;
-  if (!user || !novelId) return;
-  const path = 'chapters';
+  if (!user || !novelId || isCloudQuotaExhausted()) return;
   try {
     const q = query(collection(db, 'chapters'), where('novelId', '==', novelId));
     const snap = await getDocs(q);
+    if (snap.empty) return;
     const batch = writeBatch(db);
+    let count = 0;
     snap.forEach(d => {
-      batch.delete(d.ref);
+      const data = d.data();
+      if (!data?.userId || data.userId === user.uid) {
+        batch.delete(d.ref);
+        count++;
+      }
     });
-    await batch.commit();
+    if (count > 0) {
+      await batch.commit();
+    }
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, path);
+    handleQuotaExhausted(error);
+    console.warn("Không thể xóa các chương của truyện trên Firestore:", error);
   }
 };
 

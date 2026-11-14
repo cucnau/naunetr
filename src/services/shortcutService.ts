@@ -8,8 +8,6 @@ const ENABLED_STORAGE_KEY = 'edit_shortcuts_enabled';
 
 export const DEFAULT_SHORTCUTS: TextShortcut[] = [];
 
-let syncDebounceTimer: NodeJS.Timeout | null = null;
-
 export const getAllStoredShortcuts = (): TextShortcut[] => {
   try {
     const raw = getScopedStorageItem(STORAGE_KEY);
@@ -43,17 +41,9 @@ export const saveStoredShortcuts = (novelShortcuts: TextShortcut[], novelId?: st
     }));
     const fullList = [...remaining, ...updated];
     setScopedStorageItem(STORAGE_KEY, JSON.stringify(fullList));
-    window.dispatchEvent(new CustomEvent('shortcuts_updated', { detail: { novelId: targetId, shortcuts: updated } }));
-
-    // Tự động lưu lên Firestore nếu đã đăng nhập và có novelId
-    if (!skipCloudSave && auth.currentUser && targetId) {
-      if (syncDebounceTimer) clearTimeout(syncDebounceTimer);
-      syncDebounceTimer = setTimeout(() => {
-        saveShortcutsToCloud(targetId, updated).catch(err => {
-          console.warn("Tự động lưu phím tắt lên Firestore thất bại:", err);
-        });
-      }, 1000);
-    }
+    window.dispatchEvent(new CustomEvent('shortcuts_updated', {
+      detail: { novelId: targetId, shortcuts: updated, isLocalEdit: !skipCloudSave }
+    }));
   } catch (err) {
     console.error("Could not save shortcuts to localStorage", err);
   }

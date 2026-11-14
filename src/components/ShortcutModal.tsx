@@ -8,7 +8,7 @@ import {
   setShortcutsEnabled,
   syncShortcutsFromCloud
 } from '../services/shortcutService';
-import { getNovels } from '../services/firestoreService';
+import { recoverAllCachedNovels } from '../services/storageNamespace';
 import { auth } from '../services/firebase';
 import { 
   X, 
@@ -64,9 +64,10 @@ export const ShortcutModal: React.FC<ShortcutModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       setActiveNovelId(currentNovelId);
-      getNovels().then(list => {
-        if (list && list.length > 0) setNovels(list);
-      }).catch(() => {});
+      const cachedNovels = recoverAllCachedNovels(auth.currentUser?.uid);
+      if (cachedNovels && cachedNovels.length > 0) {
+        setNovels(cachedNovels);
+      }
     }
   }, [isOpen, currentNovelId]);
 
@@ -76,17 +77,6 @@ export const ShortcutModal: React.FC<ShortcutModalProps> = ({
       setEnabled(isShortcutsEnabled());
       setMessage(null);
       setEditingId(null);
-
-      // Tự động đồng bộ từ Firestore
-      if (activeNovelId && auth.currentUser) {
-        setIsSyncing(true);
-        syncShortcutsFromCloud(activeNovelId)
-          .then(list => {
-            if (list) setShortcuts(list);
-          })
-          .catch(console.warn)
-          .finally(() => setIsSyncing(false));
-      }
     }
   }, [isOpen, activeNovelId]);
 
@@ -384,10 +374,10 @@ export const ShortcutModal: React.FC<ShortcutModalProps> = ({
                   }
                 }}
                 className="flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full border transition-colors cursor-pointer text-emerald-700 bg-emerald-50 border-emerald-200 hover:bg-emerald-100"
-                title="Dữ liệu gõ tắt được tự động lưu lên Firestore theo từng truyện"
+                title="Nhấn để đồng bộ bảng gõ tắt của truyện này với Firestore (thủ công)"
               >
                 <RefreshCw size={11} className={isSyncing ? "animate-spin" : ""} />
-                <span>{isSyncing ? 'Đang đồng bộ...' : 'Tự lưu Firestore'}</span>
+                <span>{isSyncing ? 'Đang đồng bộ...' : 'Đồng bộ gõ tắt'}</span>
               </button>
             ) : (
               <span className="text-[10px] px-2 py-0.5 rounded-full border text-amber-800 bg-amber-50 border-amber-200" title="Đăng nhập để đồng bộ lên Firestore">

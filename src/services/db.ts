@@ -1,6 +1,6 @@
 
 import { CustomTerm, Chapter, VietphraseFileItem, Character, Novel } from '../types';
-import { getScopedDbName, recoverAllCachedNovels, setScopedStorageItem } from './storageNamespace';
+import { getScopedDbName, getScopedStorageItem, recoverAllCachedNovels, setScopedStorageItem } from './storageNamespace';
 
 // IndexedDB Service duoc cach ly rieng cho tung repo / web
 const DB_NAME = getScopedDbName();
@@ -183,12 +183,22 @@ export const db = {
 
     async autoRecoverNovels(targetUid?: string): Promise<Novel[]> {
         const novelMap = new Map<string, Novel>();
+        let deletedIds = new Set<string>();
+        try {
+            const rawDeleted = getScopedStorageItem('deleted_novel_ids');
+            if (rawDeleted) {
+                const parsed = JSON.parse(rawDeleted);
+                if (Array.isArray(parsed)) {
+                    deletedIds = new Set(parsed.map(String));
+                }
+            }
+        } catch (_) {}
 
         // 1. Lấy từ IndexedDB settings của chính tài khoản này (hoặc settings chung)
         try {
             const currentDbNovels = await this.getNovels(targetUid);
             currentDbNovels.forEach(n => {
-                if (n && n.id && n.name) novelMap.set(n.id, n);
+                if (n && n.id && n.name && !deletedIds.has(n.id)) novelMap.set(n.id, n);
             });
         } catch (_) {}
 
@@ -196,7 +206,7 @@ export const db = {
         try {
             const storageNovels = recoverAllCachedNovels(targetUid);
             storageNovels.forEach(n => {
-                if (n && n.id && n.name && !novelMap.has(n.id)) {
+                if (n && n.id && n.name && !deletedIds.has(n.id) && !novelMap.has(n.id)) {
                     novelMap.set(n.id, n);
                 }
             });
@@ -206,7 +216,7 @@ export const db = {
         try {
             const currentChapters = await this.getAllChapters();
             currentChapters.forEach(c => {
-                if (c.novelId && !novelMap.has(c.novelId)) {
+                if (c.novelId && !deletedIds.has(c.novelId) && !novelMap.has(c.novelId)) {
                     const chName = c.name ? c.name.trim() : '';
                     const recoveredName = (c as any).novelName || (chName ? `Truyện (${chName.slice(0, 30)})` : (c.novelId === 'default' ? 'Truyện mặc định' : `Truyện đã lưu ${c.novelId.slice(-4)}`));
                     novelMap.set(c.novelId, {

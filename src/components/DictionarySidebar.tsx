@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { CustomTerm, VietphraseFileItem, VietphraseCategory } from '../types';
 import { Plus, Trash2, BookUser, Settings, Download, Upload, Loader2, Save, Code, Copy, Search, X, RefreshCw, FileText, CheckCircle, FileUp, AlertCircle, FileSpreadsheet, Layers, Pencil, Check, ChevronUp, ChevronDown } from 'lucide-react';
-import { syncFirestoreData, deleteFirestoreDoc, overwriteFirestoreData } from '../services/firestoreService';
+import { syncFirestoreData } from '../services/firestoreService';
 import { auth } from '../services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { vietphraseEngine, VIETPHRASE_CATEGORY_CONFIG, getOmittedParticlesConfig, saveOmittedParticlesConfig, DEFAULT_OMITTED_PARTICLES, OMITTED_PARTICLES_EXPLANATIONS } from '../services/vietphraseService';
@@ -152,12 +152,7 @@ export const DictionarySidebar: React.FC<DictionarySidebarProps> = ({
     setQuickLookupResult(vietphraseEngine.lookupComprehensive(trimmed));
   };
   
-  // Auto Sync State
-  const [autoSync, setAutoSync] = useState<boolean>(() => {
-    const saved = localStorage.getItem('autoSync_vocab');
-    return saved === null ? true : saved === 'true';
-  });
-  const isInitialMount = useRef(true);
+  const isPullingRef = useRef(false);
 
   // Cấu hình trợ từ / hư từ bỏ qua trong Vietphrase (mặc định: 地, 了)
   const [omittedParticlesEnabled, setOmittedParticlesEnabled] = useState<boolean>(() => getOmittedParticlesConfig().enabled);
@@ -193,13 +188,6 @@ export const DictionarySidebar: React.FC<DictionarySidebarProps> = ({
     setOmittedParticlesInput(nextStr);
     saveOmittedParticlesConfig(omittedParticlesEnabled, nextStr);
   };
-  const isPullingRef = useRef(false); // Flag to ignore changes caused by pulling data
-
-  // Persist autoSync preference
-  useEffect(() => {
-    localStorage.setItem('autoSync_vocab', String(autoSync));
-  }, [autoSync]);
-
   // Load VP size on mount/render
   useEffect(() => {
      setVpCount(vietphraseEngine.getSize());
@@ -209,32 +197,6 @@ export const DictionarySidebar: React.FC<DictionarySidebarProps> = ({
          setVpFiles(vietphraseEngine.getFiles());
      });
   }, [refreshTrigger]);
-
-  // Auto-Pull on mount or when switching novel / sign in
-  useEffect(() => {
-    if (isSignedIn && currentNovelId && !isSyncing && !isPullingRef.current) {
-      const timer = setTimeout(() => {
-        handlePullFromCloud(true);
-      }, 300);
-      return () => clearTimeout(timer);
-    }
-  }, [isSignedIn, currentNovelId]);
-
-  // AUTO SYNC LOGIC (Push)
-  useEffect(() => {
-    if (isInitialMount.current) {
-      isInitialMount.current = false;
-      return;
-    }
-    
-    if (!autoSync || !isSignedIn || isPullingRef.current || terms.length === 0) return;
-    
-    const timer = setTimeout(() => {
-      handlePushToCloud(true);
-    }, 2000);
-
-    return () => clearTimeout(timer);
-  }, [terms, autoSync, isSignedIn]);
 
   // Filter terms belonging strictly to current novel
   const currentNovelTerms = useMemo(() => {
@@ -318,7 +280,6 @@ export const DictionarySidebar: React.FC<DictionarySidebarProps> = ({
   };
 
   const handleDelete = (id: string) => {
-    deleteFirestoreDoc('vocab', id);
     onUpdateTerms(currentNovelTerms.filter(t => t.id !== id));
   };
 
@@ -341,11 +302,6 @@ export const DictionarySidebar: React.FC<DictionarySidebarProps> = ({
       // CRITICAL PROTECTION: If silent pull returned empty cloud data but we have local data, do not overwrite!
       if (silent && data.length === 0 && currentLocal.length > 0) {
           console.log("Preserving local terms since cloud is empty");
-          if (autoSync) {
-              setTimeout(() => {
-                  handlePushToCloud(true);
-              }, 1000);
-          }
           return;
       }
 
@@ -833,20 +789,9 @@ export const DictionarySidebar: React.FC<DictionarySidebarProps> = ({
              {/* CLOUD SYNC SECTION */}
              <div className="border-t border-[#D7CCC8] pt-3">
              <label className="block text-[10px] font-bold text-[#5D4037] uppercase mb-1 flex items-center gap-1"><Settings size={12}/> Đồng bộ Đám mây</label>
-
-             {/* Auto Sync Toggle */}
-             <div className="flex items-center justify-between bg-white border border-[#D7CCC8] p-2 rounded mb-2">
-                 <div className="flex items-center gap-2">
-                   <RefreshCw size={14} className={autoSync ? "text-green-600 animate-spin-slow" : "text-[#A1887F]"} />
-                   <span className="text-xs font-medium text-[#5D4037]">Tự động đồng bộ</span>
-                 </div>
-                 <button 
-                   onClick={() => setAutoSync(!autoSync)}
-                   className={`w-8 h-4 rounded-full relative transition-colors ${autoSync ? 'bg-green-500' : 'bg-[#D7CCC8]'}`}
-                 >
-                   <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${autoSync ? 'left-4.5' : 'left-0.5'}`} style={{left: autoSync ? '18px' : '2px'}} />
-                 </button>
-               </div>
+             <div className="bg-white border border-[#D7CCC8] p-2 rounded mb-2 text-[10px] text-[#5D4037] leading-relaxed">
+                 Đã tắt tự động đồng bộ để tiết kiệm quota Firestore. Mọi thay đổi được lưu trực tiếp trên máy; hãy nhấn <strong>Đồng bộ Firestore</strong> (hoặc nút Tải về / Đẩy lên) khi cần đồng bộ.
+             </div>
                
                {!isSignedIn && <div className="text-[10px] text-red-500 mt-1">Đăng nhập để đồng bộ dữ liệu.</div>}
              </div>
@@ -992,14 +937,6 @@ export const DictionarySidebar: React.FC<DictionarySidebarProps> = ({
                      }
 
                      onUpdateTerms(parsedItems);
-                     
-                     if (isSignedIn && currentNovelId) {
-                       try {
-                         await overwriteFirestoreData('vocab', currentNovelId, parsedItems);
-                       } catch (err) {
-                         console.error("Overwrite Cloud failed:", err);
-                       }
-                     }
 
                      setBulkText('');
                      setSyncMessage({ type: 'success', text: `Đã ghi đè thành công ${parsedItems.length} từ vào kho!` });
