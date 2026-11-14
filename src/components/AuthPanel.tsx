@@ -13,12 +13,27 @@ import {
   linkWithCredential,
   linkWithPopup
 } from 'firebase/auth';
-import { LogIn, LogOut, User as UserIcon, X, Mail, Lock, CheckCircle2, ShieldAlert, Loader2, Link, Eye, EyeOff } from 'lucide-react';
+import { LogIn, LogOut, User as UserIcon, X, Mail, Lock, CheckCircle2, ShieldAlert, Loader2, Link, Eye, EyeOff, CloudDownload, HardDrive } from 'lucide-react';
+import { recoverAllUserDataFromFirestore, RecoveredCloudData } from '../services/firestoreService';
+import { extractLocalBrowserData, ExtractedLocalData, SelectedLocalRestoreData } from '../services/localExtractService';
+import { LocalExtractModal } from './LocalExtractModal';
 
-export const AuthPanel: React.FC = () => {
+interface AuthPanelProps {
+  onApplyCloudRecovery?: (data: RecoveredCloudData) => Promise<void> | void;
+  onApplyLocalSelection?: (selection: SelectedLocalRestoreData) => Promise<void> | void;
+}
+
+export const AuthPanel: React.FC<AuthPanelProps> = ({
+  onApplyCloudRecovery,
+  onApplyLocalSelection,
+}) => {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [isRecoveringCloud, setIsRecoveringCloud] = useState(false);
+  const [isExtractingLocal, setIsExtractingLocal] = useState(false);
+  const [extractedLocalData, setExtractedLocalData] = useState<ExtractedLocalData | null>(null);
+  const [isLocalModalOpen, setIsLocalModalOpen] = useState(false);
   
   // Tab within Auth Modal: 'login' | 'register'
   const [authTab, setAuthTab] = useState<'login' | 'register'>('login');
@@ -186,6 +201,80 @@ export const AuthPanel: React.FC = () => {
     } catch (error) {
       console.error('Lỗi đăng xuất:', error);
     }
+  };
+
+  const handleRecoverAllFromFirestore = async () => {
+    if (!user || isRecoveringCloud) return;
+    setIsRecoveringCloud(true);
+    setErrorMsg('');
+    setSuccessMsg('');
+    try {
+      const recovered = await recoverAllUserDataFromFirestore();
+      const totalItems =
+        recovered.novels.length +
+        recovered.chapters.length +
+        recovered.customTerms.length +
+        recovered.characters.length +
+        recovered.relationships.length +
+        recovered.shortcuts.length +
+        (recovered.latestWorkspace ? 1 : 0);
+
+      if (totalItems === 0) {
+        setErrorMsg('Không tìm thấy dữ liệu nào thuộc tài khoản này trên Firestore.');
+        return;
+      }
+
+      if (onApplyCloudRecovery) {
+        await onApplyCloudRecovery(recovered);
+      }
+
+      setSuccessMsg(
+        `Đã khôi phục từ Firestore: ${recovered.novels.length} truyện, ${recovered.chapters.length} chương, ${recovered.customTerms.length} từ vựng, ${recovered.characters.length} nhân vật, ${recovered.relationships.length} quan hệ, ${recovered.shortcuts.length} gõ tắt${recovered.latestWorkspace ? ' và bản thảo đang làm dở' : ''}.`
+      );
+    } catch (error: any) {
+      const msg = String(error?.message || error || '');
+      if (msg.toLowerCase().includes('quota') || msg.toLowerCase().includes('resource-exhausted') || msg.toLowerCase().includes('free daily read units')) {
+        setErrorMsg(
+          'Firestore đã hết hạn ngạch đọc miễn phí hôm nay (sẽ tự reset vào ngày mai). Bạn có thể kiểm tra tại: https://console.firebase.google.com/project/naunetr/firestore/databases/ai-studio-nuntr-03f76b7c-dd62-4305-811a-5da8c9ab9010/data?openUpgradeDialog=true hoặc dùng nút Trích xuất Local bên dưới.'
+        );
+      } else {
+        setErrorMsg(msg || 'Không thể khôi phục dữ liệu từ Firestore.');
+      }
+    } finally {
+      setIsRecoveringCloud(false);
+    }
+  };
+
+  const handleExtractLocal = async () => {
+    if (isExtractingLocal) return;
+    setIsExtractingLocal(true);
+    setErrorMsg('');
+    setSuccessMsg('');
+    try {
+      const extracted = await extractLocalBrowserData();
+      setExtractedLocalData(extracted);
+      setIsLocalModalOpen(true);
+    } catch (error: any) {
+      setErrorMsg(error?.message || 'Không thể trích xuất dữ liệu từ bộ nhớ Local.');
+    } finally {
+      setIsExtractingLocal(false);
+    }
+  };
+
+  const handleRestoreSelectedLocal = async (selection: SelectedLocalRestoreData) => {
+    if (onApplyLocalSelection) {
+      await onApplyLocalSelection(selection);
+    }
+    const parts: string[] = [];
+    if (selection.novels.length > 0) parts.push(`${selection.novels.length} truyện`);
+    if (selection.chapters.length > 0) parts.push(`${selection.chapters.length} chương`);
+    if (selection.sessionToRestore) parts.push('1 bản thảo làm dở');
+    if (selection.historyToRestore.length > 0) parts.push(`${selection.historyToRestore.length} lịch sử`);
+    if (selection.customTerms.length > 0) parts.push(`${selection.customTerms.length} từ vựng`);
+    if (selection.characters.length > 0) parts.push(`${selection.characters.length} nhân vật`);
+    if (selection.relationships.length > 0) parts.push(`${selection.relationships.length} quan hệ`);
+    if (selection.shortcuts.length > 0) parts.push(`${selection.shortcuts.length} gõ tắt`);
+    setSuccessMsg(`Đã khôi phục từ Local các mục bạn chọn: ${parts.join(', ')}.`);
   };
 
   const resetForm = () => {
@@ -421,7 +510,7 @@ export const AuthPanel: React.FC = () => {
             </div>
 
             {/* Content */}
-            <div className="p-6 space-y-5">
+            <div className="p-6 space-y-5 max-h-[80vh] overflow-y-auto">
               {/* User Profile Summary */}
               <div className="bg-[#FFFDF7] border border-[#EFEBE9] p-4 rounded-lg flex items-center gap-3">
                 <div className="bg-[#FFECB3] text-[#5D4037] p-2 rounded-full">
@@ -534,17 +623,64 @@ export const AuthPanel: React.FC = () => {
                 </div>
               )}
 
+              {/* Data Recovery & Local Extraction */}
+              <div className="bg-white border border-[#D7CCC8] p-4 rounded-lg space-y-2.5">
+                <h4 className="text-[10px] font-bold text-[#8D6E63] uppercase tracking-wider">
+                  Khôi phục & Trích xuất dữ liệu tài khoản
+                </h4>
+                <p className="text-[11px] text-[#6D4C41] leading-relaxed">
+                  Nếu tài khoản hiện đang trống dữ liệu, bạn có thể lấy lại toàn bộ dữ liệu của tài khoản từ Firestore hoặc trích xuất bộ nhớ máy để xem và chọn mục muốn khôi phục.
+                </p>
+                <div className="space-y-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={handleRecoverAllFromFirestore}
+                    disabled={isRecoveringCloud || loading}
+                    className="w-full bg-[#5D4037] hover:bg-[#4E342E] text-white py-2 px-3 rounded-lg font-bold text-xs shadow-sm transition-colors flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+                  >
+                    {isRecoveringCloud ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : (
+                      <CloudDownload size={14} />
+                    )}
+                    <span>
+                      {isRecoveringCloud
+                        ? 'Đang lấy tất cả dữ liệu từ Firestore...'
+                        : 'Khôi phục tất cả dữ liệu từ Firestore'}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleExtractLocal}
+                    disabled={isExtractingLocal || loading}
+                    className="w-full bg-[#FAF6F0] hover:bg-[#EFE5D9] text-[#3E2723] border border-[#D7CCC8] py-2 px-3 rounded-lg font-bold text-xs shadow-2xs transition-colors flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+                  >
+                    {isExtractingLocal ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : (
+                      <HardDrive size={14} />
+                    )}
+                    <span>
+                      {isExtractingLocal
+                        ? 'Đang trích xuất dữ liệu Local...'
+                        : 'Trích xuất Local (Xem & Chọn khôi phục)'}
+                    </span>
+                  </button>
+                </div>
+              </div>
+
               {/* Status notifications */}
               {errorMsg && (
-                <div className="bg-red-50 border border-red-200 text-red-700 p-2.5 rounded-lg flex items-start gap-2 text-xs">
+                <div className="bg-red-50 border border-red-200 text-red-700 p-2.5 rounded-lg flex items-start gap-2 text-xs break-words">
                   <ShieldAlert size={16} className="shrink-0 mt-0.5" />
-                  <span>{errorMsg}</span>
+                  <span className="min-w-0">{errorMsg}</span>
                 </div>
               )}
               {successMsg && (
-                <div className="bg-green-50 border border-green-200 text-green-700 p-2.5 rounded-lg flex items-start gap-2 text-xs">
+                <div className="bg-green-50 border border-green-200 text-green-700 p-2.5 rounded-lg flex items-start gap-2 text-xs break-words">
                   <CheckCircle2 size={16} className="shrink-0 mt-0.5" />
-                  <span>{successMsg}</span>
+                  <span className="min-w-0">{successMsg}</span>
                 </div>
               )}
 
@@ -565,6 +701,13 @@ export const AuthPanel: React.FC = () => {
         </div>,
         document.body
       )}
+
+      <LocalExtractModal
+        isOpen={isLocalModalOpen}
+        onClose={() => setIsLocalModalOpen(false)}
+        data={extractedLocalData}
+        onRestoreSelected={handleRestoreSelectedLocal}
+      />
     </div>
   );
 };

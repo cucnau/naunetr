@@ -1,21 +1,28 @@
 import React, { useState, useEffect } from 'react';
 import { getNovels, createNovel } from '../services/firestoreService';
 import { Novel } from '../types';
-import { Book, Plus, Loader2, Trash2, RotateCcw } from 'lucide-react';
+import { Book, Plus, Loader2, Trash2 } from 'lucide-react';
 import { auth } from '../services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { getScopedStorageItem, setScopedStorageItem, recoverAllCachedNovels } from '../services/storageNamespace';
 import { db } from '../services/db';
-import { deepScanAndRecoverFromLocal } from '../services/localRecoveryService';
 
 interface NovelSelectorProps {
   currentNovelId: string;
   onSelectNovel: (id: string) => void;
   onDeleteNovel?: (id: string) => void;
+  novels?: Novel[];
+  onNovelsChange?: (novels: Novel[]) => void;
 }
 
-export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, onSelectNovel, onDeleteNovel }) => {
-  const [novels, setNovels] = useState<Novel[]>(() => {
+export const NovelSelector: React.FC<NovelSelectorProps> = ({
+  currentNovelId,
+  onSelectNovel,
+  onDeleteNovel,
+  novels: propNovels,
+  onNovelsChange,
+}) => {
+  const [internalNovels, setInternalNovels] = useState<Novel[]>(() => {
     try {
       const uid = auth.currentUser?.uid;
       const recovered = recoverAllCachedNovels(uid);
@@ -25,17 +32,24 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, on
       return [{ id: 'default', name: 'Truyện mặc định' }];
     }
   });
+
+  const novels = propNovels && propNovels.length > 0 ? propNovels : internalNovels;
+  const updateNovelsList = (list: Novel[]) => {
+    setInternalNovels(list);
+    onNovelsChange?.(list);
+  };
+
   const [loading, setLoading] = useState(false);
-  const [isSignedIn, setIsSignedIn] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Khôi phục bền vững từ IndexedDB ngay khi component mount
+  // Khôi phục bền vững từ IndexedDB chỉ khi component tự quản lý state (không nhận propNovels)
   useEffect(() => {
+    if (propNovels !== undefined) return;
     let isMounted = true;
     const uid = auth.currentUser?.uid;
     db.autoRecoverNovels(uid).then((recoveredList) => {
       if (isMounted && Array.isArray(recoveredList) && recoveredList.length > 0) {
-        setNovels(recoveredList);
+        updateNovelsList(recoveredList);
         if (!currentNovelId) {
           onSelectNovel(recoveredList[0].id);
         }
@@ -46,8 +60,8 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, on
   }, []);
 
   useEffect(() => {
+    if (propNovels !== undefined) return;
     const unsub = onAuthStateChanged(auth, async (user) => {
-      setIsSignedIn(!!user);
       if (user) {
         // Tải cache của user này nếu có
         try {
@@ -57,10 +71,11 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, on
             if (Array.isArray(parsed) && parsed.length > 0) {
               const clean = parsed.filter((n: any) => n && n.name && typeof n.name === 'string');
               if (clean.length > 0) {
-                setNovels(clean);
+                updateNovelsList(clean);
                 const nonDef = clean.find((n: any) => n.id !== 'default');
-                if (!currentNovelId || currentNovelId === 'default') {
-                  onSelectNovel(nonDef ? nonDef.id : clean[0].id);
+                const target = nonDef ? nonDef.id : clean[0].id;
+                if ((!currentNovelId || currentNovelId === 'default') && target !== currentNovelId) {
+                  onSelectNovel(target);
                 }
               }
             }
@@ -72,15 +87,16 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, on
         try {
           const recovered = await db.autoRecoverNovels();
           if (Array.isArray(recovered) && recovered.length > 0) {
-            setNovels(recovered);
+            updateNovelsList(recovered);
             const nonDef = recovered.find(n => n.id !== 'default');
-            if (!currentNovelId || currentNovelId === 'default') {
-              onSelectNovel(nonDef ? nonDef.id : recovered[0].id);
+            const target = nonDef ? nonDef.id : recovered[0].id;
+            if ((!currentNovelId || currentNovelId === 'default') && target !== currentNovelId) {
+              onSelectNovel(target);
             }
           }
         } catch (_) {
           const fallback = recoverAllCachedNovels();
-          setNovels(fallback);
+          updateNovelsList(fallback);
           if (!currentNovelId && fallback.length > 0) onSelectNovel(fallback[0].id);
         }
       }
@@ -89,42 +105,49 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, on
   }, []);
 
   useEffect(() => {
+    if (propNovels !== undefined) return;
     if (!currentNovelId && novels.length > 0) {
       onSelectNovel(novels[0].id);
     }
-  }, [currentNovelId, novels]);
+  }, [currentNovelId, novels, propNovels]);
 
   const fetchNovels = async (uid?: string) => {
     setLoading(true);
     setError(null);
     try {
       const currentUid = uid || auth.currentUser?.uid;
-      const cloudData = await getNovels();
-      
-      // 1. Nếu tải thành công từ Firestore
-      if (cloudData && cloudData.length > 0) {
-        setNovels(cloudData);
-        if (currentUid) {
-          setScopedStorageItem(`cached_novels_${currentUid}`, JSON.stringify(cloudData));
-          await db.saveNovels(cloudData, currentUid);
-        }
-        const nonDef = cloudData.find(n => n.id !== 'default');
-        const targetId = (currentNovelId && currentNovelId !== 'default' && cloudData.some(n => n.id === currentNovelId))
-          ? currentNovelId
-          : (nonDef ? nonDef.id : cloudData[0].id);
-        onSelectNovel(targetId);
-        return;
+      const [cloudData, localData] = await Promise.all([
+        getNovels().catch(() => [] as Novel[]),
+        db.autoRecoverNovels(currentUid).catch(() => [] as Novel[]),
+      ]);
+
+      // Hợp nhất 2 chiều giữa Cloud và Local (không ghi đè 1 chiều)
+      const mergedMap = new Map<string, Novel>();
+      (localData || []).forEach(n => {
+        if (n && n.id && n.name) mergedMap.set(n.id, n);
+      });
+      (cloudData || []).forEach(n => {
+        if (n && n.id && n.name) mergedMap.set(n.id, n);
+      });
+
+      if (mergedMap.size > 1 && mergedMap.has('default')) {
+        mergedMap.delete('default');
       }
 
-      // 2. Nếu Cloud chưa có hoặc offline: Khôi phục cache của ĐÚNG tài khoản này
-      const localData = await db.autoRecoverNovels(currentUid);
-      if (localData && localData.length > 0) {
-        setNovels(localData);
-        const nonDef = localData.find(n => n.id !== 'default');
-        const targetId = (currentNovelId && currentNovelId !== 'default' && localData.some(n => n.id === currentNovelId))
+      const merged = Array.from(mergedMap.values());
+      if (merged.length > 0) {
+        updateNovelsList(merged);
+        if (currentUid) {
+          setScopedStorageItem(`cached_novels_${currentUid}`, JSON.stringify(merged));
+          await db.saveNovels(merged, currentUid);
+        }
+        const nonDef = merged.find(n => n.id !== 'default');
+        const targetId = (currentNovelId && currentNovelId !== 'default' && merged.some(n => n.id === currentNovelId))
           ? currentNovelId
-          : (nonDef ? nonDef.id : localData[0].id);
-        onSelectNovel(targetId);
+          : (nonDef ? nonDef.id : merged[0].id);
+        if (targetId && targetId !== currentNovelId) {
+          onSelectNovel(targetId);
+        }
       }
     } catch (e: any) {
       console.warn("Đang dùng danh sách truyện từ bộ nhớ máy:", e);
@@ -144,7 +167,7 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, on
     // 1. Cập nhật giao diện ngay lập tức
     const filteredOld = novels.filter(n => !(n.id === 'default' && n.name === 'Truyện mặc định' && novels.length === 1));
     const updatedNovels = [...filteredOld, newNovel];
-    setNovels(updatedNovels);
+    updateNovelsList(updatedNovels);
     onSelectNovel(newNovel.id);
     
     // Lưu đồng thời vào cả IndexedDB lẫn LocalStorage theo đúng tài khoản này
@@ -168,31 +191,10 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, on
     }
   };
 
-  const handleDeepScan = async () => {
-    setLoading(true);
-    try {
-      const res = await deepScanAndRecoverFromLocal();
-      if (res.recoveredNovels.length > 0) {
-        setNovels(res.recoveredNovels);
-        const target = res.recoveredNovels.find(n => 
-          n.name.toLowerCase().includes('thao tác') || 
-          n.name.toLowerCase().includes('culi') || 
-          n.name.toLowerCase().includes('kiêu ngạo')
-        ) || res.recoveredNovels[0];
-        onSelectNovel(target.id);
-        alert(res.message);
-      }
-    } catch (e: any) {
-      alert("Lỗi quét bộ nhớ máy: " + (e?.message || e));
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleDelete = () => {
     const current = novels.find(n => n.id === currentNovelId);
     if (!current) return;
-    const confirmDelete = window.confirm(`Bạn có chắc chắn muốn xóa bộ truyện "${current.name}" khỏi danh sách hiển thị trên máy không? (Dữ liệu của người khác trên Cloud sẽ không bị ảnh hưởng)`);
+    const confirmDelete = window.confirm(`Bạn có chắc chắn muốn xóa bộ truyện "${current.name}" khỏi danh sách không?`);
     if (confirmDelete && onDeleteNovel) {
       onDeleteNovel(current.id);
     }
@@ -224,19 +226,11 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({ currentNovelId, on
               <Plus size={12} />
             </button>
 
-            <button 
-              onClick={handleDeepScan} 
-              className="transition-colors text-[#8D6E63] hover:text-[#2E7D32]" 
-              title="Quét bộ nhớ máy để khôi phục 3 truyện (Thao tác, Làm culi, Kiêu ngạo) và kho chương"
-            >
-              <RotateCcw size={11} />
-            </button>
-
             {onDeleteNovel && (novels.length > 1 || currentNovelId !== 'default') && (
               <button
                 onClick={handleDelete}
                 className="transition-colors text-[#A1887F] hover:text-red-700 ml-0.5"
-                title="Gỡ bộ truyện này khỏi máy"
+                title="Xóa bộ truyện này"
               >
                 <Trash2 size={11} />
               </button>

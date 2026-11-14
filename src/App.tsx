@@ -1,11 +1,12 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { AppStatus, TranslationSession, HistoryItem, TranslationResponse, Chapter, TranslationSegment, Character, Relationship, CustomTerm } from './types';
+import { AppStatus, TranslationSession, HistoryItem, TranslationResponse, Chapter, TranslationSegment, Character, Relationship, CustomTerm, Novel } from './types';
 import { exportToExcel } from './services/excelService';
-import { getNovels, createNovel, deleteNovel, getChaptersFromCloud, saveChapterToCloud, bulkSaveChaptersToCloud, deleteChapterFromCloud, clearNovelChaptersFromCloud, syncFirestoreData, subscribeToChapters, subscribeToUserLiveWorkspace, saveUserLiveWorkspaceToCloud, getUserLiveWorkspaceFromCloud, isCloudQuotaExhausted, getDeviceId } from './services/firestoreService';
+import { getNovels, createNovel, deleteNovel, getChaptersFromCloud, saveChapterToCloud, bulkSaveChaptersToCloud, deleteChapterFromCloud, clearNovelChaptersFromCloud, syncFirestoreData, subscribeToChapters, subscribeToUserLiveWorkspace, saveUserLiveWorkspaceToCloud, getUserLiveWorkspaceFromCloud, isCloudQuotaExhausted, getDeviceId, RecoveredCloudData } from './services/firestoreService';
+import { SelectedLocalRestoreData } from './services/localExtractService';
 import { auth } from './services/firebase';
-import { onAuthStateChanged } from 'firebase/auth';
+import { onAuthStateChanged, User } from 'firebase/auth';
 import { vietphraseEngine } from './services/vietphraseService';
 import { extractBracketsOnly } from './services/bracketUtils';
 import { db } from './services/db'; // Import db service
@@ -19,12 +20,11 @@ import { AuthPanel } from './components/AuthPanel';
 import { NovelSelector } from './components/NovelSelector';
 import { FontSelectorModal } from './components/FontSelectorModal';
 import { initFont } from './services/fontService';
-import { BookOpen, Loader2, Eraser, Quote, Layout, History, AlertTriangle, Layers, FolderOpen, Keyboard, BookA, Users, X, Wifi, Scissors, CheckSquare, Square, Type, ExternalLink, FileText, Cloud, Check, Star, ChevronDown, CheckCircle2 } from 'lucide-react';
-import { checkAndApplyShortcut, getStoredShortcuts, isShortcutsEnabled, syncShortcutsFromCloud } from './services/shortcutService';
+import { BookOpen, Loader2, Eraser, Quote, Layout, History, AlertTriangle, Layers, FolderOpen, Keyboard, BookA, Users, X, Wifi, Scissors, CheckSquare, Square, Type, ExternalLink, FileText, Cloud, Check, Star, ChevronDown, CheckCircle2, RefreshCw } from 'lucide-react';
+import { checkAndApplyShortcut, getStoredShortcuts, saveStoredShortcuts, isShortcutsEnabled, syncShortcutsFromCloud } from './services/shortcutService';
 import { handleSmartQuotesKeyDown, convertStraightToSmartQuotes } from './services/quoteUtils';
 import { getScopedStorageItem, setScopedStorageItem, recoverAllCachedNovels } from './services/storageNamespace';
 import { normalizeVietnameseText } from './services/vietnameseUtils';
-import { deepScanAndRecoverFromLocal } from './services/localRecoveryService';
 
 const EXAMPLE_TEXT = "路遥知马力，日久见人心。";
 
@@ -357,13 +357,43 @@ function AppContent() {
   const [redoStack, setRedoStack] = useState<HistorySnapshot[]>([]);
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [autoCleanBlankLines, setAutoCleanBlankLines] = useState(true);
+  const [currentUser, setCurrentUser] = useState<User | null>(auth.currentUser);
   const [lastRemoteSyncTime, setLastRemoteSyncTime] = useState<number>(0);
   const lastLocalEditTimeRef = useRef<number>(0);
+  const localWorkspaceUpdatedAtRef = useRef<number>(
+    Number(getScopedStorageItem('local_workspace_updated_at') || '0')
+  );
   const deletedChapterIdsRef = useRef<Set<string>>(new Set());
 
+  const [hasUnsyncedChanges, setHasUnsyncedChanges] = useState<boolean>(false);
+  const [isSyncingToCloud, setIsSyncingToCloud] = useState<boolean>(false);
+  const [syncToastMessage, setSyncToastMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
+  const markLocalWorkspaceDirty = (timestamp?: number) => {
+    const ts = timestamp || Date.now();
+    lastLocalEditTimeRef.current = ts;
+    localWorkspaceUpdatedAtRef.current = ts;
+    try {
+      setScopedStorageItem('local_workspace_updated_at', String(ts));
+    } catch (_) {}
+    setHasUnsyncedChanges(true);
+  };
 
-  // Danh sách Novels (tự động khôi phục đúng cho tài khoản đang dùng)
+  // Cảnh báo khi người dùng đóng tab mà quên chưa nhấn nút đồng bộ (không tự ý ghi đè 1 chiều)
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasUnsyncedChanges && (currentUser || auth.currentUser)) {
+        e.preventDefault();
+        e.returnValue = 'Bạn có dữ liệu chưa được đồng bộ với Firestore! Hãy nhấn nút "Đồng bộ Firestore" trước khi đóng tab.';
+        return e.returnValue;
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [hasUnsyncedChanges, currentUser]);
   const [novels, setNovels] = useState<Novel[]>(() => {
     try {
       const uid = auth.currentUser?.uid;
@@ -391,12 +421,13 @@ function AppContent() {
     return () => { isMounted = false; };
   }, []);
 
-  // Tự động ĐỒNG BỘ DỮ LIỆU TỪ LOCAL TRƯỚC VÀ FIRESTORE TIẾP THEO cho từng tài khoản và khôi phục ĐÚNG TIẾN ĐỘ THỰC TẾ
+  // Tự động ĐỒNG BỘ 2 CHIỀU giữa Local và Firestore cho từng tài khoản và khôi phục ĐÚNG TIẾN ĐỘ THỰC TẾ
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
+      setCurrentUser(user);
       if (user) {
         try {
-          // BƯỚC 1: NẠP DỮ LIỆU CỤC BỘ TRƯỚC TIÊN (Local First - đảm bảo không bao giờ bị trắng màn hình hay mất dữ liệu khi Firestore hết quota)
+          // BƯỚC 1: HỢP NHẤT 2 CHIỀU DANH SÁCH TRUYỆN (Local <-> Cloud Firestore)
           const userLocal = await db.autoRecoverNovels(user.uid);
           let cloudNovels: Novel[] = [];
           if (!isCloudQuotaExhausted()) {
@@ -408,16 +439,18 @@ function AppContent() {
           }
 
           const novelMap = new Map<string, Novel>();
-          // Ưu tiên nạp truyện của tài khoản này từ Local
           (userLocal || []).forEach(n => {
             if (n && n.id && n.name) novelMap.set(n.id, n);
           });
-          // Bổ sung truyện từ Cloud Firestore nếu có
           (cloudNovels || []).forEach(n => {
             if (n && n.id && n.name) novelMap.set(n.id, n);
           });
 
-          // Tự động đẩy các bộ truyện ở Local chưa có trên Cloud lên Firestore (nếu cloud chưa hết quota)
+          if (novelMap.size > 1 && novelMap.has('default')) {
+            novelMap.delete('default');
+          }
+
+          // Đẩy các bộ truyện chỉ có ở Local lên Firestore (nếu cloud chưa hết quota)
           if (!isCloudQuotaExhausted()) {
             (userLocal || []).forEach(n => {
               if (n && n.id && n.name && !cloudNovels.some(cn => cn.id === n.id)) {
@@ -428,23 +461,8 @@ function AppContent() {
             });
           }
 
-          let effectiveNovels = Array.from(novelMap.values());
+          const effectiveNovels = Array.from(novelMap.values());
           let currentTargetNovelId = session.currentNovelId;
-
-          // Nếu danh sách hiện tại chưa có 3 bộ truyện của bạn (Thao tác, Làm culi, Kiêu ngạo), tự động quét sâu bộ nhớ máy để phục hồi
-          const hasUserNovels = effectiveNovels.some(n => {
-            const l = (n.name || '').toLowerCase();
-            return l.includes('thao tác') || l.includes('culi') || l.includes('kiêu ngạo');
-          });
-
-          if (!hasUserNovels) {
-            try {
-              const deepReport = await deepScanAndRecoverFromLocal();
-              if (deepReport.recoveredNovels.length > 0) {
-                effectiveNovels = deepReport.recoveredNovels;
-              }
-            } catch (_) {}
-          }
 
           if (effectiveNovels.length > 0) {
             setNovels(effectiveNovels);
@@ -452,20 +470,14 @@ function AppContent() {
             setScopedStorageItem(`cached_novels_${user.uid}`, JSON.stringify(effectiveNovels));
             setScopedStorageItem('cached_novels_list', JSON.stringify(effectiveNovels));
 
-            // Chọn bộ truyện thực tế hợp lệ của tài khoản này
-            const targetUserNovel = effectiveNovels.find(n => {
-              const l = (n.name || '').toLowerCase();
-              return l.includes('thao tác') || l.includes('culi') || l.includes('kiêu ngạo');
-            });
             const nonDefault = effectiveNovels.find(n => n.id !== 'default');
             const targetId = (session.currentNovelId && session.currentNovelId !== 'default' && effectiveNovels.some(n => n.id === session.currentNovelId))
               ? session.currentNovelId
-              : (targetUserNovel ? targetUserNovel.id : (nonDefault ? nonDefault.id : effectiveNovels[0].id));
+              : (nonDefault ? nonDefault.id : effectiveNovels[0].id);
             currentTargetNovelId = targetId;
           }
 
-          // BƯỚC 2: KHÔI PHỤC TIẾN ĐỘ THỰC TẾ (Bản thảo đang edit/beta dở)
-          // Kiểm tra xem Local hiện tại hoặc db.getActiveSession có bản thảo dở dang không
+          // BƯỚC 2: HỢP NHẤT 2 CHIỀU TIẾN ĐỘ THỰC TẾ (Local <-> Cloud theo timestamp thật)
           const savedLocalSession = await db.getActiveSession();
           let liveWorkspace: any = null;
 
@@ -482,8 +494,50 @@ function AppContent() {
           const hasLocalWork = Boolean(activeInput.length > 0 || activeSegments > 0);
           const hasCloudWork = Boolean((liveWorkspace?.inputText && liveWorkspace.inputText.trim().length > 0) || (liveWorkspace?.result?.segments && liveWorkspace.result.segments.length > 0));
 
-          if (hasLocalWork && (!hasCloudWork || (liveWorkspace?.updatedAt && Date.now() > liveWorkspace.updatedAt))) {
-            // Giữ nguyên bản thảo ở máy và đồng bộ lên Cloud nếu chưa hết quota
+          const localTime = localWorkspaceUpdatedAtRef.current || 0;
+          const cloudTime = liveWorkspace?.updatedAt || 0;
+
+          if (hasCloudWork && liveWorkspace && (!hasLocalWork || cloudTime > localTime)) {
+            // Cloud mới hơn hoặc Local đang trống -> Kéo từ Cloud về
+            const targetNovel = (liveWorkspace.novelId && effectiveNovels.some(n => n.id === liveWorkspace.novelId))
+              ? liveWorkspace.novelId
+              : (currentTargetNovelId || 'default');
+            
+            currentTargetNovelId = targetNovel;
+
+            let restoredResult = liveWorkspace.result ? sanitizeResult(liveWorkspace.result) : null;
+            if (!restoredResult && liveWorkspace.segments && liveWorkspace.segments.length > 0) {
+              restoredResult = {
+                segments: liveWorkspace.segments,
+                naturalTranslation: liveWorkspace.segments.map((s: any) => s.natural).join('\n'),
+                quickTrans: liveWorkspace.segments.map((s: any) => s.quick).join('\n'),
+                sinoVietnamese: '',
+                deeplTranslation: liveWorkspace.segments.map((s: any) => s.deepl).join('\n'),
+                vocabulary: []
+              };
+            }
+
+            const restoredSession: TranslationSession = {
+              ...session,
+              currentNovelId: targetNovel,
+              currentChapterId: liveWorkspace.chapterId || undefined,
+              inputText: liveWorkspace.inputText || '',
+              deeplText: liveWorkspace.deeplText || '',
+              preEditedText: liveWorkspace.preEditedText || '',
+              result: restoredResult,
+              status: (liveWorkspace.status as AppStatus) || (restoredResult ? AppStatus.SUCCESS : AppStatus.IDLE),
+              completedSegments: liveWorkspace.completedSegments || []
+            };
+
+            localWorkspaceUpdatedAtRef.current = cloudTime || Date.now();
+            try {
+              setScopedStorageItem('local_workspace_updated_at', String(localWorkspaceUpdatedAtRef.current));
+            } catch (_) {}
+
+            setSession(restoredSession);
+            db.saveActiveSession(restoredSession).catch(console.error);
+          } else if (hasLocalWork && (!hasCloudWork || localTime > cloudTime)) {
+            // Local có chỉnh sửa mới hơn hoặc Cloud trống -> Giữ Local và đẩy lên Cloud
             const effectiveSession = (session.inputText?.trim().length > 0 || session.result?.segments?.length) ? session : savedLocalSession;
             if (effectiveSession) {
               if (currentTargetNovelId && effectiveSession.currentNovelId !== currentTargetNovelId) {
@@ -503,48 +557,16 @@ function AppContent() {
                   preEditedText: effectiveSession.preEditedText,
                   result: effectiveSession.result,
                   completedSegments: effectiveSession.completedSegments,
-                  status: effectiveSession.status
+                  status: effectiveSession.status,
+                  updatedAt: localTime || Date.now()
                 }, true).catch(console.warn);
               }
             }
-          } else if (hasCloudWork && liveWorkspace) {
-            // Khôi phục từ Cloud về màn hình
-            const targetNovel = (liveWorkspace.novelId && effectiveNovels.some(n => n.id === liveWorkspace.novelId))
-              ? liveWorkspace.novelId
-              : (currentTargetNovelId || 'default');
-            
-            currentTargetNovelId = targetNovel;
-
-            let restoredResult = liveWorkspace.result ? sanitizeResult(liveWorkspace.result) : null;
-            if (!restoredResult && liveWorkspace.segments && liveWorkspace.segments.length > 0) {
-              restoredResult = {
-                segments: liveWorkspace.segments,
-                naturalTranslation: liveWorkspace.segments.map((s: any) => s.natural).join('\n'),
-                quickTrans: liveWorkspace.segments.map((s: any) => s.quick).join('\n'),
-                deeplTranslation: liveWorkspace.segments.map((s: any) => s.deepl).join('\n'),
-                vocabulary: []
-              };
-            }
-
-            const restoredSession: TranslationSession = {
-              ...session,
-              currentNovelId: targetNovel,
-              currentChapterId: liveWorkspace.chapterId || undefined,
-              inputText: liveWorkspace.inputText || '',
-              deeplText: liveWorkspace.deeplText || '',
-              preEditedText: liveWorkspace.preEditedText || '',
-              result: restoredResult,
-              status: (liveWorkspace.status as AppStatus) || (restoredResult ? AppStatus.SUCCESS : AppStatus.IDLE),
-              completedSegments: liveWorkspace.completedSegments || []
-            };
-
-            setSession(restoredSession);
-            db.saveActiveSession(restoredSession).catch(console.error);
           } else if (currentTargetNovelId) {
             setSession(prev => ({ ...prev, currentNovelId: currentTargetNovelId }));
           }
 
-          // BƯỚC 3: ĐỒNG BỘ KHO CHƯƠNG (Nạp từ Local trước, sau đó đồng bộ với Cloud)
+          // BƯỚC 3: ĐỒNG BỘ 2 CHIỀU KHO CHƯƠNG (Local <-> Cloud)
           if (currentTargetNovelId && currentTargetNovelId !== 'default') {
             const allLocalChaps = await db.getAllChapters();
             const localChaps = (allLocalChaps || []).filter(c => !c.novelId || c.novelId === currentTargetNovelId);
@@ -565,19 +587,17 @@ function AppContent() {
             const localMap = new Map<string, Chapter>();
             localChaps.forEach(c => localMap.set(c.id, c));
 
-            // Nạp từ Cloud nếu có
             (cloudChaps || []).forEach(cloudCh => {
               const localCh = localMap.get(cloudCh.id);
               const { selected, shouldSyncToCloud } = resolveChapterConflict(localCh, cloudCh);
               mergedMap.set(cloudCh.id, selected);
-              if (selected === cloudCh && !localCh) {
+              if (selected === cloudCh && (!localCh || (cloudCh.timestamp || 0) > (localCh.timestamp || 0) || (cloudCh.result?.segments?.length || 0) > (localCh.result?.segments?.length || 0))) {
                 chapsToSaveDb.push(cloudCh);
-              } else if (shouldSyncToCloud && localCh) {
-                chapsToUpload.push(localCh);
+              } else if (shouldSyncToCloud) {
+                chapsToUpload.push(selected);
               }
             });
 
-            // Tự động giữ nguyên mọi chương có ở Local (kể cả khi Cloud lỗi hay hết quota)
             localChaps.forEach(localCh => {
               if (!mergedMap.has(localCh.id)) {
                 const chapToSave: Chapter = { ...localCh, novelId: currentTargetNovelId };
@@ -586,12 +606,10 @@ function AppContent() {
               }
             });
 
-            // Lưu các chương hợp lệ mới vào IndexedDB
             for (const ch of chapsToSaveDb) {
               await db.saveChapter(ch);
             }
 
-            // Tự động đẩy lên Cloud Firestore nếu chưa hết quota
             if (chapsToUpload.length > 0 && !isCloudQuotaExhausted()) {
               bulkSaveChaptersToCloud(chapsToUpload).catch(console.warn);
             }
@@ -602,7 +620,6 @@ function AppContent() {
               return [...finalChaps, ...others];
             });
 
-            // Nếu trên màn hình chưa có bản thảo đang edit dở, tự động nạp chương mới nhất lên bảng
             setSession(prev => {
               const hasWork = Boolean((prev.inputText && prev.inputText.trim().length > 0) || (prev.result?.segments && prev.result.segments.length > 0));
               if (!hasWork && finalChaps.length > 0) {
@@ -623,9 +640,17 @@ function AppContent() {
             });
           }
 
+          setTimeout(() => setHasUnsyncedChanges(false), 500);
         } catch (e) {
           console.warn("Lỗi khởi tạo đồng bộ dữ liệu:", e);
         }
+      } else {
+        try {
+          const guestNovels = await db.autoRecoverNovels();
+          if (Array.isArray(guestNovels) && guestNovels.length > 0) {
+            setNovels(guestNovels);
+          }
+        } catch (_) {}
       }
     });
     return () => unsub();
@@ -638,6 +663,7 @@ function AppContent() {
     const filteredOld = novels.filter(n => !(n.id === 'default' && n.name === 'Truyện mặc định' && novels.length === 1));
     const updatedNovels = [...filteredOld, newNovel];
 
+    markLocalWorkspaceDirty();
     setNovels(updatedNovels);
     setSession(prev => ({
       ...prev,
@@ -668,9 +694,10 @@ function AppContent() {
   };
 
   const handleRenameNovel = async (id: string, newName: string) => {
+    markLocalWorkspaceDirty();
     const updated = novels.map(n => n.id === id ? { ...n, name: newName } : n);
     setNovels(updated);
-    await db.saveNovels(updated);
+    await db.saveNovels(updated, auth.currentUser?.uid);
     setScopedStorageItem('cached_novels_list', JSON.stringify(updated));
 
     try {
@@ -681,6 +708,7 @@ function AppContent() {
   };
 
   const handleDeleteNovel = async (id: string) => {
+    markLocalWorkspaceDirty();
     let nextCurrentId = session.currentNovelId;
     const remaining = novels.filter(n => n.id !== id);
     const finalNovels = remaining.length > 0 ? remaining : [{ id: `novel_${Date.now()}`, name: 'Thư mục mới' }];
@@ -871,6 +899,11 @@ useEffect(() => {
             if (Date.now() - lastLocalEditTimeRef.current < 350) return;
 
             setLastRemoteSyncTime(Date.now());
+            const remoteTs = liveData.updatedAt || Date.now();
+            localWorkspaceUpdatedAtRef.current = remoteTs;
+            try {
+              setScopedStorageItem('local_workspace_updated_at', String(remoteTs));
+            } catch (_) {}
 
             // Tự động chuyển bộ truyện nếu thiết bị khác vừa chuyển bộ truyện
             if (liveData.novelId) {
@@ -1200,7 +1233,587 @@ useEffect(() => {
   // --- ACTIONS ---
 
   const updateSession = (updates: Partial<TranslationSession>) => {
+    markLocalWorkspaceDirty();
     setSession(prev => ({ ...prev, ...updates }));
+  };
+
+  // Hàm thủ công ĐỒNG BỘ 2 CHIỀU VỚI FIRESTORE (Trộn thông minh Local <-> Cloud, không ghi đè 1 chiều)
+  const handleManualSyncToFirestore = async () => {
+    const user = auth.currentUser;
+    if (!user) {
+      setSyncToastMessage({
+        type: 'info',
+        text: 'Vui lòng đăng nhập tài khoản (góc phải trên) trước khi đồng bộ 2 chiều với Firestore!'
+      });
+      setTimeout(() => setSyncToastMessage(null), 4000);
+      return;
+    }
+    if (isSyncingToCloud) return;
+
+    setIsSyncingToCloud(true);
+    setSyncToastMessage({ type: 'info', text: 'Đang đồng bộ 2 chiều giữa máy và Firestore...' });
+
+    try {
+      // 1. ĐỒNG BỘ 2 CHIỀU DANH SÁCH TRUYỆN
+      const [cloudNovels, localDbNovels] = await Promise.all([
+        getNovels().catch(() => [] as Novel[]),
+        db.autoRecoverNovels(user.uid).catch(() => [] as Novel[])
+      ]);
+
+      const mergedNovelsMap = new Map<string, Novel>();
+      (novels || []).forEach(n => {
+        if (n && n.id && n.name) mergedNovelsMap.set(n.id, n);
+      });
+      (localDbNovels || []).forEach(n => {
+        if (n && n.id && n.name) mergedNovelsMap.set(n.id, n);
+      });
+      (cloudNovels || []).forEach(n => {
+        if (n && n.id && n.name) mergedNovelsMap.set(n.id, n);
+      });
+
+      if (mergedNovelsMap.size > 1 && mergedNovelsMap.has('default')) {
+        mergedNovelsMap.delete('default');
+      }
+
+      const mergedNovels = Array.from(mergedNovelsMap.values());
+      if (mergedNovels.length > 0) {
+        setNovels(mergedNovels);
+        await db.saveNovels(mergedNovels, user.uid);
+        setScopedStorageItem(`cached_novels_${user.uid}`, JSON.stringify(mergedNovels));
+        setScopedStorageItem('cached_novels_list', JSON.stringify(mergedNovels));
+
+        // Đẩy lên Cloud những bộ truyện chỉ có ở Local
+        if (!isCloudQuotaExhausted()) {
+          for (const novel of mergedNovels) {
+            if (novel.id !== 'default' && !cloudNovels.some(cn => cn.id === novel.id)) {
+              await createNovel(novel.id, novel.name).catch(console.warn);
+            }
+          }
+        }
+      }
+
+      const activeNovelId =
+        session.currentNovelId && session.currentNovelId !== 'default' && mergedNovels.some(n => n.id === session.currentNovelId)
+          ? session.currentNovelId
+          : (mergedNovels.find(n => n.id !== 'default')?.id || session.currentNovelId || 'default');
+
+      // 2. ĐỒNG BỘ 2 CHIỀU KHO CHƯƠNG CHO TOÀN BỘ TRUYỆN
+      const allLocalChaps = await db.getAllChapters();
+      const targetNovelIds = Array.from(
+        new Set(
+          mergedNovels
+            .map(n => n.id)
+            .concat(activeNovelId && activeNovelId !== 'default' ? [activeNovelId] : [])
+            .filter(id => id && id !== 'default')
+        )
+      );
+
+      const allMergedChapters: Chapter[] = [];
+      const chapsToSaveDb: Chapter[] = [];
+      const chapsToUpload: Chapter[] = [];
+
+      for (const nId of targetNovelIds) {
+        const localForNovel = (allLocalChaps || []).filter(c =>
+          !deletedChapterIdsRef.current.has(c.id) &&
+          (c.novelId === nId || (!c.novelId && nId === activeNovelId))
+        );
+        const cloudForNovel = isCloudQuotaExhausted()
+          ? []
+          : await getChaptersFromCloud(nId).catch(() => [] as Chapter[]);
+
+        const localMap = new Map<string, Chapter>();
+        localForNovel.forEach(c => localMap.set(c.id, { ...c, novelId: c.novelId || nId }));
+
+        const novelMergedMap = new Map<string, Chapter>();
+
+        (cloudForNovel || []).forEach(cloudCh => {
+          if (deletedChapterIdsRef.current.has(cloudCh.id)) return;
+          const localCh = localMap.get(cloudCh.id);
+          const { selected, shouldSyncToCloud } = resolveChapterConflict(localCh, cloudCh);
+          const normalizedSelected: Chapter = { ...selected, novelId: nId };
+          novelMergedMap.set(cloudCh.id, normalizedSelected);
+
+          if (selected === cloudCh && (!localCh || (cloudCh.timestamp || 0) > (localCh.timestamp || 0) || (cloudCh.result?.segments?.length || 0) > (localCh.result?.segments?.length || 0))) {
+            chapsToSaveDb.push(normalizedSelected);
+          } else if (shouldSyncToCloud) {
+            chapsToUpload.push(normalizedSelected);
+          }
+        });
+
+        localMap.forEach((localCh, id) => {
+          if (!novelMergedMap.has(id)) {
+            novelMergedMap.set(id, localCh);
+            chapsToUpload.push(localCh);
+          }
+        });
+
+        novelMergedMap.forEach(c => allMergedChapters.push(c));
+      }
+
+      for (const ch of chapsToSaveDb) {
+        await db.saveChapter(ch);
+      }
+      if (chapsToUpload.length > 0 && !isCloudQuotaExhausted()) {
+        await bulkSaveChaptersToCloud(chapsToUpload);
+      }
+
+      if (allMergedChapters.length > 0 || targetNovelIds.length > 0) {
+        setChapters(prev => {
+          const otherChaps = prev.filter(c => c.novelId && !targetNovelIds.includes(c.novelId));
+          const combined = [...allMergedChapters, ...otherChaps].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+          return combined;
+        });
+      }
+
+      // 3. ĐỒNG BỘ 2 CHIỀU TIẾN ĐỘ LÀM DỞ (Live Workspace)
+      const cloudWorkspace = isCloudQuotaExhausted()
+        ? null
+        : await getUserLiveWorkspaceFromCloud().catch(() => null);
+
+      const hasLocalWork = Boolean(
+        (session.inputText && session.inputText.trim().length > 0) ||
+        (session.result?.segments && session.result.segments.length > 0) ||
+        (session.preEditedText && session.preEditedText.trim().length > 0)
+      );
+      const hasCloudWork = Boolean(
+        cloudWorkspace &&
+        ((cloudWorkspace.inputText && cloudWorkspace.inputText.trim().length > 0) ||
+          (cloudWorkspace.result?.segments && cloudWorkspace.result.segments.length > 0) ||
+          (cloudWorkspace.preEditedText && cloudWorkspace.preEditedText.trim().length > 0))
+      );
+
+      const localTime = localWorkspaceUpdatedAtRef.current || 0;
+      const cloudTime = cloudWorkspace?.updatedAt || 0;
+
+      let effectiveNovelIdForData = activeNovelId;
+
+      if (hasCloudWork && cloudWorkspace && (!hasLocalWork || cloudTime > localTime)) {
+        // Cloud mới hơn hoặc Local đang trống -> Kéo về màn hình
+        const targetNovel = (cloudWorkspace.novelId && mergedNovels.some(n => n.id === cloudWorkspace.novelId))
+          ? cloudWorkspace.novelId
+          : activeNovelId;
+        effectiveNovelIdForData = targetNovel;
+
+        let restoredResult = cloudWorkspace.result ? sanitizeResult(cloudWorkspace.result) : null;
+        if (!restoredResult && cloudWorkspace.segments && cloudWorkspace.segments.length > 0) {
+          restoredResult = {
+            segments: cloudWorkspace.segments,
+            naturalTranslation: cloudWorkspace.segments.map((s: any) => s.natural).join('\n'),
+            quickTrans: cloudWorkspace.segments.map((s: any) => s.quick).join('\n'),
+            sinoVietnamese: '',
+            deeplTranslation: cloudWorkspace.segments.map((s: any) => s.deepl).join('\n'),
+            vocabulary: []
+          };
+        }
+
+        const syncedTs = cloudTime || Date.now();
+        localWorkspaceUpdatedAtRef.current = syncedTs;
+        setScopedStorageItem('local_workspace_updated_at', String(syncedTs));
+
+        setSession(prev => {
+          const updatedSession: TranslationSession = {
+            ...prev,
+            currentNovelId: targetNovel,
+            currentChapterId: cloudWorkspace.chapterId || undefined,
+            inputText: cloudWorkspace.inputText || '',
+            deeplText: cloudWorkspace.deeplText || '',
+            preEditedText: cloudWorkspace.preEditedText || '',
+            result: restoredResult,
+            status: (cloudWorkspace.status as AppStatus) || (restoredResult ? AppStatus.SUCCESS : AppStatus.IDLE),
+            completedSegments: cloudWorkspace.completedSegments || []
+          };
+          db.saveActiveSession({ ...updatedSession, customTerms: [] }).catch(console.error);
+          return updatedSession;
+        });
+      } else {
+        // Local mới hơn hoặc Cloud chưa có -> Đẩy tiến độ Local lên Cloud
+        const pushTs = localTime || Date.now();
+        localWorkspaceUpdatedAtRef.current = pushTs;
+        setScopedStorageItem('local_workspace_updated_at', String(pushTs));
+        if (!isCloudQuotaExhausted()) {
+          await saveUserLiveWorkspaceToCloud({
+            novelId: activeNovelId,
+            chapterId: session.currentChapterId,
+            inputText: session.inputText || '',
+            deeplText: session.deeplText || '',
+            preEditedText: session.preEditedText || '',
+            result: session.result,
+            completedSegments: session.completedSegments || [],
+            status: session.status,
+            updatedAt: pushTs
+          }, true);
+        }
+      }
+
+      // 4. ĐỒNG BỘ 2 CHIỀU TỪ ĐIỂN, NHÂN VẬT, QUAN HỆ & GÕ TẮT CHO TRUYỆN HIỆN TẠI
+      if (effectiveNovelIdForData && effectiveNovelIdForData !== 'default' && !isCloudQuotaExhausted()) {
+        // Từ vựng (2 chiều)
+        const cloudTerms = await syncFirestoreData<CustomTerm>('vocab', effectiveNovelIdForData, 'GET').catch(() => [] as CustomTerm[]);
+        const localNovelTerms = (session.customTerms || []).filter(t => !t.novelId || t.novelId === effectiveNovelIdForData || t.novelId === 'default');
+        const otherTerms = (session.customTerms || []).filter(t => t.novelId && t.novelId !== effectiveNovelIdForData && t.novelId !== 'default');
+        const termMap = new Map<string, CustomTerm>();
+        cloudTerms.forEach(t => termMap.set(t.id, { ...t, novelId: effectiveNovelIdForData }));
+        localNovelTerms.forEach(t => termMap.set(t.id, { ...t, novelId: effectiveNovelIdForData }));
+        const mergedNovelTerms = Array.from(termMap.values());
+        if (mergedNovelTerms.length > 0) {
+          await syncFirestoreData('vocab', effectiveNovelIdForData, 'POST', mergedNovelTerms).catch(console.warn);
+        }
+
+        // Nhân vật (2 chiều)
+        const cloudChars = await syncFirestoreData<Character>('char', effectiveNovelIdForData, 'GET').catch(() => [] as Character[]);
+        const localNovelChars = (session.characters || []).filter(c => !c.novelId || c.novelId === effectiveNovelIdForData || c.novelId === 'default');
+        const otherChars = (session.characters || []).filter(c => c.novelId && c.novelId !== effectiveNovelIdForData && c.novelId !== 'default');
+        const charMap = new Map<string, Character>();
+        cloudChars.forEach(c => charMap.set(c.id, { ...c, novelId: effectiveNovelIdForData }));
+        localNovelChars.forEach(c => charMap.set(c.id, { ...c, novelId: effectiveNovelIdForData }));
+        const mergedNovelChars = Array.from(charMap.values());
+        if (mergedNovelChars.length > 0) {
+          await syncFirestoreData('char', effectiveNovelIdForData, 'POST', mergedNovelChars).catch(console.warn);
+        }
+
+        // Quan hệ (2 chiều)
+        const cloudRels = await syncFirestoreData<Relationship>('rel', effectiveNovelIdForData, 'GET').catch(() => [] as Relationship[]);
+        const localNovelRels = (session.relationships || []).filter(r => !r.novelId || r.novelId === effectiveNovelIdForData || r.novelId === 'default');
+        const otherRels = (session.relationships || []).filter(r => r.novelId && r.novelId !== effectiveNovelIdForData && r.novelId !== 'default');
+        const relMap = new Map<string, Relationship>();
+        cloudRels.forEach(r => relMap.set(r.id, { ...r, novelId: effectiveNovelIdForData }));
+        localNovelRels.forEach(r => relMap.set(r.id, { ...r, novelId: effectiveNovelIdForData }));
+        const mergedNovelRels = Array.from(relMap.values());
+        if (mergedNovelRels.length > 0) {
+          await syncFirestoreData('rel', effectiveNovelIdForData, 'POST', mergedNovelRels).catch(console.warn);
+        }
+
+        const allMergedTerms = [...mergedNovelTerms, ...otherTerms];
+        const allMergedChars = [...mergedNovelChars, ...otherChars];
+        const allMergedRels = [...mergedNovelRels, ...otherRels];
+
+        db.bulkSaveCustomTerms(allMergedTerms).catch(console.error);
+        db.saveCharacters(allMergedChars).catch(console.error);
+
+        setSession(prev => ({
+          ...prev,
+          customTerms: allMergedTerms,
+          characters: allMergedChars,
+          relationships: allMergedRels
+        }));
+
+        syncShortcutsFromCloud(effectiveNovelIdForData).then(cloudList => {
+          if (cloudList) setShortcuts(cloudList);
+        }).catch(console.warn);
+      }
+
+      setHasUnsyncedChanges(false);
+      setLastRemoteSyncTime(Date.now());
+      setSyncToastMessage({
+        type: isCloudQuotaExhausted() ? 'error' : 'success',
+        text: isCloudQuotaExhausted()
+          ? 'Firestore đã hết hạn ngạch miễn phí hôm nay. Dữ liệu vẫn được bảo vệ 100% trên bộ nhớ máy!'
+          : 'Đã đồng bộ 2 chiều với Firestore thành công!'
+      });
+      setTimeout(() => setSyncToastMessage(null), 4000);
+    } catch (err: any) {
+      console.error("Lỗi đồng bộ Firestore:", err);
+      setSyncToastMessage({ 
+        type: 'error', 
+        text: isCloudQuotaExhausted() 
+          ? 'Firestore đã hết hạn ngạch miễn phí hôm nay. Dữ liệu vẫn được bảo vệ 100% trên bộ nhớ máy của bạn!' 
+          : `Lỗi đồng bộ: ${err?.message || 'Không thể kết nối đến Firestore'}` 
+      });
+      setTimeout(() => setSyncToastMessage(null), 5000);
+    } finally {
+      setIsSyncingToCloud(false);
+    }
+  };
+
+  // Áp dụng dữ liệu khôi phục toàn diện từ Firestore (lấy từ mục Thiết lập tài khoản)
+  const handleApplyCloudRecovery = async (data: RecoveredCloudData) => {
+    const uid = auth.currentUser?.uid;
+
+    // 1. Hợp nhất danh sách truyện
+    const novelMap = new Map<string, Novel>();
+    (novels || []).forEach((n) => {
+      if (n && n.id && n.name) novelMap.set(n.id, n);
+    });
+    (data.novels || []).forEach((n) => {
+      if (n && n.id && n.name) novelMap.set(n.id, n);
+    });
+    if (novelMap.size > 1 && novelMap.has('default')) {
+      novelMap.delete('default');
+    }
+    const mergedNovels = Array.from(novelMap.values());
+    if (mergedNovels.length > 0) {
+      setNovels(mergedNovels);
+      await db.saveNovels(mergedNovels, uid);
+      if (uid) setScopedStorageItem(`cached_novels_${uid}`, JSON.stringify(mergedNovels));
+      setScopedStorageItem('cached_novels_list', JSON.stringify(mergedNovels));
+    }
+
+    // 2. Hợp nhất toàn bộ kho chương
+    const existingAllChaps = await db.getAllChapters();
+    const chapMap = new Map<string, Chapter>();
+    (existingAllChaps || []).forEach((c) => chapMap.set(c.id, c));
+    (chapters || []).forEach((c) => {
+      if (!chapMap.has(c.id)) chapMap.set(c.id, c);
+    });
+
+    const chapsToSave: Chapter[] = [];
+    (data.chapters || []).forEach((cloudCh) => {
+      const localCh = chapMap.get(cloudCh.id);
+      if (!localCh) {
+        chapMap.set(cloudCh.id, cloudCh);
+        chapsToSave.push(cloudCh);
+      } else {
+        const { selected } = resolveChapterConflict(localCh, cloudCh);
+        chapMap.set(cloudCh.id, selected);
+        if (selected === cloudCh) {
+          chapsToSave.push(cloudCh);
+        }
+      }
+    });
+
+    for (const ch of chapsToSave) {
+      await db.saveChapter(ch);
+    }
+    const mergedChapters = Array.from(chapMap.values()).sort(
+      (a, b) => (b.timestamp || 0) - (a.timestamp || 0)
+    );
+    setChapters(mergedChapters);
+
+    // 3. Hợp nhất từ vựng, nhân vật, quan hệ
+    const termMap = new Map<string, CustomTerm>();
+    (session.customTerms || []).forEach((t) => termMap.set(t.id, t));
+    (data.customTerms || []).forEach((t) => termMap.set(t.id, t));
+    const mergedTerms = Array.from(termMap.values());
+
+    const charMap = new Map<string, Character>();
+    (session.characters || []).forEach((c) => charMap.set(c.id, c));
+    (data.characters || []).forEach((c) => charMap.set(c.id, c));
+    const mergedChars = Array.from(charMap.values());
+
+    const relMap = new Map<string, Relationship>();
+    (session.relationships || []).forEach((r) => relMap.set(r.id, r));
+    (data.relationships || []).forEach((r) => relMap.set(r.id, r));
+    const mergedRels = Array.from(relMap.values());
+
+    await db.bulkSaveCustomTerms(mergedTerms);
+    await db.saveCharacters(mergedChars);
+
+    // 4. Hợp nhất phím tắt theo từng novelId
+    if (data.shortcuts && data.shortcuts.length > 0) {
+      const byNovel = new Map<string, typeof data.shortcuts>();
+      data.shortcuts.forEach((sc) => {
+        const nId = sc.novelId || '';
+        const list = byNovel.get(nId) || [];
+        list.push(sc);
+        byNovel.set(nId, list);
+      });
+      byNovel.forEach((cloudList, nId) => {
+        const localList = getStoredShortcuts(nId);
+        const scMap = new Map(localList.map((s) => [s.id, s]));
+        cloudList.forEach((s) => scMap.set(s.id, s));
+        saveStoredShortcuts(Array.from(scMap.values()), nId, true);
+      });
+    }
+
+    // 5. Xác định truyện active & khôi phục bản thảo đang làm dở nếu có
+    const currentHasWork = Boolean(
+      (session.inputText && session.inputText.trim().length > 0) ||
+        (session.result?.segments && session.result.segments.length > 0) ||
+        (session.preEditedText && session.preEditedText.trim().length > 0)
+    );
+    const nonDefault = mergedNovels.find((n) => n.id !== 'default');
+    let nextNovelId =
+      session.currentNovelId &&
+      session.currentNovelId !== 'default' &&
+      mergedNovels.some((n) => n.id === session.currentNovelId)
+        ? session.currentNovelId
+        : nonDefault?.id || mergedNovels[0]?.id || session.currentNovelId;
+
+    const ws = data.latestWorkspace;
+    if (ws && (!currentHasWork || (ws.updatedAt || 0) > (localWorkspaceUpdatedAtRef.current || 0))) {
+      if (ws.novelId && mergedNovels.some((n) => n.id === ws.novelId)) {
+        nextNovelId = ws.novelId;
+      }
+      let restoredResult = ws.result ? sanitizeResult(ws.result) : null;
+      if (!restoredResult && ws.segments && ws.segments.length > 0) {
+        restoredResult = {
+          segments: ws.segments,
+          naturalTranslation: ws.segments.map((s: any) => s.natural).join('\n'),
+          quickTrans: ws.segments.map((s: any) => s.quick).join('\n'),
+          sinoVietnamese: '',
+          deeplTranslation: ws.segments.map((s: any) => s.deepl).join('\n'),
+          vocabulary: [],
+        };
+      }
+      const wsTime = ws.updatedAt || Date.now();
+      localWorkspaceUpdatedAtRef.current = wsTime;
+      setScopedStorageItem('local_workspace_updated_at', String(wsTime));
+
+      const nextSession: TranslationSession = {
+        ...session,
+        currentNovelId: nextNovelId,
+        currentChapterId: ws.chapterId || undefined,
+        inputText: ws.inputText || '',
+        deeplText: ws.deeplText || '',
+        preEditedText: ws.preEditedText || '',
+        result: restoredResult,
+        status: (ws.status as AppStatus) || (restoredResult ? AppStatus.SUCCESS : AppStatus.IDLE),
+        completedSegments: ws.completedSegments || [],
+        customTerms: mergedTerms,
+        characters: mergedChars,
+        relationships: mergedRels,
+      };
+      setSession(nextSession);
+      db.saveActiveSession({ ...nextSession, customTerms: [] }).catch(console.error);
+    } else {
+      setSession((prev) => ({
+        ...prev,
+        currentNovelId: nextNovelId,
+        customTerms: mergedTerms,
+        characters: mergedChars,
+        relationships: mergedRels,
+      }));
+    }
+
+    if (nextNovelId) {
+      db.saveCurrentNovelId(nextNovelId).catch(console.error);
+      setShortcuts(getStoredShortcuts(nextNovelId));
+    }
+
+    setHasUnsyncedChanges(false);
+    setLastRemoteSyncTime(Date.now());
+    setSyncToastMessage({
+      type: 'success',
+      text: `Đã khôi phục từ Firestore: ${mergedNovels.length} truyện, ${data.chapters.length} chương!`,
+    });
+    setTimeout(() => setSyncToastMessage(null), 4500);
+  };
+
+  // Áp dụng các mục người dùng tự chọn từ công cụ Trích xuất Local
+  const handleApplyLocalSelection = async (selection: SelectedLocalRestoreData) => {
+    const uid = auth.currentUser?.uid;
+
+    // 1. Truyện đã chọn
+    let nextNovelId = session.currentNovelId;
+    if (selection.novels.length > 0) {
+      const novelMap = new Map<string, Novel>();
+      (novels || []).forEach((n) => {
+        if (n && n.id && n.name) novelMap.set(n.id, n);
+      });
+      selection.novels.forEach((n) => novelMap.set(n.id, n));
+      if (novelMap.size > 1 && novelMap.has('default')) {
+        novelMap.delete('default');
+      }
+      const mergedNovels = Array.from(novelMap.values());
+      setNovels(mergedNovels);
+      await db.saveNovels(mergedNovels, uid);
+      if (uid) setScopedStorageItem(`cached_novels_${uid}`, JSON.stringify(mergedNovels));
+      setScopedStorageItem('cached_novels_list', JSON.stringify(mergedNovels));
+
+      if (!nextNovelId || nextNovelId === 'default') {
+        nextNovelId = selection.novels[0].id;
+      }
+    }
+
+    // 2. Chương đã chọn
+    if (selection.chapters.length > 0) {
+      const chapMap = new Map<string, Chapter>();
+      (chapters || []).forEach((c) => chapMap.set(c.id, c));
+      for (const ch of selection.chapters) {
+        const normalizedCh: Chapter = {
+          ...ch,
+          novelId: ch.novelId || (nextNovelId && nextNovelId !== 'default' ? nextNovelId : ch.novelId),
+        };
+        chapMap.set(normalizedCh.id, normalizedCh);
+        await db.saveChapter(normalizedCh);
+      }
+      setChapters(
+        Array.from(chapMap.values()).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+      );
+    }
+
+    // 3. Từ vựng, nhân vật, quan hệ đã chọn
+    const termMap = new Map<string, CustomTerm>();
+    (session.customTerms || []).forEach((t) => termMap.set(t.id, t));
+    selection.customTerms.forEach((t) => termMap.set(t.id, t));
+    const mergedTerms = Array.from(termMap.values());
+
+    const charMap = new Map<string, Character>();
+    (session.characters || []).forEach((c) => charMap.set(c.id, c));
+    selection.characters.forEach((c) => charMap.set(c.id, c));
+    const mergedChars = Array.from(charMap.values());
+
+    const relMap = new Map<string, Relationship>();
+    (session.relationships || []).forEach((r) => relMap.set(r.id, r));
+    selection.relationships.forEach((r) => relMap.set(r.id, r));
+    const mergedRels = Array.from(relMap.values());
+
+    if (selection.customTerms.length > 0) await db.bulkSaveCustomTerms(mergedTerms);
+    if (selection.characters.length > 0) await db.saveCharacters(mergedChars);
+
+    // 4. Gõ tắt đã chọn
+    if (selection.shortcuts.length > 0) {
+      const byNovel = new Map<string, typeof selection.shortcuts>();
+      selection.shortcuts.forEach((sc) => {
+        const nId = sc.novelId || nextNovelId || '';
+        const list = byNovel.get(nId) || [];
+        list.push(sc);
+        byNovel.set(nId, list);
+      });
+      byNovel.forEach((picked, nId) => {
+        const currentList = getStoredShortcuts(nId);
+        const scMap = new Map(currentList.map((s) => [s.id, s]));
+        picked.forEach((s) => scMap.set(s.id, s));
+        saveStoredShortcuts(Array.from(scMap.values()), nId, true);
+      });
+      setShortcuts(getStoredShortcuts(nextNovelId));
+    }
+
+    // 5. Lịch sử đã chọn
+    if (selection.historyToRestore.length > 0) {
+      setHistory((prev) => {
+        const hMap = new Map(prev.map((h) => [h.id, h]));
+        selection.historyToRestore.forEach((h) => hMap.set(h.id, h));
+        return Array.from(hMap.values()).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+      });
+    }
+
+    // 6. Bản thảo làm dở đã chọn (nếu có)
+    if (selection.sessionToRestore) {
+      const picked = selection.sessionToRestore;
+      const targetNovel = picked.novelId || nextNovelId;
+      const nextSession: TranslationSession = {
+        ...session,
+        currentNovelId: targetNovel,
+        currentChapterId: picked.chapterId,
+        inputText: picked.inputText,
+        deeplText: picked.deeplText,
+        preEditedText: picked.preEditedText,
+        result: picked.result ? sanitizeResult(picked.result) : null,
+        completedSegments: picked.completedSegments,
+        status: picked.status,
+        customTerms: mergedTerms,
+        characters: mergedChars,
+        relationships: mergedRels,
+      };
+      setSession(nextSession);
+      await db.saveActiveSession({ ...nextSession, customTerms: [] });
+    } else {
+      setSession((prev) => ({
+        ...prev,
+        currentNovelId: nextNovelId || prev.currentNovelId,
+        customTerms: mergedTerms,
+        characters: mergedChars,
+        relationships: mergedRels,
+      }));
+    }
+
+    markLocalWorkspaceDirty();
+    setSyncToastMessage({
+      type: 'success',
+      text: 'Đã khôi phục các mục bạn chọn từ Local! Nhấn "Đồng bộ Firestore" nếu muốn lưu lên đám mây.',
+    });
+    setTimeout(() => setSyncToastMessage(null), 5000);
   };
 
   const handleUpdateCharacters = (novelChars: Character[]) => {
@@ -2131,8 +2744,11 @@ useEffect(() => {
   }, [session.currentChapterId, session.result, session.inputText, chapters]);
 
   const handleSelectNovel = (novelId: string) => {
-    lastLocalEditTimeRef.current = Date.now();
-    updateSession({ 
+    if (!novelId || novelId === session.currentNovelId) return;
+    const now = Date.now();
+    markLocalWorkspaceDirty(now);
+    setSession(prev => ({
+      ...prev,
       currentNovelId: novelId,
       currentChapterId: undefined,
       currentHistoryId: undefined,
@@ -2142,7 +2758,7 @@ useEffect(() => {
       preEditedText: '',
       completedSegments: [],
       status: AppStatus.IDLE
-    });
+    }));
     db.saveCurrentNovelId(novelId).catch(console.error);
 
     saveUserLiveWorkspaceToCloud({
@@ -2154,7 +2770,7 @@ useEffect(() => {
       inputText: '',
       deeplText: '',
       preEditedText: '',
-      updatedAt: Date.now()
+      updatedAt: now
     }, true);
   };
 
@@ -2186,6 +2802,7 @@ useEffect(() => {
   };
 
   const handleDeleteChapter = async (id: string) => {
+    markLocalWorkspaceDirty();
     deletedChapterIdsRef.current.add(id);
     // 1. Cập nhật state UI ngay lập tức
     setChapters(prev => prev.filter(c => c.id !== id));
@@ -2224,11 +2841,11 @@ useEffect(() => {
     const trimmed = newName.trim();
     if (!trimmed) return;
 
-    lastLocalEditTimeRef.current = Date.now();
+    const now = Date.now();
+    markLocalWorkspaceDirty(now);
     const chapter = chapters.find(c => c.id === id);
     if (!chapter) return;
 
-    const now = Date.now();
     const updated: Chapter = { ...chapter, name: trimmed, timestamp: now };
 
     // 1. Cập nhật UI ngay tức thì (Optimistic update)
@@ -2283,8 +2900,8 @@ useEffect(() => {
       
       {/* HEADER */}
       
-        <header className={`bg-[#EFE5D9] text-[#3E2723] border-b border-[#D7CCC8] h-14 items-center justify-between px-3 sm:px-4 shrink-0 z-20 shadow-xs overflow-x-auto no-scrollbar ${isFocusMode ? 'hidden' : 'flex'}`}>
-          <div className="flex items-center gap-1.5 sm:gap-4 shrink-0">
+        <header className={`bg-[#EFE5D9] text-[#3E2723] border-b border-[#D7CCC8] min-h-14 py-1.5 flex-wrap items-center justify-between gap-2 px-3 sm:px-4 shrink-0 z-20 shadow-xs ${isFocusMode ? 'hidden' : 'flex'}`}>
+          <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
             {/* Segmented Mode Control */}
             <div className="flex bg-[#E4D5C3] p-0.5 rounded-lg border border-[#D7CCC8]">
               <button
@@ -2304,10 +2921,54 @@ useEffect(() => {
                 <span className="hidden sm:inline">Beta</span>
               </button>
             </div>
+
+            <button
+              onClick={handleManualSyncToFirestore}
+              disabled={isSyncingToCloud}
+              className={`flex items-center gap-1.5 text-[10px] font-semibold px-2.5 py-1 rounded-full border transition-all shadow-2xs ${
+                isSyncingToCloud
+                  ? 'bg-amber-50 text-amber-800 border-amber-300 animate-pulse'
+                  : !currentUser
+                  ? 'bg-white/80 hover:bg-white text-[#8D6E63] border-[#D7CCC8]'
+                  : hasUnsyncedChanges
+                  ? 'bg-[#FFF3E0] hover:bg-[#FFE0B2] text-[#E65100] border-[#FFB74D] shadow-xs ring-1 ring-amber-400/50'
+                  : 'bg-white hover:bg-[#FAF6F0] text-[#5D4037] hover:text-[#3E2723] border-[#D7CCC8]'
+              }`}
+              title={
+                !currentUser
+                  ? "Đăng nhập tài khoản để bật đồng bộ 2 chiều với Firestore"
+                  : hasUnsyncedChanges
+                  ? "Bạn có thay đổi chưa đồng bộ 2 chiều với Firestore! Nhấn để đồng bộ ngay"
+                  : "Nhấn để đồng bộ 2 chiều giữa máy và Firestore"
+              }
+            >
+              {isSyncingToCloud ? (
+                <>
+                  <Loader2 size={12} className="animate-spin text-amber-700" />
+                  <span>Đang đồng bộ...</span>
+                </>
+              ) : !currentUser ? (
+                <>
+                  <RefreshCw size={12} className="text-[#8D6E63]" />
+                  <span>Đồng bộ Firestore</span>
+                </>
+              ) : hasUnsyncedChanges ? (
+                <>
+                  <RefreshCw size={12} className="text-[#E65100]" />
+                  <span className="font-bold">Đồng bộ Firestore</span>
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#E65100] animate-ping" />
+                </>
+              ) : (
+                <>
+                  <RefreshCw size={12} className="text-[#5D4037]" />
+                  <span>Đồng bộ Firestore</span>
+                </>
+              )}
+            </button>
           </div>
           
           {/* RIGHT CONTROLS */}
-          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
               <button
                 onClick={() => setShowMobileSidebar(true)}
                 className="lg:hidden flex items-center justify-center text-[#5D4037] hover:text-[#3E2723] bg-white hover:bg-[#FAF6F0] p-2 sm:px-2.5 sm:py-1 rounded-full border border-[#D7CCC8] shadow-2xs transition-colors"
@@ -2328,6 +2989,8 @@ useEffect(() => {
                 currentNovelId={session.currentNovelId || ''} 
                 onSelectNovel={handleSelectNovel}
                 onDeleteNovel={handleDeleteNovel}
+                novels={novels}
+                onNovelsChange={setNovels}
               />
               <button 
                 onClick={() => setShowShortcuts(true)} 
@@ -2364,7 +3027,7 @@ useEffect(() => {
                  <span className="hidden sm:inline">Lịch sử</span>
               </button>
 
-              {auth.currentUser && (
+              {currentUser && (
                 <div 
                   className={`flex items-center gap-1 text-[10px] px-2 py-1 rounded-full border transition-all ${
                     Date.now() - lastRemoteSyncTime < 4000
@@ -2380,7 +3043,10 @@ useEffect(() => {
                 </div>
               )}
 
-              <AuthPanel />
+              <AuthPanel
+                onApplyCloudRecovery={handleApplyCloudRecovery}
+                onApplyLocalSelection={handleApplyLocalSelection}
+              />
           </div>
         </header>
 
@@ -2798,6 +3464,32 @@ useEffect(() => {
         isOpen={showFontModal}
         onClose={() => setShowFontModal(false)}
       />
+
+      {/* THÔNG BÁO TRẠNG THÁI ĐỒNG BỘ FIRESTORE */}
+      {syncToastMessage && (
+        <div 
+          className="fixed bottom-4 right-4 z-50 flex items-center gap-2 px-3.5 py-2.5 rounded-lg shadow-xl text-xs font-medium animate-in fade-in slide-in-from-bottom-2 duration-200 border bg-white"
+          style={{
+            borderColor: syncToastMessage.type === 'error' ? '#EF9A9A' : syncToastMessage.type === 'info' ? '#90CAF9' : '#A5D6A7',
+            color: syncToastMessage.type === 'error' ? '#C62828' : syncToastMessage.type === 'info' ? '#1565C0' : '#2E7D32'
+          }}
+        >
+          {syncToastMessage.type === 'error' ? (
+            <AlertTriangle size={15} className="shrink-0 text-[#C62828]" />
+          ) : syncToastMessage.type === 'info' ? (
+            <Loader2 size={15} className="shrink-0 animate-spin text-[#1565C0]" />
+          ) : (
+            <CheckCircle2 size={15} className="shrink-0 text-[#2E7D32]" />
+          )}
+          <span>{syncToastMessage.text}</span>
+          <button 
+            onClick={() => setSyncToastMessage(null)} 
+            className="ml-2 opacity-60 hover:opacity-100 transition-opacity"
+          >
+            <X size={13} />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
