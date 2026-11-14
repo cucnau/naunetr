@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { AppStatus, TranslationSession, HistoryItem, TranslationResponse, Chapter, TranslationSegment, Character, Relationship, CustomTerm, Novel } from './types';
 import { exportToExcel } from './services/excelService';
-import { getNovels, createNovel, deleteNovel, getChaptersFromCloud, bulkSaveChaptersToCloud, deleteChapterFromCloud, clearNovelChaptersFromCloud, syncFirestoreData, saveUserLiveWorkspaceToCloud, getUserLiveWorkspaceFromCloud, isCloudQuotaExhausted, RecoveredCloudData } from './services/firestoreService';
+import { getNovels, createNovel, deleteNovel, getAllUserChaptersFromCloud, bulkSaveChaptersToCloud, deleteChapterFromCloud, clearNovelChaptersFromCloud, syncFirestoreData, saveUserLiveWorkspaceToCloud, getUserLiveWorkspaceFromCloud, isCloudQuotaExhausted, RecoveredCloudData } from './services/firestoreService';
 import { SelectedLocalRestoreData } from './services/localExtractService';
 import { auth } from './services/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
@@ -397,6 +397,7 @@ function AppContent() {
   }, [hasUnsyncedChanges]);
 
   const [isSyncingToCloud, setIsSyncingToCloud] = useState<boolean>(false);
+  const [showLeaveSyncModal, setShowLeaveSyncModal] = useState<boolean>(false);
   const [syncToastMessage, setSyncToastMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
   const markLocalWorkspaceDirty = (timestamp?: number) => {
@@ -417,6 +418,7 @@ function AppContent() {
       setScopedStorageItem('has_unsynced_changes', 'false');
     } catch (_) {}
     setHasUnsyncedChanges(false);
+    setShowLeaveSyncModal(false);
   };
 
   // Nhắc nhở người dùng nhấn nút đồng bộ khi định đóng tab / đóng app / tắt máy
@@ -425,6 +427,7 @@ function AppContent() {
 
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       if (hasUnsyncedChangesRef.current) {
+        setShowLeaveSyncModal(true);
         e.preventDefault();
         e.returnValue = warnMsg;
         return warnMsg;
@@ -436,11 +439,6 @@ function AppContent() {
         try {
           setScopedStorageItem('has_unsynced_changes', hasUnsyncedChangesRef.current ? 'true' : 'false');
         } catch (_) {}
-      } else if (document.visibilityState === 'visible' && hasUnsyncedChangesRef.current) {
-        setSyncToastMessage({
-          type: 'info',
-          text: 'Nhắc nhở: Bạn vẫn còn dữ liệu chưa đồng bộ lên Firestore. Hãy nhấn "Đồng bộ Firestore" trước khi thoát app hoặc tắt máy!'
-        });
       }
     };
 
@@ -970,15 +968,17 @@ useEffect(() => {
       const chapsToSaveDb: Chapter[] = [];
       const chapsToUpload: Chapter[] = [];
 
+      const allCloudChaps = isCloudQuotaExhausted()
+        ? []
+        : await getAllUserChaptersFromCloud().catch(() => [] as Chapter[]);
+
       for (const nId of targetNovelIds) {
         const localForNovel = (allLocalChaps || []).filter(c =>
           !deletedChapterIdsRef.current.has(c.id) &&
           !deletedNovelIdsRef.current.has(c.novelId || '') &&
           (c.novelId === nId || (!c.novelId && nId === activeNovelId))
         );
-        const cloudForNovel = isCloudQuotaExhausted()
-          ? []
-          : await getChaptersFromCloud(nId).catch(() => [] as Chapter[]);
+        const cloudForNovel = allCloudChaps.filter(c => c.novelId === nId);
 
         const localMap = new Map<string, Chapter>();
         localForNovel.forEach(c => localMap.set(c.id, { ...c, novelId: c.novelId || nId }));
@@ -2527,27 +2527,6 @@ useEffect(() => {
           </div>
         </header>
 
-      {/* THANH NHẮC ĐỒNG BỘ KHI CÓ THAY ĐỔI CHƯA ĐỒNG BỘ */}
-      {hasUnsyncedChanges && !isFocusMode && (
-        <div className="bg-[#FFF8E1] border-b border-[#FFE082] px-3 sm:px-4 py-1 flex flex-wrap items-center justify-between gap-2 text-[11px] text-[#E65100] shrink-0 z-10">
-          <div className="flex items-center gap-1.5 font-medium">
-            <AlertTriangle size={13} className="shrink-0 text-[#E65100]" />
-            <span>
-              Bạn có thay đổi mới chưa đồng bộ lên Firestore. Hãy nhấn <strong>Đồng bộ Firestore</strong> trước khi đóng tab, thoát app hoặc tắt máy!
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={handleManualSyncToFirestore}
-            disabled={isSyncingToCloud}
-            className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#E65100] hover:bg-[#BF360C] text-white text-[10px] font-bold transition-colors disabled:opacity-50 cursor-pointer shrink-0"
-          >
-            {isSyncingToCloud ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
-            <span>{isSyncingToCloud ? 'Đang đồng bộ...' : 'Đồng bộ ngay'}</span>
-          </button>
-        </div>
-      )}
-
       {/* MAIN WORKSPACE */}
       <div className="flex-1 flex overflow-hidden relative">
         {/* LEFT SIDEBAR (Desktop / Laptop) */}
@@ -2962,6 +2941,54 @@ useEffect(() => {
         isOpen={showFontModal}
         onClose={() => setShowFontModal(false)}
       />
+
+      {/* HỘP THOẠI NHẮC NHỞ ĐỒNG BỘ KHI ĐỊNH ĐÓNG TAB / THOÁT APP */}
+      {showLeaveSyncModal && hasUnsyncedChanges && createPortal(
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black/50" onClick={() => setShowLeaveSyncModal(false)} />
+          <div className="relative bg-[#FAFAFA] border border-[#FFB74D] rounded-xl shadow-2xl w-full max-w-md overflow-hidden z-10 animate-in zoom-in-95 duration-150 text-[#3E2723]">
+            <div className="bg-[#FFF3E0] px-5 py-3.5 flex items-center justify-between border-b border-[#FFE0B2]">
+              <div className="flex items-center gap-2 text-[#E65100] font-bold text-xs tracking-wide uppercase">
+                <AlertTriangle size={16} className="shrink-0" />
+                <span>Chưa đồng bộ Firestore</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowLeaveSyncModal(false)}
+                className="text-[#8D6E63] hover:text-[#3E2723] p-1 rounded-md transition-colors cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <p className="text-xs text-[#4E342E] leading-relaxed">
+                Bạn vừa chỉnh sửa dữ liệu trên máy nhưng <strong>chưa nhấn Đồng bộ Firestore</strong>. Nếu bạn đóng tab, thoát ứng dụng hoặc tắt máy lúc này, phần thay đổi mới nhất sẽ chưa được lưu lên tài khoản đám mây.
+              </p>
+
+              <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={handleManualSyncToFirestore}
+                  disabled={isSyncingToCloud}
+                  className="flex-1 bg-[#E65100] hover:bg-[#BF360C] text-white py-2.5 px-4 rounded-lg font-bold text-xs shadow-sm transition-colors flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+                >
+                  {isSyncingToCloud ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                  <span>{isSyncingToCloud ? 'Đang đồng bộ...' : 'Đồng bộ Firestore ngay'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowLeaveSyncModal(false)}
+                  className="px-4 py-2.5 rounded-lg border border-[#D7CCC8] bg-white hover:bg-[#FAF6F0] text-[#5D4037] font-bold text-xs transition-colors cursor-pointer"
+                >
+                  Để sau
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
 
       {/* THÔNG BÁO TRẠNG THÁI ĐỒNG BỘ FIRESTORE */}
       {syncToastMessage && (

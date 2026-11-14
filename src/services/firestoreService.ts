@@ -219,20 +219,23 @@ export const overwriteFirestoreData = async <T extends { id: string, novelId?: s
   newItems: T[]
 ): Promise<void> => {
   const user = auth.currentUser;
-  if (!user || !novelId) return;
+  if (!user || !novelId || isCloudQuotaExhausted()) return;
 
   const collectionName = type === 'vocab' ? 'customTerms' : type === 'char' ? 'characters' : type === 'rel' ? 'relationships' : type === 'shortcut' ? 'shortcuts' : 'chapters';
   const collRef = collection(db, collectionName);
 
-  // 1. Fetch all existing documents belonging to this novelId
+  // 1. Fetch existing documents belonging to this novelId (sử dụng cache nếu đã biết rỗng/có sẵn)
   const q = query(collRef, where('novelId', '==', novelId));
   const snapshot = await getDocs(q);
 
   const operations: { type: 'set' | 'delete', ref: any, data?: any }[] = [];
 
-  // Delete all existing items
+  // Delete all existing items belonging to this user
   snapshot.forEach(docSnap => {
-    operations.push({ type: 'delete', ref: docSnap.ref });
+    const data = docSnap.data();
+    if (!data?.userId || data.userId === user.uid) {
+      operations.push({ type: 'delete', ref: docSnap.ref });
+    }
   });
 
   // Prepare new items to insert
@@ -510,6 +513,33 @@ export const getChaptersFromCloud = async (novelId: string, retryCount = 1): Pro
   }
 };
 
+/**
+ * Tải toàn bộ chương thuộc tài khoản hiện tại chỉ bằng 1 truy vấn theo userId
+ * (tránh lặp nhiều query theo từng truyện và tránh đọc nhầm chương của tài khoản khác).
+ */
+export const getAllUserChaptersFromCloud = async (): Promise<Chapter[]> => {
+  const user = auth.currentUser;
+  if (!user || isCloudQuotaExhausted()) return [];
+  try {
+    const q = query(collection(db, 'chapters'), where('userId', '==', user.uid));
+    const snap = await getDocs(q);
+    const chapters: Chapter[] = [];
+    snap.forEach((d) => {
+      const data = d.data();
+      if (data && (!data.userId || data.userId === user.uid)) {
+        const { userId, ...rest } = data;
+        chapters.push(restoreLeanChapter({ id: d.id, ...rest }));
+      }
+    });
+    chapters.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+    return chapters;
+  } catch (error) {
+    handleQuotaExhausted(error);
+    console.warn("Không thể tải danh sách chương từ đám mây (đang dùng cache cục bộ):", error);
+    return [];
+  }
+};
+
 const chapterDebounceTimers = new Map<string, any>();
 const chaptersInFlight = new Set<string>();
 const pendingChapterSaves = new Map<string, Chapter>();
@@ -636,7 +666,7 @@ export const clearNovelChaptersFromCloud = async (novelId: string): Promise<void
 
 export const getShortcutsFromCloud = async (novelId: string): Promise<TextShortcut[]> => {
   const user = auth.currentUser;
-  if (!user || !novelId) return [];
+  if (!user || !novelId || isCloudQuotaExhausted()) return [];
   const path = 'shortcuts';
   try {
     const q = query(collection(db, path), where('novelId', '==', novelId));
@@ -644,11 +674,13 @@ export const getShortcutsFromCloud = async (novelId: string): Promise<TextShortc
     const shortcuts: TextShortcut[] = [];
     snap.forEach(d => {
       const data = d.data();
+      if (data.userId && data.userId !== user.uid) return;
       const { userId, createdAt, ...rest } = data;
       shortcuts.push({ id: d.id, ...rest, novelId: data.novelId || novelId } as TextShortcut);
     });
     return shortcuts;
   } catch (error) {
+    handleQuotaExhausted(error);
     console.warn("Không thể tải phím tắt từ đám mây (đang dùng cache cục bộ):", error);
     return [];
   }
@@ -949,6 +981,9 @@ export const recoverAllUserDataFromFirestore = async (): Promise<RecoveredCloudD
   if (!user) {
     throw new Error('Bạn cần đăng nhập tài khoản trước khi khôi phục dữ liệu từ Firestore.');
   }
+  if (isCloudQuotaExhausted()) {
+    throw new Error('Firestore đã hết hạn ngạch đọc miễn phí hôm nay (Free daily read units). Vui lòng đợi reset vào ngày mai hoặc dùng nút Trích xuất Local.');
+  }
 
   const novelMap = new Map<string, Novel>();
   const chapterMap = new Map<string, Chapter>();
@@ -958,7 +993,7 @@ export const recoverAllUserDataFromFirestore = async (): Promise<RecoveredCloudD
   const shortcutMap = new Map<string, TextShortcut>();
 
   try {
-    // 1. Tải toàn bộ dữ liệu gắn với userId của tài khoản này
+    // 1. Tải toàn bộ dữ liệu gắn với userId của tài khoản này (CHỈ 1 LƯỢT DUY NHẤT - KHÔNG ĐỌC LẶP)
     const [
       novelsSnap,
       chaptersSnap,
@@ -1000,7 +1035,13 @@ export const recoverAllUserDataFromFirestore = async (): Promise<RecoveredCloudD
       const data = d.data();
       if (data && (!data.userId || data.userId === user.uid)) {
         const { userId, createdAt, ...rest } = data;
-        termMap.set(d.id, { id: d.id, ...rest } as CustomTerm);
+        const item = { id: d.id, ...rest } as CustomTerm;
+        termMap.set(d.id, item);
+        if (item.novelId) {
+          const cacheKey = `customTerms_${item.novelId}`;
+          if (!dbCache.has(cacheKey)) dbCache.set(cacheKey, new Map());
+          dbCache.get(cacheKey)!.set(d.id, data);
+        }
       }
     });
 
@@ -1008,7 +1049,13 @@ export const recoverAllUserDataFromFirestore = async (): Promise<RecoveredCloudD
       const data = d.data();
       if (data && (!data.userId || data.userId === user.uid)) {
         const { userId, createdAt, ...rest } = data;
-        charMap.set(d.id, { id: d.id, ...rest } as Character);
+        const item = { id: d.id, ...rest } as Character;
+        charMap.set(d.id, item);
+        if (item.novelId) {
+          const cacheKey = `characters_${item.novelId}`;
+          if (!dbCache.has(cacheKey)) dbCache.set(cacheKey, new Map());
+          dbCache.get(cacheKey)!.set(d.id, data);
+        }
       }
     });
 
@@ -1016,7 +1063,13 @@ export const recoverAllUserDataFromFirestore = async (): Promise<RecoveredCloudD
       const data = d.data();
       if (data && (!data.userId || data.userId === user.uid)) {
         const { userId, createdAt, ...rest } = data;
-        relMap.set(d.id, { id: d.id, ...rest } as Relationship);
+        const item = { id: d.id, ...rest } as Relationship;
+        relMap.set(d.id, item);
+        if (item.novelId) {
+          const cacheKey = `relationships_${item.novelId}`;
+          if (!dbCache.has(cacheKey)) dbCache.set(cacheKey, new Map());
+          dbCache.get(cacheKey)!.set(d.id, data);
+        }
       }
     });
 
@@ -1028,55 +1081,7 @@ export const recoverAllUserDataFromFirestore = async (): Promise<RecoveredCloudD
       }
     });
 
-    // 2. Bổ sung kiểm tra các bản lưu theo từng novelId của tài khoản này (phòng dữ liệu cũ thiếu field userId)
-    const knownNovelIds = Array.from(novelMap.keys()).filter((id) => id && id !== 'default');
-    for (const nId of knownNovelIds) {
-      const [nChaps, nTerms, nChars, nRels, nShortcuts] = await Promise.all([
-        getDocs(query(collection(db, 'chapters'), where('novelId', '==', nId))).catch(() => null),
-        getDocs(query(collection(db, 'customTerms'), where('novelId', '==', nId))).catch(() => null),
-        getDocs(query(collection(db, 'characters'), where('novelId', '==', nId))).catch(() => null),
-        getDocs(query(collection(db, 'relationships'), where('novelId', '==', nId))).catch(() => null),
-        getDocs(query(collection(db, 'shortcuts'), where('novelId', '==', nId))).catch(() => null),
-      ]);
-
-      nChaps?.forEach((d) => {
-        const data = d.data();
-        if (data && (!data.userId || data.userId === user.uid) && !chapterMap.has(d.id)) {
-          const { userId, ...rest } = data;
-          chapterMap.set(d.id, restoreLeanChapter({ id: d.id, ...rest, novelId: nId }));
-        }
-      });
-      nTerms?.forEach((d) => {
-        const data = d.data();
-        if (data && (!data.userId || data.userId === user.uid) && !termMap.has(d.id)) {
-          const { userId, createdAt, ...rest } = data;
-          termMap.set(d.id, { id: d.id, ...rest, novelId: nId } as CustomTerm);
-        }
-      });
-      nChars?.forEach((d) => {
-        const data = d.data();
-        if (data && (!data.userId || data.userId === user.uid) && !charMap.has(d.id)) {
-          const { userId, createdAt, ...rest } = data;
-          charMap.set(d.id, { id: d.id, ...rest, novelId: nId } as Character);
-        }
-      });
-      nRels?.forEach((d) => {
-        const data = d.data();
-        if (data && (!data.userId || data.userId === user.uid) && !relMap.has(d.id)) {
-          const { userId, createdAt, ...rest } = data;
-          relMap.set(d.id, { id: d.id, ...rest, novelId: nId } as Relationship);
-        }
-      });
-      nShortcuts?.forEach((d) => {
-        const data = d.data();
-        if (data && (!data.userId || data.userId === user.uid) && !shortcutMap.has(d.id)) {
-          const { userId, createdAt, ...rest } = data;
-          shortcutMap.set(d.id, { id: d.id, ...rest, novelId: nId } as TextShortcut);
-        }
-      });
-    }
-
-    // 3. Tự động tái tạo đầu truyện nếu có chương/từ vựng thuộc về novelId chưa có trong collection novels
+    // 2. Tự động tái tạo đầu truyện nếu có chương thuộc về novelId chưa có trong collection novels
     chapterMap.forEach((chap) => {
       if (chap.novelId && chap.novelId !== 'default' && !novelMap.has(chap.novelId)) {
         const candidateName = (chap as any).novelName || (chap.name ? `Truyện (${chap.name.slice(0, 28)})` : `Truyện khôi phục (${chap.novelId.slice(-4)})`);
@@ -1088,13 +1093,9 @@ export const recoverAllUserDataFromFirestore = async (): Promise<RecoveredCloudD
       novelMap.delete('default');
     }
 
-    // 4. Tìm tiến độ làm việc dở dang (activeSessions) thuộc về user này
+    // 3. Tìm tiến độ làm việc dở dang (activeSessions) — dùng luôn kết quả từ bước 1, chỉ getDoc dự phòng nếu chưa có
     const candidateWorkspaces: LiveSessionData[] = [];
-    const currentScope = getAppScope();
-    const directScopeIds = Array.from(new Set([`ws_${user.uid}_${currentScope}`, `ws_${user.uid}_root_app`]));
-    const directSnaps = await Promise.all(
-      directScopeIds.map((docId) => getDoc(doc(db, 'activeSessions', docId)).catch(() => null))
-    );
+    const seenSessionIds = new Set<string>();
 
     const parseWorkspaceDoc = (raw: any): LiveSessionData | null => {
       if (!raw) return null;
@@ -1111,17 +1112,27 @@ export const recoverAllUserDataFromFirestore = async (): Promise<RecoveredCloudD
       return data;
     };
 
-    directSnaps.forEach((s) => {
-      if (s && s.exists()) {
-        const parsed = parseWorkspaceDoc(s.data());
-        if (parsed) candidateWorkspaces.push(parsed);
-      }
-    });
-
     sessionsByUidSnap.forEach((d) => {
+      seenSessionIds.add(d.id);
       const parsed = parseWorkspaceDoc(d.data());
       if (parsed) candidateWorkspaces.push(parsed);
     });
+
+    const currentScope = getAppScope();
+    const missingScopeIds = Array.from(new Set([`ws_${user.uid}_${currentScope}`, `ws_${user.uid}_root_app`]))
+      .filter((docId) => !seenSessionIds.has(docId));
+
+    if (missingScopeIds.length > 0) {
+      const directSnaps = await Promise.all(
+        missingScopeIds.map((docId) => getDoc(doc(db, 'activeSessions', docId)).catch(() => null))
+      );
+      directSnaps.forEach((s) => {
+        if (s && s.exists()) {
+          const parsed = parseWorkspaceDoc(s.data());
+          if (parsed) candidateWorkspaces.push(parsed);
+        }
+      });
+    }
 
     const nonEmptyWorkspaces = candidateWorkspaces
       .filter((w) =>
