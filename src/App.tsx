@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { AppStatus, TranslationSession, HistoryItem, TranslationResponse, Chapter, TranslationSegment, Character, Relationship, CustomTerm, Novel } from './types';
 import { exportToExcel } from './services/excelService';
-import { getNovels, createNovel, deleteNovel, getAllUserChaptersFromCloud, bulkSaveChaptersToCloud, deleteChapterFromCloud, clearNovelChaptersFromCloud, syncFirestoreData, saveUserLiveWorkspaceToCloud, getUserLiveWorkspaceFromCloud, isCloudQuotaExhausted, RecoveredCloudData } from './services/firestoreService';
+import { getNovels, createNovel, deleteNovel, getAllUserChaptersFromCloud, bulkSaveChaptersToCloud, deleteChapterFromCloud, clearNovelChaptersFromCloud, syncFirestoreData, saveUserLiveWorkspaceToCloud, getUserLiveWorkspaceFromCloud, getHistoriesFromCloud, bulkSaveHistoriesToCloud, deleteHistoryFromCloud, isCloudQuotaExhausted, RecoveredCloudData } from './services/firestoreService';
 import { SelectedLocalRestoreData } from './services/localExtractService';
 import { auth } from './services/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
@@ -308,6 +308,14 @@ function AppContent() {
       return [];
     }
   });
+  const historyRef = useRef<HistoryItem[]>(history);
+  useEffect(() => {
+    historyRef.current = history;
+  }, [history]);
+  const activeHistoryIdRef = useRef<string | undefined>(session.currentHistoryId);
+  useEffect(() => {
+    activeHistoryIdRef.current = session.currentHistoryId;
+  }, [session.currentHistoryId]);
   const [showHistory, setShowHistory] = useState(false);
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [showChapters, setShowChapters] = useState(false);
@@ -376,11 +384,13 @@ function AppContent() {
 
   const deletedChapterIdsRef = useRef<Set<string>>(loadIdSetFromStorage('deleted_chapter_ids'));
   const deletedNovelIdsRef = useRef<Set<string>>(loadIdSetFromStorage('deleted_novel_ids'));
+  const deletedHistoryIdsRef = useRef<Set<string>>(loadIdSetFromStorage('deleted_history_ids'));
 
   const persistDeletedIds = () => {
     try {
       setScopedStorageItem('deleted_chapter_ids', JSON.stringify(Array.from(deletedChapterIdsRef.current)));
       setScopedStorageItem('deleted_novel_ids', JSON.stringify(Array.from(deletedNovelIdsRef.current)));
+      setScopedStorageItem('deleted_history_ids', JSON.stringify(Array.from(deletedHistoryIdsRef.current)));
     } catch (_) {}
   };
 
@@ -502,6 +512,28 @@ function AppContent() {
               db.saveCurrentNovelId(targetId).catch(console.error);
             }
           }
+          const userLocalHist = await db.getHistory(user.uid).catch(() => []);
+          if (Array.isArray(userLocalHist) && userLocalHist.length > 0) {
+            setHistory((prev) => {
+              const hMap = new Map<string, HistoryItem>();
+              prev.forEach((h) => {
+                if (h && h.id && !deletedHistoryIdsRef.current.has(h.id)) hMap.set(h.id, h);
+              });
+              userLocalHist.forEach((h) => {
+                if (h && h.id && !deletedHistoryIdsRef.current.has(h.id)) {
+                  const existing = hMap.get(h.id);
+                  if (!existing || (h.timestamp || 0) >= (existing.timestamp || 0)) {
+                    hMap.set(h.id, h);
+                  }
+                }
+              });
+              const merged = Array.from(hMap.values())
+                .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+                .slice(0, 50);
+              historyRef.current = merged;
+              return merged;
+            });
+          }
         } catch (e) {
           console.warn("Lỗi nạp dữ liệu cục bộ cho tài khoản:", e);
         }
@@ -511,6 +543,28 @@ function AppContent() {
           const filteredGuest = (guestNovels || []).filter((n) => n && n.id && n.name && !deletedNovelIdsRef.current.has(n.id));
           if (filteredGuest.length > 0) {
             setNovels(filteredGuest);
+          }
+          const guestHist = await db.getHistory().catch(() => []);
+          if (Array.isArray(guestHist) && guestHist.length > 0) {
+            setHistory((prev) => {
+              const hMap = new Map<string, HistoryItem>();
+              prev.forEach((h) => {
+                if (h && h.id && !deletedHistoryIdsRef.current.has(h.id)) hMap.set(h.id, h);
+              });
+              guestHist.forEach((h) => {
+                if (h && h.id && !deletedHistoryIdsRef.current.has(h.id)) {
+                  const existing = hMap.get(h.id);
+                  if (!existing || (h.timestamp || 0) >= (existing.timestamp || 0)) {
+                    hMap.set(h.id, h);
+                  }
+                }
+              });
+              const merged = Array.from(hMap.values())
+                .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+                .slice(0, 50);
+              historyRef.current = merged;
+              return merged;
+            });
           }
         } catch (_) {}
       }
@@ -749,6 +803,30 @@ useEffect(() => {
              });
          }
      }).catch(console.warn);
+
+     db.getHistory(auth.currentUser?.uid).then(savedDbHist => {
+         if (Array.isArray(savedDbHist) && savedDbHist.length > 0) {
+             setHistory(prev => {
+                 const hMap = new Map<string, HistoryItem>();
+                 prev.forEach(h => {
+                     if (h && h.id && !deletedHistoryIdsRef.current.has(h.id)) hMap.set(h.id, h);
+                 });
+                 savedDbHist.forEach(h => {
+                     if (h && h.id && !deletedHistoryIdsRef.current.has(h.id)) {
+                         const existing = hMap.get(h.id);
+                         if (!existing || (h.timestamp || 0) >= (existing.timestamp || 0)) {
+                             hMap.set(h.id, h);
+                         }
+                     }
+                 });
+                 const merged = Array.from(hMap.values())
+                     .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+                     .slice(0, 50);
+                 historyRef.current = merged;
+                 return merged;
+             });
+         }
+     }).catch(console.warn);
   }, []);
 
   // Dong bo Custom Map vao Vietphrase Engine de chac chan ghi de len ban dich Vietphrase o moi noi
@@ -802,8 +880,10 @@ useEffect(() => {
     }
   }, [session]);
 
-  // Fix lỗi QuotaExceededError khi lưu History
+  // Lưu Lịch sử an toàn vào cả IndexedDB (đầy đủ) và localStorage (chỉ lưu local, không đụng Firestore)
   useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    db.saveHistory(history, uid).catch(console.warn);
     try {
         setScopedStorageItem('app_history', JSON.stringify(history));
     } catch (e) {
@@ -892,7 +972,7 @@ useEffect(() => {
     setSyncToastMessage({ type: 'info', text: 'Đang đồng bộ 2 chiều giữa máy và Firestore...' });
 
     try {
-      // 0. XÓA TRÊN FIRESTORE CÁC TRUYỆN / CHƯƠNG MÀ NGƯỜI DÙNG ĐÃ XÓA CỤC BỘ
+      // 0. XÓA TRÊN FIRESTORE CÁC TRUYỆN / CHƯƠNG / LỊCH SỬ MÀ NGƯỜI DÙNG ĐÃ XÓA CỤC BỘ
       if (!isCloudQuotaExhausted()) {
         for (const delNovelId of Array.from(deletedNovelIdsRef.current)) {
           if (delNovelId && delNovelId !== 'default') {
@@ -903,6 +983,11 @@ useEffect(() => {
         for (const delChapId of Array.from(deletedChapterIdsRef.current)) {
           if (delChapId) {
             await deleteChapterFromCloud(delChapId).catch(console.warn);
+          }
+        }
+        for (const delHistId of Array.from(deletedHistoryIdsRef.current)) {
+          if (delHistId) {
+            await deleteHistoryFromCloud(delHistId).catch(console.warn);
           }
         }
       }
@@ -1160,9 +1245,63 @@ useEffect(() => {
         if (cloudList) setShortcuts(cloudList);
       }
 
+      // 5. ĐỒNG BỘ 2 CHIỀU LỊCH SỬ CHỈNH SỬA (CHỈ KHI NGƯỜI DÙNG BẤM ĐỒNG BỘ)
+      if (!isCloudQuotaExhausted()) {
+        const cloudHistories = await getHistoriesFromCloud().catch(() => [] as HistoryItem[]);
+        const localHistories = historyRef.current || [];
+        const mergedHistMap = new Map<string, HistoryItem>();
+        const historiesToUpload: HistoryItem[] = [];
+
+        localHistories.forEach((lh) => {
+          if (lh && lh.id && !deletedHistoryIdsRef.current.has(lh.id)) {
+            mergedHistMap.set(lh.id, lh);
+          }
+        });
+
+        cloudHistories.forEach((ch) => {
+          if (!ch || !ch.id || deletedHistoryIdsRef.current.has(ch.id)) return;
+          const lh = mergedHistMap.get(ch.id);
+          if (!lh) {
+            mergedHistMap.set(ch.id, ch);
+          } else {
+            const cTime = ch.timestamp || 0;
+            const lTime = lh.timestamp || 0;
+            const cSegs = ch.result?.segments?.length || 0;
+            const lSegs = lh.result?.segments?.length || 0;
+            if (cTime > lTime || (cTime === lTime && cSegs > lSegs)) {
+              mergedHistMap.set(ch.id, ch);
+            } else if (lTime > cTime || lSegs > cSegs) {
+              historiesToUpload.push(lh);
+            }
+          }
+        });
+
+        localHistories.forEach((lh) => {
+          if (lh && lh.id && !deletedHistoryIdsRef.current.has(lh.id)) {
+            const existsInCloud = cloudHistories.some((ch) => ch.id === lh.id);
+            if (!existsInCloud) {
+              historiesToUpload.push(lh);
+            }
+          }
+        });
+
+        const mergedHistories = Array.from(mergedHistMap.values())
+          .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+          .slice(0, 50);
+
+        historyRef.current = mergedHistories;
+        setHistory(mergedHistories);
+        await db.saveHistory(mergedHistories, user.uid).catch(console.warn);
+
+        if (historiesToUpload.length > 0 && !isCloudQuotaExhausted()) {
+          await bulkSaveHistoriesToCloud(historiesToUpload).catch(console.warn);
+        }
+      }
+
       if (!isCloudQuotaExhausted()) {
         deletedNovelIdsRef.current.clear();
         deletedChapterIdsRef.current.clear();
+        deletedHistoryIdsRef.current.clear();
         persistDeletedIds();
         clearUnsyncedChanges();
       }
@@ -1278,6 +1417,29 @@ useEffect(() => {
       });
     }
 
+    // 4b. Hợp nhất lịch sử chỉnh sửa từ Firestore (nếu có)
+    if (data.histories && data.histories.length > 0) {
+      const hMap = new Map<string, HistoryItem>();
+      (historyRef.current || []).forEach((h) => {
+        if (h && h.id) hMap.set(h.id, h);
+      });
+      data.histories.forEach((ch) => {
+        if (!ch || !ch.id) return;
+        deletedHistoryIdsRef.current.delete(ch.id);
+        const existing = hMap.get(ch.id);
+        if (!existing || (ch.timestamp || 0) >= (existing.timestamp || 0)) {
+          hMap.set(ch.id, ch);
+        }
+      });
+      persistDeletedIds();
+      const mergedHistories = Array.from(hMap.values())
+        .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+        .slice(0, 50);
+      historyRef.current = mergedHistories;
+      setHistory(mergedHistories);
+      await db.saveHistory(mergedHistories, uid).catch(console.warn);
+    }
+
     // 5. Xác định truyện active & khôi phục bản thảo đang làm dở nếu có
     const currentHasWork = Boolean(
       (session.inputText && session.inputText.trim().length > 0) ||
@@ -1347,7 +1509,7 @@ useEffect(() => {
     setLastRemoteSyncTime(Date.now());
     setSyncToastMessage({
       type: 'success',
-      text: `Đã khôi phục từ Firestore: ${mergedNovels.length} truyện, ${data.chapters.length} chương!`,
+      text: `Đã khôi phục từ Firestore: ${mergedNovels.length} truyện, ${data.chapters.length} chương, ${data.histories?.length || 0} lịch sử!`,
     });
     setTimeout(() => setSyncToastMessage(null), 4500);
   };
@@ -1434,10 +1596,16 @@ useEffect(() => {
 
     // 5. Lịch sử đã chọn
     if (selection.historyToRestore.length > 0) {
+      selection.historyToRestore.forEach((h) => deletedHistoryIdsRef.current.delete(h.id));
+      persistDeletedIds();
       setHistory((prev) => {
         const hMap = new Map(prev.map((h) => [h.id, h]));
         selection.historyToRestore.forEach((h) => hMap.set(h.id, h));
-        return Array.from(hMap.values()).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+        const merged = Array.from(hMap.values())
+          .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+          .slice(0, 50);
+        historyRef.current = merged;
+        return merged;
       });
     }
 
@@ -1577,6 +1745,76 @@ useEffect(() => {
     setRedoStack([]);
   };
 
+  /**
+   * Luôn cập nhật Lịch sử ngay lập tức ở Local (state + localStorage + IndexedDB)
+   * mỗi khi có chỉnh sửa, KHÔNG gọi Firestore. Firestore chỉ nhận khi bấm nút Đồng bộ.
+   */
+  const upsertLocalHistoryOnEdit = (params: {
+    sourceText?: string;
+    result: TranslationResponse | null | undefined;
+    completedSegments?: number[];
+    chapterId?: string;
+    chapterName?: string;
+    novelId?: string;
+    explicitHistoryId?: string;
+  }) => {
+    if (!params.result) return;
+    const now = Date.now();
+    const targetChapterId = params.chapterId !== undefined ? params.chapterId : session.currentChapterId;
+    const targetNovelId = params.novelId !== undefined ? params.novelId : session.currentNovelId;
+    const targetChapterName = params.chapterName !== undefined ? params.chapterName : session.name;
+    const resolvedSourceText =
+      params.sourceText !== undefined
+        ? params.sourceText
+        : (params.result.segments?.length
+            ? params.result.segments.map((s) => s.source || '').join('\n')
+            : session.inputText || '');
+    const resolvedCompleted = params.completedSegments !== undefined ? params.completedSegments : (session.completedSegments || []);
+
+    const currentList = historyRef.current || [];
+    let targetId = params.explicitHistoryId || activeHistoryIdRef.current || session.currentHistoryId;
+
+    if (!targetId || !currentList.some((h) => h.id === targetId)) {
+      const matchedByChapter = targetChapterId
+        ? currentList.find((h) => h.chapterId === targetChapterId)
+        : undefined;
+      if (matchedByChapter) {
+        targetId = matchedByChapter.id;
+      } else {
+        targetId = targetId || `hist_${now}_${Math.random().toString(36).slice(2, 6)}`;
+      }
+    }
+
+    activeHistoryIdRef.current = targetId;
+    deletedHistoryIdsRef.current.delete(targetId);
+
+    const updatedItem: HistoryItem = {
+      id: targetId,
+      timestamp: now,
+      sourceText: resolvedSourceText,
+      result: params.result,
+      modelId: 'Offline Engine',
+      completedSegments: resolvedCompleted,
+      novelId: targetNovelId,
+      chapterId: targetChapterId,
+      chapterName: targetChapterName,
+    };
+
+    const nextList = [
+      updatedItem,
+      ...currentList.filter((item) => item.id !== targetId),
+    ].slice(0, 50);
+
+    historyRef.current = nextList;
+    setHistory(nextList);
+
+    if (session.currentHistoryId !== targetId) {
+      setSession((prev) =>
+        prev.currentHistoryId === targetId ? prev : { ...prev, currentHistoryId: targetId }
+      );
+    }
+  };
+
   const handleUpdateSegment = (index: number, newNatural: string) => {
     if (!session.result) return;
     lastLocalEditTimeRef.current = Date.now();
@@ -1599,14 +1837,7 @@ useEffect(() => {
     
     updateSession({ result: newResult });
     autoSaveLinkedChapter(newResult);
-
-    if (session.currentHistoryId) {
-      setHistory(prev => prev.map(item => 
-        item.id === session.currentHistoryId 
-          ? { ...item, result: newResult, completedSegments: session.completedSegments, timestamp: Date.now() } 
-          : item
-      ));
-    }
+    upsertLocalHistoryOnEdit({ result: newResult });
   };
 
   const handleUpdateAllSegments = (newNaturals: string[]) => {
@@ -1641,14 +1872,7 @@ useEffect(() => {
     
     updateSession({ result: newResult });
     autoSaveLinkedChapter(newResult);
-
-    if (session.currentHistoryId) {
-      setHistory(prev => prev.map(item => 
-        item.id === session.currentHistoryId 
-          ? { ...item, result: newResult, completedSegments: session.completedSegments, timestamp: Date.now() } 
-          : item
-      ));
-    }
+    upsertLocalHistoryOnEdit({ result: newResult });
   };
 
   const handleUpdateSegmentField = (index: number, field: 'source' | 'natural' | 'quick' | 'deepl', value: string) => {
@@ -1678,7 +1902,9 @@ useEffect(() => {
     const newResult: TranslationResponse = {
       ...session.result,
       segments: newSegments,
-      naturalTranslation: newSegments.map(s => s.natural).join('\n')
+      naturalTranslation: newSegments.map(s => s.natural).join('\n'),
+      quickTrans: newSegments.map(s => s.quick).join('\n'),
+      deeplTranslation: newSegments.map(s => s.deepl).join('\n')
     };
 
     updateSession({
@@ -1687,14 +1913,7 @@ useEffect(() => {
       deeplText: newDeeplText
     });
     autoSaveLinkedChapter(newResult);
-
-    if (session.currentHistoryId) {
-      setHistory(prev => prev.map(item => 
-        item.id === session.currentHistoryId 
-          ? { ...item, result: newResult, completedSegments: session.completedSegments, timestamp: Date.now() } 
-          : item
-      ));
-    }
+    upsertLocalHistoryOnEdit({ sourceText: newInputText, result: newResult });
   };
 
   const handleDeleteSegment = (index: number) => {
@@ -1715,7 +1934,9 @@ useEffect(() => {
     const newResult: TranslationResponse = {
       ...session.result,
       segments: newSegments,
-      naturalTranslation: newSegments.map(s => s.natural).join('\n')
+      naturalTranslation: newSegments.map(s => s.natural).join('\n'),
+      quickTrans: newSegments.map(s => s.quick).join('\n'),
+      deeplTranslation: newSegments.map(s => s.deepl).join('\n')
     };
 
     updateSession({
@@ -1725,14 +1946,11 @@ useEffect(() => {
       deeplText: newDeeplText
     });
     autoSaveLinkedChapter(newResult, newCompletedSegments);
-
-    if (session.currentHistoryId) {
-      setHistory(prev => prev.map(item => 
-        item.id === session.currentHistoryId 
-          ? { ...item, result: newResult, completedSegments: newCompletedSegments, timestamp: Date.now() } 
-          : item
-      ));
-    }
+    upsertLocalHistoryOnEdit({
+      sourceText: newInputText,
+      result: newResult,
+      completedSegments: newCompletedSegments,
+    });
   };
 
   const handleUndo = () => {
@@ -1758,14 +1976,11 @@ useEffect(() => {
       deeplText: previousState.deeplText
     });
     autoSaveLinkedChapter(newResult, previousState.completedSegments);
-
-    if (session.currentHistoryId) {
-      setHistory(prev => prev.map(item => 
-        item.id === session.currentHistoryId 
-          ? { ...item, result: newResult, completedSegments: previousState.completedSegments, timestamp: Date.now() } 
-          : item
-      ));
-    }
+    upsertLocalHistoryOnEdit({
+      sourceText: previousState.inputText,
+      result: newResult,
+      completedSegments: previousState.completedSegments || [],
+    });
   };
 
   const handleRedo = () => {
@@ -1791,14 +2006,11 @@ useEffect(() => {
       deeplText: nextState.deeplText
     });
     autoSaveLinkedChapter(newResult, nextState.completedSegments);
-
-    if (session.currentHistoryId) {
-      setHistory(prev => prev.map(item => 
-        item.id === session.currentHistoryId 
-          ? { ...item, result: newResult, completedSegments: nextState.completedSegments, timestamp: Date.now() } 
-          : item
-      ));
-    }
+    upsertLocalHistoryOnEdit({
+      sourceText: nextState.inputText,
+      result: newResult,
+      completedSegments: nextState.completedSegments || [],
+    });
   };
 
   const handleToggleComplete = (index: number) => {
@@ -1811,14 +2023,7 @@ useEffect(() => {
     
     updateSession({ completedSegments: newCompleted });
     autoSaveLinkedChapter(session.result, newCompleted);
-
-    if (session.currentHistoryId) {
-      setHistory(prev => prev.map(item => 
-        item.id === session.currentHistoryId 
-          ? { ...item, completedSegments: newCompleted, timestamp: Date.now() } 
-          : item
-      ));
-    }
+    upsertLocalHistoryOnEdit({ result: session.result, completedSegments: newCompleted });
   };
 
   const handleRestoreSegments = () => {
@@ -1827,6 +2032,7 @@ useEffect(() => {
     const fixed = reconstructSegmentsIfEmpty(session);
     if (fixed.result?.segments && fixed.result.segments.length > 0) {
       updateSession({ result: fixed.result });
+      upsertLocalHistoryOnEdit({ result: fixed.result });
     }
   };
 
@@ -2095,15 +2301,23 @@ useEffect(() => {
         db.saveChapter(chapToSave).catch(console.warn);
       }
       
+      activeHistoryIdRef.current = historyId;
       const newHistoryItem: HistoryItem = {
         id: historyId,
         timestamp: Date.now(),
         sourceText: session.inputText,
         result: sanitized as TranslationResponse,
         modelId: "Offline Engine",
-        completedSegments: []
+        completedSegments: [],
+        novelId: session.currentNovelId,
+        chapterId: activeChapId,
+        chapterName: session.name
       };
-      setHistory(prev => [newHistoryItem, ...prev].slice(0, 50));
+      setHistory(prev => {
+        const next = [newHistoryItem, ...prev.filter(h => h.id !== historyId)].slice(0, 50);
+        historyRef.current = next;
+        return next;
+      });
     } catch (err: any) {
       updateSession({ 
         error: err.message || "Đã xảy ra lỗi không xác định.", 
@@ -2116,6 +2330,7 @@ useEffect(() => {
     lastLocalEditTimeRef.current = Date.now();
     const restored = sanitizeResult(item.result);
     const completed = item.completedSegments || [];
+    activeHistoryIdRef.current = item.id;
 
     updateSession({
       inputText: item.sourceText,
@@ -2125,13 +2340,39 @@ useEffect(() => {
       status: AppStatus.SUCCESS,
       error: null,
       completedSegments: completed,
-      currentHistoryId: item.id
+      currentHistoryId: item.id,
+      ...(item.chapterId ? { currentChapterId: item.chapterId } : {}),
+      ...(item.novelId ? { currentNovelId: item.novelId } : {}),
+      ...(item.chapterName ? { name: item.chapterName } : {})
     });
     setShowHistory(false);
   };
 
   const deleteHistoryItem = (id: string) => {
-    setHistory(prev => prev.filter(item => item.id !== id));
+    markLocalWorkspaceDirty();
+    deletedHistoryIdsRef.current.add(id);
+    persistDeletedIds();
+    if (activeHistoryIdRef.current === id) {
+      activeHistoryIdRef.current = undefined;
+      setSession(prev => prev.currentHistoryId === id ? { ...prev, currentHistoryId: undefined } : prev);
+    }
+    setHistory(prev => {
+      const next = prev.filter(item => item.id !== id);
+      historyRef.current = next;
+      return next;
+    });
+  };
+
+  const handleClearAllHistory = () => {
+    markLocalWorkspaceDirty();
+    (historyRef.current || []).forEach(item => {
+      if (item?.id) deletedHistoryIdsRef.current.add(item.id);
+    });
+    persistDeletedIds();
+    activeHistoryIdRef.current = undefined;
+    historyRef.current = [];
+    setHistory([]);
+    setSession(prev => prev.currentHistoryId ? { ...prev, currentHistoryId: undefined } : prev);
   };
 
   const handleSaveChapter = async (name: string, saveMode: 'new' | 'update' = 'new') => {
@@ -2191,6 +2432,14 @@ useEffect(() => {
       inputText: fullSourceText || session.inputText,
       preEditedText: fullNaturalText || session.preEditedText
     });
+    upsertLocalHistoryOnEdit({
+      sourceText: fullSourceText || session.inputText,
+      result: cleanResult,
+      completedSegments: session.completedSegments,
+      chapterId,
+      chapterName: name,
+      novelId: session.currentNovelId
+    });
   };
 
   const handleRestoreChapter = (chapter: Chapter) => {
@@ -2246,6 +2495,9 @@ useEffect(() => {
     const deeplText = hasSegments ? (restoredResult?.segments || []).map(s => s.deepl || '').join('\n') : (chapter.deeplText || "");
     const naturalText = hasSegments ? (restoredResult?.segments || []).map(s => s.natural || '').join('\n') : (chapter.preEditedText || "");
 
+    const matchedHist = (historyRef.current || []).find(h => h.chapterId === chapter.id);
+    activeHistoryIdRef.current = matchedHist?.id;
+
     updateSession({
       name: chapter.name,
       inputText: sourceText,
@@ -2255,7 +2507,7 @@ useEffect(() => {
       status: hasSegments ? AppStatus.SUCCESS : AppStatus.IDLE,
       error: null,
       completedSegments: completed,
-      currentHistoryId: undefined,
+      currentHistoryId: matchedHist?.id,
       currentChapterId: chapter.id,
       currentNovelId: activeNovelId
     });
@@ -2304,6 +2556,12 @@ useEffect(() => {
       cleanUpdates.preEditedText = convertStraightToSmartQuotes(cleanUpdates.preEditedText);
     }
     updateSession(cleanUpdates);
+    if (session.result) {
+      upsertLocalHistoryOnEdit({
+        sourceText: cleanUpdates.inputText !== undefined ? cleanUpdates.inputText : session.inputText,
+        result: session.result
+      });
+    }
   };
 
   const handleDeleteChapter = async (id: string) => {
@@ -2917,7 +3175,7 @@ useEffect(() => {
         )}
       </div>
 
-      <HistoryModal isOpen={showHistory} onClose={() => setShowHistory(false)} history={history} onSelect={handleRestoreHistory} onDelete={deleteHistoryItem} onClearAll={() => setHistory([])} />
+      <HistoryModal isOpen={showHistory} onClose={() => setShowHistory(false)} history={history} onSelect={handleRestoreHistory} onDelete={deleteHistoryItem} onClearAll={handleClearAllHistory} />
 
       <ChapterArchiveModal 
         isOpen={showChapters} 

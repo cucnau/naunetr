@@ -266,6 +266,12 @@ export const extractLocalBrowserData = async (): Promise<ExtractedLocalData> => 
               });
             } else if (kStr === 'active_session_data' && value) {
               addSessionIfHasWork(value, `idb_${info.name}_active`, sourceLabel);
+            } else if ((kStr === 'history_data' || kStr.startsWith('history_data_')) && Array.isArray(value)) {
+              value.forEach((h: any) => {
+                if (h && h.id && (h.sourceText || h.result) && !historyMap.has(h.id)) {
+                  historyMap.set(h.id, { item: h as HistoryItem, source: `${sourceLabel} → ${kStr}` });
+                }
+              });
             }
           });
 

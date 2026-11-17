@@ -1,5 +1,5 @@
 
-import { CustomTerm, Chapter, VietphraseFileItem, Character, Novel } from '../types';
+import { CustomTerm, Chapter, VietphraseFileItem, Character, Novel, HistoryItem } from '../types';
 import { getScopedDbName, getScopedStorageItem, recoverAllCachedNovels, setScopedStorageItem } from './storageNamespace';
 
 // IndexedDB Service duoc cach ly rieng cho tung repo / web
@@ -15,6 +15,7 @@ export const KEY_CURRENT_NOVEL = 'current_novel_id';
 export const KEY_NOVELS = 'novels_list';
 export const KEY_CHARACTERS = 'characters_data';
 export const KEY_ACTIVE_SESSION = 'active_session_data';
+export const KEY_HISTORY = 'history_data';
 
 const dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
     if (typeof window === 'undefined' || !window.indexedDB) {
@@ -459,6 +460,43 @@ export const db = {
             });
         } catch (e) {
             console.error("DB Save Active Session Error", e);
+        }
+    },
+
+    async getHistory(targetUid?: string): Promise<HistoryItem[]> {
+        try {
+            const db = await dbPromise;
+            return new Promise((resolve) => {
+                const tx = db.transaction(STORE_SETTINGS, 'readonly');
+                const store = tx.objectStore(STORE_SETTINGS);
+                const storeKey = targetUid ? `${KEY_HISTORY}_${targetUid}` : KEY_HISTORY;
+                const req = store.get(storeKey);
+                req.onsuccess = () => {
+                    const res = req.result;
+                    resolve(Array.isArray(res) ? res : []);
+                };
+                req.onerror = () => resolve([]);
+            });
+        } catch (e) {
+            console.error("DB Get History Error", e);
+            return [];
+        }
+    },
+
+    async saveHistory(items: HistoryItem[], targetUid?: string): Promise<void> {
+        try {
+            if (!Array.isArray(items)) return;
+            const db = await dbPromise;
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(STORE_SETTINGS, 'readwrite');
+                const store = tx.objectStore(STORE_SETTINGS);
+                const storeKey = targetUid ? `${KEY_HISTORY}_${targetUid}` : KEY_HISTORY;
+                const req = store.put(items, storeKey);
+                req.onsuccess = () => resolve();
+                req.onerror = () => reject(req.error);
+            });
+        } catch (e) {
+            console.error("DB Save History Error", e);
         }
     }
 };

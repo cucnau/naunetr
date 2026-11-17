@@ -85,6 +85,9 @@ export interface HistoryItem {
   result: TranslationResponse;
   modelId?: string;
   completedSegments?: number[];
+  novelId?: string;
+  chapterId?: string;
+  chapterName?: string;
 }
 
 export interface Chapter {

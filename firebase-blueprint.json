@@ -98,6 +98,20 @@
         "updatedAt": "number",
         "deviceId": "string"
       }
+    },
+    {
+      "name": "histories",
+      "purpose": "Stores user editing version history synced manually from local",
+      "access_pattern": "Users can read and write only their own history items.",
+      "document_schema": {
+        "userId": "string",
+        "novelId": "string",
+        "chapterId": "string",
+        "chapterName": "string",
+        "timestamp": "number",
+        "sourceText": "string",
+        "completedSegments": "array"
+      }
     }
   ],
   "auth_required": true

@@ -217,6 +217,7 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
         recovered.characters.length +
         recovered.relationships.length +
         recovered.shortcuts.length +
+        (recovered.histories?.length || 0) +
         (recovered.latestWorkspace ? 1 : 0);
 
       if (totalItems === 0) {
@@ -229,7 +230,7 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
       }
 
       setSuccessMsg(
-        `Đã khôi phục từ Firestore: ${recovered.novels.length} truyện, ${recovered.chapters.length} chương, ${recovered.customTerms.length} từ vựng, ${recovered.characters.length} nhân vật, ${recovered.relationships.length} quan hệ, ${recovered.shortcuts.length} gõ tắt${recovered.latestWorkspace ? ' và bản thảo đang làm dở' : ''}.`
+        `Đã khôi phục từ Firestore: ${recovered.novels.length} truyện, ${recovered.chapters.length} chương, ${recovered.histories?.length || 0} lịch sử, ${recovered.customTerms.length} từ vựng, ${recovered.characters.length} nhân vật, ${recovered.relationships.length} quan hệ, ${recovered.shortcuts.length} gõ tắt${recovered.latestWorkspace ? ' và bản thảo đang làm dở' : ''}.`
       );
     } catch (error: any) {
       const msg = String(error?.message || error || '');

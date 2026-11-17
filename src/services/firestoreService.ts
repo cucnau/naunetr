@@ -1,6 +1,6 @@
 import { db, auth } from './firebase';
 import { collection, doc, setDoc, getDoc, getDocs, deleteDoc, writeBatch, query, where, Timestamp, onSnapshot } from 'firebase/firestore';
-import { CustomTerm, Character, Relationship, Novel, Chapter, TextShortcut, TranslationSegment, TranslationResponse } from '../types';
+import { CustomTerm, Character, Relationship, Novel, Chapter, TextShortcut, TranslationSegment, TranslationResponse, HistoryItem } from '../types';
 import { getAppNamespace, getScopedStorageItem, recoverAllCachedNovels } from './storageNamespace';
 
 export enum OperationType {
@@ -962,6 +962,141 @@ export const saveUserLiveWorkspaceToCloud = async (
   }
 };
 
+export const restoreLeanHistoryItem = (raw: any): HistoryItem => {
+  const item = { ...raw } as HistoryItem;
+  if (item.result?.segments && item.result.segments.length > 0) {
+    const segs = item.result.segments;
+    if (!item.sourceText) {
+      item.sourceText = segs.map(s => s.source || '').join('\n');
+    }
+    if (!item.result.naturalTranslation) {
+      item.result.naturalTranslation = segs.map(s => s.natural || '').join('\n');
+    }
+    if (!item.result.quickTrans) {
+      item.result.quickTrans = segs.map(s => s.quick || '').join('\n');
+    }
+    if (!item.result.deeplTranslation) {
+      item.result.deeplTranslation = segs.map(s => s.deepl || '').join('\n');
+    }
+  }
+  return item;
+};
+
+const prepareHistoryForCloud = (item: HistoryItem, userId: string): Record<string, any> => {
+  const currentScope = getAppScope();
+  const rawData: any = {
+    ...item,
+    userId,
+    appScope: currentScope,
+    createdAt: Timestamp.now()
+  };
+
+  if (rawData.result?.segments && rawData.result.segments.length > 0) {
+    rawData.result = {
+      ...rawData.result,
+      sinoVietnamese: "",
+      vocabulary: []
+    };
+
+    const jsonEstimate = JSON.stringify(rawData);
+    if (jsonEstimate.length > 350 * 1024) {
+      rawData.result = {
+        segments: rawData.result.segments.map((s: any) => ({
+          source: (s.source || '').trim(),
+          natural: (s.natural || '').trim(),
+          quick: (s.quick || '').trim(),
+          deepl: (s.deepl || '').trim()
+        })),
+        naturalTranslation: "",
+        quickTrans: "",
+        deeplTranslation: "",
+        sinoVietnamese: "",
+        vocabulary: []
+      };
+      rawData.sourceText = "";
+      rawData._isLean = true;
+    }
+  }
+
+  const dataToSave = sanitizeData(rawData);
+  Object.keys(dataToSave).forEach(k => {
+    if (dataToSave[k] === undefined) delete dataToSave[k];
+  });
+  return dataToSave;
+};
+
+export const getHistoriesFromCloud = async (): Promise<HistoryItem[]> => {
+  const user = auth.currentUser;
+  if (!user || isCloudQuotaExhausted()) return [];
+  try {
+    const q = query(collection(db, 'histories'), where('userId', '==', user.uid));
+    const snap = await getDocs(q);
+    const items: HistoryItem[] = [];
+    const cacheMap = new Map<string, any>();
+    snap.forEach((d) => {
+      const data = d.data();
+      if (data && (!data.userId || data.userId === user.uid)) {
+        cacheMap.set(d.id, data);
+        const { userId, appScope, createdAt, ...rest } = data;
+        items.push(restoreLeanHistoryItem({ id: d.id, ...rest }));
+      }
+    });
+    dbCache.set(`histories_${user.uid}`, cacheMap);
+    items.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+    return items;
+  } catch (error) {
+    handleQuotaExhausted(error);
+    console.warn("Không thể tải lịch sử từ đám mây (đang dùng bản cục bộ):", error);
+    return [];
+  }
+};
+
+export const bulkSaveHistoriesToCloud = async (items: HistoryItem[]): Promise<void> => {
+  const user = auth.currentUser;
+  if (!user || items.length === 0 || isCloudQuotaExhausted()) return;
+
+  const cacheMap = dbCache.get(`histories_${user.uid}`);
+  const changedItems = items.filter((item) => {
+    if (!item || !item.id) return false;
+    const cached = cacheMap?.get(item.id);
+    if (!cached) return true;
+    return (item.timestamp || 0) > (cached.timestamp || 0);
+  });
+
+  if (changedItems.length === 0) return;
+
+  const chunkSize = 10;
+  for (let i = 0; i < changedItems.length; i += chunkSize) {
+    const chunk = changedItems.slice(i, i + chunkSize);
+    const batch = writeBatch(db);
+    chunk.forEach((item) => {
+      const dataToSave = prepareHistoryForCloud(item, user.uid);
+      batch.set(doc(db, 'histories', item.id), dataToSave, { merge: true });
+      if (cacheMap) cacheMap.set(item.id, dataToSave);
+    });
+    try {
+      await batch.commit();
+    } catch (e) {
+      handleQuotaExhausted(e);
+      console.warn("Lỗi lưu lịch sử lên Cloud:", e);
+      if (isCloudQuotaExhausted()) break;
+    }
+  }
+};
+
+export const deleteHistoryFromCloud = async (historyId: string): Promise<void> => {
+  const user = auth.currentUser;
+  if (!user || !historyId || isCloudQuotaExhausted()) return;
+  try {
+    await deleteDoc(doc(db, 'histories', historyId));
+    const cacheMap = dbCache.get(`histories_${user.uid}`);
+    cacheMap?.delete(historyId);
+  } catch (error) {
+    handleQuotaExhausted(error);
+    console.warn("Không thể xóa lịch sử trên Cloud Firestore:", error);
+  }
+};
+
 export interface RecoveredCloudData {
   novels: Novel[];
   chapters: Chapter[];
@@ -969,6 +1104,7 @@ export interface RecoveredCloudData {
   characters: Character[];
   relationships: Relationship[];
   shortcuts: TextShortcut[];
+  histories: HistoryItem[];
   latestWorkspace: LiveSessionData | null;
 }
 
@@ -991,6 +1127,7 @@ export const recoverAllUserDataFromFirestore = async (): Promise<RecoveredCloudD
   const charMap = new Map<string, Character>();
   const relMap = new Map<string, Relationship>();
   const shortcutMap = new Map<string, TextShortcut>();
+  const historyMap = new Map<string, HistoryItem>();
 
   try {
     // 1. Tải toàn bộ dữ liệu gắn với userId của tài khoản này (CHỈ 1 LƯỢT DUY NHẤT - KHÔNG ĐỌC LẶP)
@@ -1002,6 +1139,7 @@ export const recoverAllUserDataFromFirestore = async (): Promise<RecoveredCloudD
       relsSnap,
       shortcutsSnap,
       sessionsByUidSnap,
+      historiesSnap,
     ] = await withTimeout(
       Promise.all([
         getDocs(query(collection(db, 'novels'), where('userId', '==', user.uid))),
@@ -1011,6 +1149,7 @@ export const recoverAllUserDataFromFirestore = async (): Promise<RecoveredCloudD
         getDocs(query(collection(db, 'relationships'), where('userId', '==', user.uid))),
         getDocs(query(collection(db, 'shortcuts'), where('userId', '==', user.uid))),
         getDocs(query(collection(db, 'activeSessions'), where('userId', '==', user.uid))),
+        getDocs(query(collection(db, 'histories'), where('userId', '==', user.uid))).catch(() => null),
       ]),
       15000,
       'Khôi phục dữ liệu từ Firestore quá thời gian. Vui lòng thử lại.'
@@ -1080,6 +1219,17 @@ export const recoverAllUserDataFromFirestore = async (): Promise<RecoveredCloudD
         shortcutMap.set(d.id, { id: d.id, ...rest } as TextShortcut);
       }
     });
+
+    const histCacheMap = new Map<string, any>();
+    historiesSnap?.forEach((d) => {
+      const data = d.data();
+      if (data && (!data.userId || data.userId === user.uid)) {
+        histCacheMap.set(d.id, data);
+        const { userId, appScope, createdAt, ...rest } = data;
+        historyMap.set(d.id, restoreLeanHistoryItem({ id: d.id, ...rest }));
+      }
+    });
+    dbCache.set(`histories_${user.uid}`, histCacheMap);
 
     // 2. Tự động tái tạo đầu truyện nếu có chương thuộc về novelId chưa có trong collection novels
     chapterMap.forEach((chap) => {
@@ -1161,6 +1311,7 @@ export const recoverAllUserDataFromFirestore = async (): Promise<RecoveredCloudD
       characters: Array.from(charMap.values()),
       relationships: Array.from(relMap.values()),
       shortcuts: Array.from(shortcutMap.values()),
+      histories: Array.from(historyMap.values()).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)),
       latestWorkspace,
     };
   } catch (error) {
