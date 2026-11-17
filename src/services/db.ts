@@ -237,17 +237,44 @@ export const db = {
             ? Array.from(novelMap.values()) 
             : [{ id: 'default', name: 'Truyện mặc định' }];
 
-        // Lưu đồng bộ lại cho tài khoản này (không ghi đè vào key chung)
-        try {
-            await this.saveNovels(finalList, targetUid);
-            if (targetUid) {
-                setScopedStorageItem(`cached_novels_${targetUid}`, JSON.stringify(finalList));
-            } else {
-                setScopedStorageItem('cached_novels_list', JSON.stringify(finalList));
-            }
-        } catch (_) {}
+        // Chỉ lưu lại cache khi thực sự tìm thấy truyện hợp lệ (tránh ghi đè Truyện mặc định lên dữ liệu cũ)
+        if (novelMap.size > 0) {
+            try {
+                await this.saveNovels(finalList, targetUid);
+                if (targetUid) {
+                    setScopedStorageItem(`cached_novels_${targetUid}`, JSON.stringify(finalList));
+                } else {
+                    setScopedStorageItem('cached_novels_list', JSON.stringify(finalList));
+                }
+            } catch (_) {}
+        }
 
         return finalList;
+    },
+
+    async getAllSettingsEntries(): Promise<Array<{ key: string; value: any }>> {
+        try {
+            const database = await dbPromise;
+            return new Promise((resolve) => {
+                const tx = database.transaction(STORE_SETTINGS, 'readonly');
+                const store = tx.objectStore(STORE_SETTINGS);
+                const entries: Array<{ key: string; value: any }> = [];
+                const req = store.openCursor();
+                req.onsuccess = (ev) => {
+                    const cursor = (ev.target as IDBRequest<IDBCursorWithValue | null>).result;
+                    if (cursor) {
+                        entries.push({ key: String(cursor.key), value: cursor.value });
+                        cursor.continue();
+                    } else {
+                        resolve(entries);
+                    }
+                };
+                req.onerror = () => resolve([]);
+            });
+        } catch (e) {
+            console.warn("DB Get All Settings Entries Error", e);
+            return [];
+        }
     },
 
     async getAllCustomTerms(): Promise<CustomTerm[]> {

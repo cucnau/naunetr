@@ -216,12 +216,12 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({
           </button>
         </div>
       ) : (
-        <div className="flex items-center gap-1 rounded-md px-2 py-1 transition-colors bg-white hover:bg-[#FAF6F0] border border-[#D7CCC8] text-[#3E2723] shadow-2xs">
-          <Book size={12} className="text-[#5D4037]" />
+        <div className="h-7 sm:h-auto flex items-center gap-1 rounded-md px-1.5 sm:px-2 py-1 transition-colors bg-white hover:bg-[#FAF6F0] border border-[#D7CCC8] text-[#3E2723] shadow-2xs">
+          <Book size={12} className="text-[#5D4037] shrink-0" />
           <select
             value={currentNovelId || novels[0]?.id || ''}
             onChange={(e) => onSelectNovel(e.target.value)}
-            className="bg-transparent font-medium text-[10px] outline-none max-w-[120px] cursor-pointer text-[#3E2723]"
+            className="bg-transparent font-medium text-[10px] outline-none max-w-[80px] sm:max-w-[120px] cursor-pointer text-[#3E2723]"
           >
             {novels.length === 0 && (
               <option value="" disabled>
@@ -235,7 +235,7 @@ export const NovelSelector: React.FC<NovelSelectorProps> = ({
             ))}
           </select>
 
-          <div className="flex items-center gap-1 ml-0.5">
+          <div className="flex items-center gap-0.5 sm:gap-1 ml-0.5">
             <button
               type="button"
               onClick={handleOpenCreate}

@@ -1331,13 +1331,16 @@ useEffect(() => {
   const handleApplyCloudRecovery = async (data: RecoveredCloudData) => {
     const uid = auth.currentUser?.uid;
 
-    // 1. Hợp nhất danh sách truyện
+    // 1. Hợp nhất danh sách truyện và gỡ khỏi danh sách đã xóa cục bộ nếu được khôi phục từ Cloud
     const novelMap = new Map<string, Novel>();
     (novels || []).forEach((n) => {
       if (n && n.id && n.name) novelMap.set(n.id, n);
     });
     (data.novels || []).forEach((n) => {
-      if (n && n.id && n.name) novelMap.set(n.id, n);
+      if (n && n.id && n.name) {
+        deletedNovelIdsRef.current.delete(n.id);
+        novelMap.set(n.id, n);
+      }
     });
     if (novelMap.size > 1 && novelMap.has('default')) {
       novelMap.delete('default');
@@ -1346,6 +1349,7 @@ useEffect(() => {
     if (mergedNovels.length > 0) {
       setNovels(mergedNovels);
       await db.saveNovels(mergedNovels, uid);
+      await db.saveNovels(mergedNovels);
       if (uid) setScopedStorageItem(`cached_novels_${uid}`, JSON.stringify(mergedNovels));
       setScopedStorageItem('cached_novels_list', JSON.stringify(mergedNovels));
     }
@@ -1360,6 +1364,8 @@ useEffect(() => {
 
     const chapsToSave: Chapter[] = [];
     (data.chapters || []).forEach((cloudCh) => {
+      deletedChapterIdsRef.current.delete(cloudCh.id);
+      if (cloudCh.novelId) deletedNovelIdsRef.current.delete(cloudCh.novelId);
       const localCh = chapMap.get(cloudCh.id);
       if (!localCh) {
         chapMap.set(cloudCh.id, cloudCh);
@@ -1372,6 +1378,7 @@ useEffect(() => {
         }
       }
     });
+    persistDeletedIds();
 
     for (const ch of chapsToSave) {
       await db.saveChapter(ch);
@@ -1525,13 +1532,17 @@ useEffect(() => {
       (novels || []).forEach((n) => {
         if (n && n.id && n.name) novelMap.set(n.id, n);
       });
-      selection.novels.forEach((n) => novelMap.set(n.id, n));
+      selection.novels.forEach((n) => {
+        deletedNovelIdsRef.current.delete(n.id);
+        novelMap.set(n.id, n);
+      });
       if (novelMap.size > 1 && novelMap.has('default')) {
         novelMap.delete('default');
       }
       const mergedNovels = Array.from(novelMap.values());
       setNovels(mergedNovels);
       await db.saveNovels(mergedNovels, uid);
+      await db.saveNovels(mergedNovels);
       if (uid) setScopedStorageItem(`cached_novels_${uid}`, JSON.stringify(mergedNovels));
       setScopedStorageItem('cached_novels_list', JSON.stringify(mergedNovels));
 
@@ -1545,6 +1556,8 @@ useEffect(() => {
       const chapMap = new Map<string, Chapter>();
       (chapters || []).forEach((c) => chapMap.set(c.id, c));
       for (const ch of selection.chapters) {
+        deletedChapterIdsRef.current.delete(ch.id);
+        if (ch.novelId) deletedNovelIdsRef.current.delete(ch.novelId);
         const normalizedCh: Chapter = {
           ...ch,
           novelId: ch.novelId || (nextNovelId && nextNovelId !== 'default' ? nextNovelId : ch.novelId),
@@ -1556,6 +1569,7 @@ useEffect(() => {
         Array.from(chapMap.values()).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
       );
     }
+    persistDeletedIds();
 
     // 3. Từ vựng, nhân vật, quan hệ đã chọn
     const termMap = new Map<string, CustomTerm>();
@@ -2649,13 +2663,13 @@ useEffect(() => {
       
       {/* HEADER */}
       
-        <header className={`bg-[#EFE5D9] text-[#3E2723] border-b border-[#D7CCC8] min-h-14 py-1.5 flex-wrap items-center justify-between gap-2 px-3 sm:px-4 shrink-0 z-20 shadow-xs ${isFocusMode ? 'hidden' : 'flex'}`}>
+        <header className={`bg-[#EFE5D9] text-[#3E2723] border-b border-[#D7CCC8] h-12 sm:h-auto sm:min-h-14 py-1.5 flex-nowrap sm:flex-wrap items-center justify-between gap-2 px-2.5 sm:px-4 shrink-0 z-20 shadow-xs overflow-x-auto sm:overflow-visible [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] ${isFocusMode ? 'hidden' : 'flex'}`}>
           <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
             {/* Segmented Mode Control */}
-            <div className="flex bg-[#E4D5C3] p-0.5 rounded-lg border border-[#D7CCC8]">
+            <div className="h-7 sm:h-auto flex items-center bg-[#E4D5C3] p-0.5 rounded-lg border border-[#D7CCC8] shrink-0">
               <button
                 onClick={() => setMode('edit')}
-                className={`px-2 sm:px-3 py-1 rounded-md text-[11px] font-bold transition-all ${mode === 'edit' ? 'bg-[#5D4037] text-white shadow-xs' : 'text-[#5D4037] hover:text-[#3E2723]'}`}
+                className={`px-2 sm:px-3 py-0.5 sm:py-1 rounded-md text-[11px] font-bold transition-all ${mode === 'edit' ? 'bg-[#5D4037] text-white shadow-xs' : 'text-[#5D4037] hover:text-[#3E2723]'}`}
                 title="Chế độ Edit"
               >
                 <span className="sm:hidden">E</span>
@@ -2663,7 +2677,7 @@ useEffect(() => {
               </button>
               <button
                 onClick={() => setMode('beta')}
-                className={`px-2 sm:px-3 py-1 rounded-md text-[11px] font-bold transition-all flex items-center gap-1 ${mode === 'beta' ? 'bg-[#5D4037] text-white shadow-xs' : 'text-[#5D4037] hover:text-[#3E2723]'}`}
+                className={`px-2 sm:px-3 py-0.5 sm:py-1 rounded-md text-[11px] font-bold transition-all flex items-center gap-1 ${mode === 'beta' ? 'bg-[#5D4037] text-white shadow-xs' : 'text-[#5D4037] hover:text-[#3E2723]'}`}
                 title="Chế độ Beta"
               >
                 <span className="sm:hidden">B</span>
@@ -2674,7 +2688,7 @@ useEffect(() => {
             <button
               onClick={handleManualSyncToFirestore}
               disabled={isSyncingToCloud}
-              className={`flex items-center gap-1.5 text-[10px] font-semibold px-2.5 py-1 rounded-full border transition-all shadow-2xs ${
+              className={`h-7 sm:h-auto flex items-center justify-center gap-1.5 text-[10px] font-semibold px-2 sm:px-2.5 py-1 rounded-full border transition-all shadow-2xs shrink-0 whitespace-nowrap ${
                 isSyncingToCloud
                   ? 'bg-amber-50 text-amber-800 border-amber-300 animate-pulse'
                   : !currentUser
@@ -2694,44 +2708,44 @@ useEffect(() => {
               {isSyncingToCloud ? (
                 <>
                   <Loader2 size={12} className="animate-spin text-amber-700" />
-                  <span>Đang đồng bộ...</span>
+                  <span className="hidden sm:inline">Đang đồng bộ...</span>
                 </>
               ) : !currentUser ? (
                 <>
                   <RefreshCw size={12} className="text-[#8D6E63]" />
-                  <span>Đồng bộ Firestore</span>
+                  <span className="hidden sm:inline">Đồng bộ Firestore</span>
                 </>
               ) : hasUnsyncedChanges ? (
                 <>
                   <RefreshCw size={12} className="text-[#E65100]" />
-                  <span className="font-bold">Đồng bộ Firestore</span>
+                  <span className="hidden sm:inline font-bold">Đồng bộ Firestore</span>
                   <span className="w-1.5 h-1.5 rounded-full bg-[#E65100] animate-ping" />
                 </>
               ) : (
                 <>
                   <RefreshCw size={12} className="text-[#5D4037]" />
-                  <span>Đồng bộ Firestore</span>
+                  <span className="hidden sm:inline">Đồng bộ Firestore</span>
                 </>
               )}
             </button>
           </div>
           
           {/* RIGHT CONTROLS */}
-          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 sm:shrink sm:flex-wrap">
               <button
                 onClick={() => setShowMobileSidebar(true)}
-                className="lg:hidden flex items-center justify-center text-[#5D4037] hover:text-[#3E2723] bg-white hover:bg-[#FAF6F0] p-2 sm:px-2.5 sm:py-1 rounded-full border border-[#D7CCC8] shadow-2xs transition-colors"
+                className="lg:hidden h-7 w-7 sm:w-auto sm:h-auto flex items-center justify-center text-[#5D4037] hover:text-[#3E2723] bg-white hover:bg-[#FAF6F0] sm:px-2.5 sm:py-1 rounded-full border border-[#D7CCC8] shadow-2xs transition-colors shrink-0"
                 title="Kho Từ vựng"
               >
-                 <BookA size={14} />
+                 <BookA size={13} />
               </button>
 
               <button
                 onClick={() => setShowMobileWorldInfo(true)}
-                className="xl:hidden flex items-center justify-center text-[#5D4037] hover:text-[#3E2723] bg-white hover:bg-[#FAF6F0] p-2 sm:px-2.5 sm:py-1 rounded-full border border-[#D7CCC8] shadow-2xs transition-colors"
+                className="xl:hidden h-7 w-7 sm:w-auto sm:h-auto flex items-center justify-center text-[#5D4037] hover:text-[#3E2723] bg-white hover:bg-[#FAF6F0] sm:px-2.5 sm:py-1 rounded-full border border-[#D7CCC8] shadow-2xs transition-colors shrink-0"
                 title="Bảng Nhân vật & Thiết lập"
               >
-                 <Users size={14} />
+                 <Users size={13} />
               </button>
 
               <NovelSelector 
@@ -2745,7 +2759,7 @@ useEffect(() => {
               />
               <button 
                 onClick={() => setShowShortcuts(true)} 
-                className={`flex items-center gap-1.5 text-[10px] font-medium px-2.5 py-1 rounded-full border transition-colors shadow-2xs ${
+                className={`h-7 sm:h-auto flex items-center justify-center gap-1 sm:gap-1.5 text-[10px] font-medium px-2 sm:px-2.5 py-1 rounded-full border transition-colors shadow-2xs shrink-0 ${
                   shortcutsEnabled 
                     ? 'text-[#5D4037] hover:text-[#3E2723] bg-white hover:bg-[#FAF6F0] border-[#D7CCC8]' 
                     : 'text-[#8D6E63] hover:text-[#3E2723] bg-white/60 border-[#D7CCC8]'
@@ -2762,18 +2776,18 @@ useEffect(() => {
               </button>
               <button 
                 onClick={() => setShowFontModal(true)} 
-                className="flex items-center gap-1.5 text-[10px] font-medium text-[#5D4037] hover:text-[#3E2723] bg-white hover:bg-[#FAF6F0] px-2 sm:px-2.5 py-1 rounded-full border border-[#D7CCC8] shadow-2xs transition-colors"
+                className="h-7 w-7 sm:w-auto sm:h-auto flex items-center justify-center gap-1.5 text-[10px] font-medium text-[#5D4037] hover:text-[#3E2723] bg-white hover:bg-[#FAF6F0] sm:px-2.5 sm:py-1 rounded-full border border-[#D7CCC8] shadow-2xs transition-colors shrink-0"
                 title="Đổi phông chữ hiển thị toàn ứng dụng"
               >
                  <Type size={12} />
                  <span className="hidden sm:inline">Phông chữ</span>
               </button>
-              <button onClick={() => setShowChapters(true)} className="flex items-center gap-1.5 text-[10px] font-medium text-[#5D4037] hover:text-[#3E2723] bg-white hover:bg-[#FAF6F0] px-2 sm:px-2.5 py-1 rounded-full border border-[#D7CCC8] shadow-2xs transition-colors">
+              <button onClick={() => setShowChapters(true)} className="h-7 sm:h-auto flex items-center justify-center gap-1 sm:gap-1.5 text-[10px] font-medium text-[#5D4037] hover:text-[#3E2723] bg-white hover:bg-[#FAF6F0] px-2 sm:px-2.5 py-1 rounded-full border border-[#D7CCC8] shadow-2xs transition-colors shrink-0">
                  <FolderOpen size={12} />
                  <span className="hidden sm:inline">Kho chương</span>
                  <span>({currentNovelChapters.length})</span>
               </button>
-              <button onClick={() => setShowHistory(true)} className="flex items-center gap-1.5 text-[10px] font-medium text-[#5D4037] hover:text-[#3E2723] bg-white hover:bg-[#FAF6F0] px-2 py-1 rounded-full border border-[#D7CCC8] shadow-2xs transition-colors">
+              <button onClick={() => setShowHistory(true)} className="h-7 w-7 sm:w-auto sm:h-auto flex items-center justify-center gap-1.5 text-[10px] font-medium text-[#5D4037] hover:text-[#3E2723] bg-white hover:bg-[#FAF6F0] sm:px-2 sm:py-1 rounded-full border border-[#D7CCC8] shadow-2xs transition-colors shrink-0">
                  <History size={12} />
                  <span className="hidden sm:inline">Lịch sử</span>
               </button>

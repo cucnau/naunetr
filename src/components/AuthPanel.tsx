@@ -301,7 +301,7 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
               resetForm();
               setIsSettingsModalOpen(true);
             }} 
-            className="flex items-center justify-center text-[#5D4037] hover:text-[#3E2723] bg-white hover:bg-[#FAF6F0] p-2 rounded-full border border-[#D7CCC8] shadow-2xs transition-all duration-200 cursor-pointer" 
+            className="h-7 w-7 sm:h-auto sm:w-auto flex items-center justify-center text-[#5D4037] hover:text-[#3E2723] bg-white hover:bg-[#FAF6F0] sm:p-2 rounded-full border border-[#D7CCC8] shadow-2xs transition-all duration-200 cursor-pointer" 
             title="Thiết lập tài khoản & Liên kết"
           >
             <UserIcon size={13} />
@@ -310,7 +310,7 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
           {/* Simple Logout Button */}
           <button 
             onClick={handleSignOut} 
-            className="flex items-center justify-center text-[#5D4037] hover:text-[#3E2723] bg-white hover:bg-[#FAF6F0] p-2 rounded-full border border-[#D7CCC8] shadow-2xs transition-all duration-200 cursor-pointer" 
+            className="h-7 w-7 sm:h-auto sm:w-auto flex items-center justify-center text-[#5D4037] hover:text-[#3E2723] bg-white hover:bg-[#FAF6F0] sm:p-2 rounded-full border border-[#D7CCC8] shadow-2xs transition-all duration-200 cursor-pointer" 
             title={`Đăng xuất (${user.displayName || user.email || 'User'})`}
           >
             <LogOut size={13} />
@@ -323,7 +323,7 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
             setAuthTab('login');
             setIsAuthModalOpen(true);
           }} 
-          className="flex items-center justify-center text-[#5D4037] hover:text-[#3E2723] bg-white hover:bg-[#FAF6F0] p-2 rounded-full border border-[#D7CCC8] shadow-2xs transition-all duration-200 cursor-pointer" 
+          className="h-7 w-7 sm:h-auto sm:w-auto flex items-center justify-center text-[#5D4037] hover:text-[#3E2723] bg-white hover:bg-[#FAF6F0] sm:p-2 rounded-full border border-[#D7CCC8] shadow-2xs transition-all duration-200 cursor-pointer" 
           title="Đăng nhập (Email hoặc Google)"
         >
           <LogIn size={13} />

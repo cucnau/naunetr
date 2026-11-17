@@ -174,9 +174,10 @@ export const extractLocalBrowserData = async (): Promise<ExtractedLocalData> => 
         (result?.segments?.[0]?.natural || result?.segments?.[0]?.source || inputText || preEditedText || '')
           .trim()
           .slice(0, 60);
+      const draftTitle = typeof raw.name === 'string' && raw.name.trim() ? `[${raw.name.trim()}] ` : '';
       sessionList.push({
         id,
-        label: preview ? `Bản thảo: "${preview}..."` : 'Bản thảo làm dở',
+        label: preview ? `${draftTitle}Bản thảo: "${preview}..."` : `${draftTitle}Bản thảo làm dở`,
         source,
         novelId: raw.currentNovelId || raw.novelId,
         chapterId: raw.currentChapterId || raw.chapterId,
@@ -213,14 +214,36 @@ export const extractLocalBrowserData = async (): Promise<ExtractedLocalData> => 
     }
   };
 
-  // 1. Quét toàn bộ IndexedDB của ứng dụng hiện tại (read-only)
+  // 1. Quét toàn bộ IndexedDB của ứng dụng hiện tại (read-only, hoạt động trên mọi trình duyệt kể cả iOS Safari)
   try {
-    const [curChaps, curTerms, curChars, curActive] = await Promise.all([
+    const [curSettings, curChaps, curTerms, curChars, curActive] = await Promise.all([
+      db.getAllSettingsEntries().catch(() => []),
       db.getAllChapters().catch(() => []),
       db.getAllCustomTerms().catch(() => []),
       db.getCharacters().catch(() => []),
       db.getActiveSession().catch(() => null),
     ]);
+
+    curSettings.forEach(({ key, value }) => {
+      const kStr = String(key);
+      if (kStr.startsWith('novels_list') && Array.isArray(value)) {
+        value.forEach((n) => addNovel(n, `IndexedDB (hiện tại) → ${kStr}`));
+      } else if (kStr === 'characters_data' && Array.isArray(value)) {
+        value.forEach((ch: any) => {
+          if (ch && ch.id && !charMap.has(ch.id)) {
+            charMap.set(ch.id, { character: ch as Character, source: 'IndexedDB (hiện tại)' });
+          }
+        });
+      } else if (kStr === 'active_session_data' && value) {
+        addSessionIfHasWork(value, 'idb_current_active', 'IndexedDB (hiện tại)');
+      } else if ((kStr === 'history_data' || kStr.startsWith('history_data_')) && Array.isArray(value)) {
+        value.forEach((h: any) => {
+          if (h && h.id && (h.sourceText || h.result) && !historyMap.has(h.id)) {
+            historyMap.set(h.id, { item: h as HistoryItem, source: `IndexedDB (hiện tại) → ${kStr}` });
+          }
+        });
+      }
+    });
 
     curChaps.forEach((c) => addChapter(c, 'IndexedDB (hiện tại)'));
     curTerms.forEach((t) => {
@@ -307,7 +330,7 @@ export const extractLocalBrowserData = async (): Promise<ExtractedLocalData> => 
 
         const lsSource = `LocalStorage (${key})`;
 
-        if (key.includes('cached_novels') && Array.isArray(parsed)) {
+        if ((key.includes('cached_novels') || key.includes('novels_list')) && Array.isArray(parsed)) {
           parsed.forEach((n) => addNovel(n, lsSource));
         } else if (
           (key.includes('app_single_session') || key.includes('chiVietSingleSession')) &&
@@ -342,6 +365,57 @@ export const extractLocalBrowserData = async (): Promise<ExtractedLocalData> => 
       uniqueSessions.push(s);
     }
   });
+
+  // 4. Tự động tái tạo lại các đầu truyện bị mất tên danh sách nhưng vẫn còn dữ liệu chương / bản thảo / lịch sử / từ điển / nhân vật / gõ tắt
+  chapterMap.forEach(({ chapter, source }) => {
+    if (chapter.novelId && chapter.novelId !== 'default' && !novelMap.has(chapter.novelId)) {
+      const chName = chapter.name ? chapter.name.trim() : '';
+      const candidateName =
+        (chapter as any).novelName ||
+        (chName ? `Truyện (${chName.slice(0, 28)})` : `Truyện khôi phục (${chapter.novelId.slice(-4)})`);
+      novelMap.set(chapter.novelId, {
+        id: chapter.novelId,
+        name: candidateName,
+        source: `Tái tạo từ chương (${source})`,
+      });
+    }
+  });
+
+  historyMap.forEach(({ item, source }) => {
+    if (item.novelId && item.novelId !== 'default' && !novelMap.has(item.novelId)) {
+      const chName = item.chapterName ? item.chapterName.trim() : '';
+      novelMap.set(item.novelId, {
+        id: item.novelId,
+        name: chName ? `Truyện (${chName.slice(0, 28)})` : `Truyện khôi phục (${item.novelId.slice(-4)})`,
+        source: `Tái tạo từ lịch sử (${source})`,
+      });
+    }
+  });
+
+  uniqueSessions.forEach((s) => {
+    if (s.novelId && s.novelId !== 'default' && !novelMap.has(s.novelId)) {
+      novelMap.set(s.novelId, {
+        id: s.novelId,
+        name: `Truyện đang edit (${s.novelId.slice(-4)})`,
+        source: `Tái tạo từ bản thảo (${s.source})`,
+      });
+    }
+  });
+
+  const ensureNovelFromSubItem = (novelId: string | undefined, originLabel: string) => {
+    if (novelId && novelId !== 'default' && !novelMap.has(novelId)) {
+      novelMap.set(novelId, {
+        id: novelId,
+        name: `Truyện khôi phục (${novelId.slice(-4)})`,
+        source: `Tái tạo từ ${originLabel}`,
+      });
+    }
+  };
+
+  termMap.forEach(({ term, source }) => ensureNovelFromSubItem(term.novelId, `từ điển (${source})`));
+  charMap.forEach(({ character, source }) => ensureNovelFromSubItem(character.novelId, `nhân vật (${source})`));
+  relMap.forEach(({ relationship, source }) => ensureNovelFromSubItem(relationship.novelId, `quan hệ (${source})`));
+  shortcutMap.forEach(({ shortcut, source }) => ensureNovelFromSubItem(shortcut.novelId, `gõ tắt (${source})`));
 
   return {
     novels: Array.from(novelMap.values()),

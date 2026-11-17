@@ -1231,7 +1231,7 @@ export const recoverAllUserDataFromFirestore = async (): Promise<RecoveredCloudD
     });
     dbCache.set(`histories_${user.uid}`, histCacheMap);
 
-    // 2. Tự động tái tạo đầu truyện nếu có chương thuộc về novelId chưa có trong collection novels
+    // 2. Tự động tái tạo đầu truyện nếu có chương/lịch sử/từ điển/nhân vật thuộc về novelId chưa có trong collection novels
     chapterMap.forEach((chap) => {
       if (chap.novelId && chap.novelId !== 'default' && !novelMap.has(chap.novelId)) {
         const candidateName = (chap as any).novelName || (chap.name ? `Truyện (${chap.name.slice(0, 28)})` : `Truyện khôi phục (${chap.novelId.slice(-4)})`);
@@ -1239,9 +1239,25 @@ export const recoverAllUserDataFromFirestore = async (): Promise<RecoveredCloudD
       }
     });
 
-    if (novelMap.size > 1 && novelMap.has('default')) {
-      novelMap.delete('default');
-    }
+    historyMap.forEach((hist) => {
+      if (hist.novelId && hist.novelId !== 'default' && !novelMap.has(hist.novelId)) {
+        const chName = hist.chapterName ? hist.chapterName.trim() : '';
+        novelMap.set(hist.novelId, {
+          id: hist.novelId,
+          name: chName ? `Truyện (${chName.slice(0, 28)})` : `Truyện khôi phục (${hist.novelId.slice(-4)})`,
+        });
+      }
+    });
+
+    const ensureNovelId = (nId?: string) => {
+      if (nId && nId !== 'default' && !novelMap.has(nId)) {
+        novelMap.set(nId, { id: nId, name: `Truyện khôi phục (${nId.slice(-4)})` });
+      }
+    };
+    termMap.forEach((t) => ensureNovelId(t.novelId));
+    charMap.forEach((c) => ensureNovelId(c.novelId));
+    relMap.forEach((r) => ensureNovelId(r.novelId));
+    shortcutMap.forEach((s) => ensureNovelId(s.novelId));
 
     // 3. Tìm tiến độ làm việc dở dang (activeSessions) — dùng luôn kết quả từ bước 1, chỉ getDoc dự phòng nếu chưa có
     const candidateWorkspaces: LiveSessionData[] = [];
@@ -1294,14 +1310,20 @@ export const recoverAllUserDataFromFirestore = async (): Promise<RecoveredCloudD
       )
       .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 
+    nonEmptyWorkspaces.forEach((ws) => {
+      if (ws.novelId && ws.novelId !== 'default' && !novelMap.has(ws.novelId)) {
+        novelMap.set(ws.novelId, {
+          id: ws.novelId,
+          name: ws.chapterName
+            ? `Truyện (${ws.chapterName.slice(0, 28)})`
+            : `Truyện khôi phục (${ws.novelId.slice(-4)})`,
+        });
+      }
+    });
+
     const latestWorkspace = nonEmptyWorkspaces[0] || null;
-    if (latestWorkspace?.novelId && latestWorkspace.novelId !== 'default' && !novelMap.has(latestWorkspace.novelId)) {
-      novelMap.set(latestWorkspace.novelId, {
-        id: latestWorkspace.novelId,
-        name: latestWorkspace.chapterName
-          ? `Truyện (${latestWorkspace.chapterName.slice(0, 28)})`
-          : `Truyện khôi phục (${latestWorkspace.novelId.slice(-4)})`,
-      });
+    if (novelMap.size > 1 && novelMap.has('default')) {
+      novelMap.delete('default');
     }
 
     return {

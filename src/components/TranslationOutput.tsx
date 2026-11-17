@@ -137,6 +137,8 @@ const EditableSegment = ({
     const [shortcuts, setShortcuts] = useState<TextShortcut[]>(() => getStoredShortcuts(novelId));
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const debounceTimeout = useRef<NodeJS.Timeout | null>(null);
+    const allowLineBreakRef = useRef(false);
+    const enterHandledRef = useRef(false);
     
     useEffect(() => {
         if (!isFocused) {
@@ -200,6 +202,18 @@ const EditableSegment = ({
         };
     }, [localText, isFocusMode, isFocused]);
 
+    const triggerEnterConfirm = (currentVal: string) => {
+        enterHandledRef.current = true;
+        setTimeout(() => {
+            enterHandledRef.current = false;
+        }, 80);
+        if (debounceTimeout.current) {
+            clearTimeout(debounceTimeout.current);
+        }
+        onUpdate(currentVal);
+        onEnterPress?.();
+    };
+
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         // Tu dong xu ly dau ngoac kep cong thong minh “” khi go phim "
         if (handleSmartQuotesKeyDown(e, (newVal) => {
@@ -211,13 +225,15 @@ const EditableSegment = ({
             return;
         }
 
-        if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        const isEnterKey = e.key === 'Enter' || e.keyCode === 13;
+        if (isEnterKey && e.shiftKey) {
+            allowLineBreakRef.current = true;
+            setTimeout(() => {
+                allowLineBreakRef.current = false;
+            }, 80);
+        } else if (isEnterKey && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
             e.preventDefault();
-            if (debounceTimeout.current) {
-                clearTimeout(debounceTimeout.current);
-            }
-            onUpdate(localText);
-            onEnterPress?.();
+            triggerEnterConfirm(e.currentTarget.value);
             return;
         }
 
@@ -239,8 +255,62 @@ const EditableSegment = ({
         }
     };
 
+    const handleBeforeInput = (e: React.FormEvent<HTMLTextAreaElement>) => {
+        const nativeEvent = e.nativeEvent as InputEvent;
+        if (enterHandledRef.current || allowLineBreakRef.current) return;
+        if (nativeEvent?.inputType === 'insertLineBreak' || nativeEvent?.inputType === 'insertParagraph') {
+            e.preventDefault();
+            triggerEnterConfirm(e.currentTarget.value);
+        }
+    };
+
+    const stripInsertedNewline = (newVal: string, prevVal: string, cursor: number) => {
+        if (cursor > 0 && newVal[cursor - 1] === '\n') {
+            return newVal.slice(0, cursor - 1) + newVal.slice(cursor);
+        }
+        if (newVal.endsWith('\n') && !prevVal.endsWith('\n')) {
+            return newVal.slice(0, -1);
+        }
+        const idx = newVal.lastIndexOf('\n');
+        return idx >= 0 ? newVal.slice(0, idx) + newVal.slice(idx + 1) : newVal;
+    };
+
     const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
         let val = e.target.value;
+        const nativeEvent = e.nativeEvent as InputEvent;
+        const inputType = nativeEvent?.inputType || '';
+        const newlineAdded = val.split('\n').length > localText.split('\n').length;
+
+        if (enterHandledRef.current) {
+            if (newlineAdded) {
+                const cursor = e.target.selectionStart ?? val.length;
+                const cleaned = stripInsertedNewline(val, localText, cursor);
+                e.target.value = cleaned;
+                setLocalText(cleaned);
+            }
+            return;
+        }
+
+        if (
+            !allowLineBreakRef.current &&
+            inputType !== 'insertFromPaste' &&
+            inputType !== 'historyUndo' &&
+            inputType !== 'historyRedo' &&
+            (inputType === 'insertLineBreak' || inputType === 'insertParagraph' || newlineAdded)
+        ) {
+            const cursor = e.target.selectionStart ?? val.length;
+            let cleaned = stripInsertedNewline(val, localText, cursor);
+            if (cleaned.includes('"')) {
+                cleaned = convertStraightToSmartQuotes(cleaned);
+            }
+            e.target.value = cleaned;
+            setLocalText(cleaned);
+            triggerEnterConfirm(cleaned);
+            return;
+        }
+
+        allowLineBreakRef.current = false;
+
         if (val.includes('"')) {
             val = convertStraightToSmartQuotes(val);
         }
@@ -324,6 +394,7 @@ const EditableSegment = ({
     if (findText && hasSearchMatch && !isFocused) {
         return (
             <div 
+                data-edit-segment-trigger="true"
                 onClick={() => {
                     setIsFocused(true);
                     setTimeout(() => textareaRef.current?.focus(), 20);
@@ -339,7 +410,9 @@ const EditableSegment = ({
     return (
         <textarea
             ref={textareaRef}
+            data-edit-segment="true"
             value={localText}
+            onBeforeInput={handleBeforeInput}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
             onBlur={handleBlur}
@@ -1207,23 +1280,26 @@ const containsChineseText = (str: string): boolean => {
       onToggleComplete?.(currentIdx);
     }
 
-    // 2. Tìm dòng tiếp theo
+    // 2. Tìm dòng tiếp theo và focus đồng bộ để giữ user gesture trên iOS/Android
     const nextIdx = currentIdx + 1;
     if (nextIdx < (data.segments?.length || 0)) {
-      setTimeout(() => {
-        const nextRow = document.getElementById(`segment-row-${nextIdx}`);
-        if (nextRow) {
-          // Lướt xuống vị trí dòng tiếp theo mượt mà
-          nextRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          // Focus vào ô textarea của dòng tiếp theo
-          const nextTextarea = nextRow.querySelector('textarea');
-          if (nextTextarea) {
-            nextTextarea.focus();
-            const len = nextTextarea.value.length;
-            nextTextarea.setSelectionRange(len, len);
-          }
+      const nextRow = document.getElementById(`segment-row-${nextIdx}`);
+      if (nextRow) {
+        const nextTextarea =
+          nextRow.querySelector<HTMLTextAreaElement>('textarea[data-edit-segment="true"]') ||
+          nextRow.querySelector<HTMLTextAreaElement>('textarea');
+        if (nextTextarea) {
+          nextTextarea.focus({ preventScroll: true });
+          const len = nextTextarea.value.length;
+          nextTextarea.setSelectionRange(len, len);
+        } else {
+          const triggerEl = nextRow.querySelector<HTMLElement>('[data-edit-segment-trigger="true"]');
+          triggerEl?.click();
         }
-      }, 50);
+        requestAnimationFrame(() => {
+          nextRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
+      }
     }
   };
 
