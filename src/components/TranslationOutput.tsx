@@ -137,7 +137,8 @@ const EditableSegment = ({
     const [shortcuts, setShortcuts] = useState<TextShortcut[]>(() => getStoredShortcuts(novelId));
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const debounceTimeout = useRef<NodeJS.Timeout | null>(null);
-    const allowLineBreakRef = useRef(false);
+    const allowLineBreakUntilRef = useRef(0);
+    const modifierHeldRef = useRef(false);
     const enterHandledRef = useRef(false);
     
     useEffect(() => {
@@ -214,6 +215,10 @@ const EditableSegment = ({
         onEnterPress?.();
     };
 
+    const isLineBreakAllowed = () => {
+        return modifierHeldRef.current || Date.now() < allowLineBreakUntilRef.current;
+    };
+
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         // Tu dong xu ly dau ngoac kep cong thong minh “” khi go phim "
         if (handleSmartQuotesKeyDown(e, (newVal) => {
@@ -225,13 +230,24 @@ const EditableSegment = ({
             return;
         }
 
+        const hasModifier = e.shiftKey || e.ctrlKey || e.altKey || e.metaKey;
+        const isModifierKey = e.key === 'Shift' || e.key === 'Control' || e.key === 'Alt' || e.key === 'Meta';
+        if (hasModifier || isModifierKey) {
+            modifierHeldRef.current = true;
+            allowLineBreakUntilRef.current = Date.now() + 400;
+        } else {
+            modifierHeldRef.current = false;
+        }
+
         const isEnterKey = e.key === 'Enter' || e.keyCode === 13;
-        if (isEnterKey && e.shiftKey) {
-            allowLineBreakRef.current = true;
-            setTimeout(() => {
-                allowLineBreakRef.current = false;
-            }, 80);
-        } else if (isEnterKey && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        if (isEnterKey && hasModifier) {
+            // Shift+Enter / Ctrl+Enter / Alt+Enter: xuống dòng trong cùng 1 đoạn
+            allowLineBreakUntilRef.current = Date.now() + 400;
+            return;
+        }
+        if (isEnterKey && !hasModifier) {
+            modifierHeldRef.current = false;
+            allowLineBreakUntilRef.current = 0;
             e.preventDefault();
             triggerEnterConfirm(e.currentTarget.value);
             return;
@@ -255,9 +271,17 @@ const EditableSegment = ({
         }
     };
 
+    const handleKeyUp = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        const stillHeld = e.shiftKey || e.ctrlKey || e.altKey || e.metaKey;
+        modifierHeldRef.current = stillHeld;
+        if (!stillHeld) {
+            allowLineBreakUntilRef.current = Math.min(allowLineBreakUntilRef.current, Date.now() + 50);
+        }
+    };
+
     const handleBeforeInput = (e: React.FormEvent<HTMLTextAreaElement>) => {
         const nativeEvent = e.nativeEvent as InputEvent;
-        if (enterHandledRef.current || allowLineBreakRef.current) return;
+        if (enterHandledRef.current || isLineBreakAllowed()) return;
         if (nativeEvent?.inputType === 'insertLineBreak' || nativeEvent?.inputType === 'insertParagraph') {
             e.preventDefault();
             triggerEnterConfirm(e.currentTarget.value);
@@ -292,7 +316,7 @@ const EditableSegment = ({
         }
 
         if (
-            !allowLineBreakRef.current &&
+            !isLineBreakAllowed() &&
             inputType !== 'insertFromPaste' &&
             inputType !== 'historyUndo' &&
             inputType !== 'historyRedo' &&
@@ -309,7 +333,9 @@ const EditableSegment = ({
             return;
         }
 
-        allowLineBreakRef.current = false;
+        if (!modifierHeldRef.current) {
+            allowLineBreakUntilRef.current = 0;
+        }
 
         if (val.includes('"')) {
             val = convertStraightToSmartQuotes(val);
@@ -326,6 +352,8 @@ const EditableSegment = ({
 
     const handleBlur = (e: React.FocusEvent<HTMLTextAreaElement>) => {
         setIsFocused(false);
+        modifierHeldRef.current = false;
+        allowLineBreakUntilRef.current = 0;
         if (debounceTimeout.current) {
             clearTimeout(debounceTimeout.current);
         }
@@ -415,6 +443,7 @@ const EditableSegment = ({
             onBeforeInput={handleBeforeInput}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
+            onKeyUp={handleKeyUp}
             onBlur={handleBlur}
             onFocus={handleFocus}
             placeholder="..."
