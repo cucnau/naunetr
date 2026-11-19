@@ -203,6 +203,43 @@ const EditableSegment = ({
         };
     }, [localText, isFocusMode, isFocused]);
 
+    useEffect(() => {
+        if (!isFocused) {
+            modifierHeldRef.current = false;
+            return;
+        }
+        const onWinKeyDown = (ev: KeyboardEvent) => {
+            if (
+                ev.key === 'Shift' ||
+                ev.key === 'Control' ||
+                ev.key === 'Alt' ||
+                ev.key === 'Meta' ||
+                ev.shiftKey ||
+                ev.ctrlKey ||
+                ev.altKey ||
+                ev.metaKey
+            ) {
+                modifierHeldRef.current = true;
+                allowLineBreakUntilRef.current = Date.now() + 400;
+            }
+        };
+        const onWinKeyUp = (ev: KeyboardEvent) => {
+            const stillHeld = ev.shiftKey || ev.ctrlKey || ev.altKey || ev.metaKey;
+            if (!stillHeld && (ev.key === 'Shift' || ev.key === 'Control' || ev.key === 'Alt' || ev.key === 'Meta')) {
+                modifierHeldRef.current = false;
+                allowLineBreakUntilRef.current = Math.min(allowLineBreakUntilRef.current, Date.now() + 80);
+            } else if (!stillHeld && ev.key !== 'Process' && ev.key !== 'Unidentified' && ev.keyCode !== 229) {
+                modifierHeldRef.current = false;
+            }
+        };
+        window.addEventListener('keydown', onWinKeyDown, true);
+        window.addEventListener('keyup', onWinKeyUp, true);
+        return () => {
+            window.removeEventListener('keydown', onWinKeyDown, true);
+            window.removeEventListener('keyup', onWinKeyUp, true);
+        };
+    }, [isFocused]);
+
     const triggerEnterConfirm = (currentVal: string) => {
         enterHandledRef.current = true;
         setTimeout(() => {
@@ -230,22 +267,23 @@ const EditableSegment = ({
             return;
         }
 
+        const isImeEvent = e.key === 'Process' || e.key === 'Unidentified' || e.keyCode === 229;
         const hasModifier = e.shiftKey || e.ctrlKey || e.altKey || e.metaKey;
         const isModifierKey = e.key === 'Shift' || e.key === 'Control' || e.key === 'Alt' || e.key === 'Meta';
         if (hasModifier || isModifierKey) {
             modifierHeldRef.current = true;
             allowLineBreakUntilRef.current = Date.now() + 400;
-        } else {
+        } else if (!isImeEvent) {
             modifierHeldRef.current = false;
         }
 
         const isEnterKey = e.key === 'Enter' || e.keyCode === 13;
-        if (isEnterKey && hasModifier) {
+        if (isEnterKey && (hasModifier || modifierHeldRef.current)) {
             // Shift+Enter / Ctrl+Enter / Alt+Enter: xuống dòng trong cùng 1 đoạn
             allowLineBreakUntilRef.current = Date.now() + 400;
             return;
         }
-        if (isEnterKey && !hasModifier) {
+        if (isEnterKey && !hasModifier && !modifierHeldRef.current) {
             modifierHeldRef.current = false;
             allowLineBreakUntilRef.current = 0;
             e.preventDefault();
@@ -273,9 +311,11 @@ const EditableSegment = ({
 
     const handleKeyUp = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         const stillHeld = e.shiftKey || e.ctrlKey || e.altKey || e.metaKey;
-        modifierHeldRef.current = stillHeld;
-        if (!stillHeld) {
-            allowLineBreakUntilRef.current = Math.min(allowLineBreakUntilRef.current, Date.now() + 50);
+        if (!stillHeld && (e.key === 'Shift' || e.key === 'Control' || e.key === 'Alt' || e.key === 'Meta')) {
+            modifierHeldRef.current = false;
+            allowLineBreakUntilRef.current = Math.min(allowLineBreakUntilRef.current, Date.now() + 80);
+        } else if (!stillHeld && e.key !== 'Process' && e.key !== 'Unidentified' && e.keyCode !== 229) {
+            modifierHeldRef.current = false;
         }
     };
 
