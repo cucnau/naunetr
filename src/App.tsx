@@ -208,8 +208,13 @@ const reconstructSegmentsIfEmpty = (sessionData: TranslationSession): Translatio
     return sessionData;
 };
 
+const isPlaceholderChapterName = (name?: string): boolean => {
+  const t = (name || '').trim();
+  return !t || t === 'Edit' || t === 'Chương' || t.startsWith('chap_');
+};
+
 // Thuật toán giải quyết xung đột thông minh giữa Bản Cục Bộ (IndexedDB) và Bản Đám Mây (Firestore)
-// QUY TẮC BẢO VỆ DỮ LIỆU: Không bao giờ để bản Cloud ít đoạn hơn hoặc cũ hơn ghi đè làm mất đoạn cuối chương hay tên chương!
+// QUY TẮC BẢO VỆ DỮ LIỆU: Không bao giờ để bản ít đoạn hơn làm mất đoạn, và luôn giữ tên chương mới nhất do người dùng đặt!
 const resolveChapterConflict = (localChap?: Chapter, cloudChap?: Chapter): { selected: Chapter; shouldSyncToCloud: boolean } => {
   if (!localChap && cloudChap) return { selected: cloudChap, shouldSyncToCloud: false };
   if (localChap && !cloudChap) return { selected: localChap, shouldSyncToCloud: true };
@@ -223,25 +228,47 @@ const resolveChapterConflict = (localChap?: Chapter, cloudChap?: Chapter): { sel
   const lTime = l.timestamp || 0;
   const cTime = c.timestamp || 0;
 
-  // 1. Nếu bản Local có nhiều đoạn hơn Cloud: Chắc chắn Cloud bị thiếu đoạn cuối -> Ưu tiên 100% Local!
-  if (lSegs > cSegs) {
-    return { selected: l, shouldSyncToCloud: true };
+  // Chọn tên mới nhất theo timestamp (trừ khi tên của bản mới hơn bị rỗng/mặc định kiểu 'Edit'/'Chương')
+  let preferredName = lTime >= cTime ? l.name : c.name;
+  if (isPlaceholderChapterName(preferredName)) {
+    const fallbackName = lTime >= cTime ? c.name : l.name;
+    if (!isPlaceholderChapterName(fallbackName)) {
+      preferredName = fallbackName;
+    }
   }
-  // 2. Nếu bản Cloud có nhiều đoạn hơn Local hẳn: Lấy Cloud
+
+  // 1. Nếu bản Local có nhiều đoạn hơn Cloud: Ưu tiên nội dung Local, bảo toàn tên mới nhất
+  if (lSegs > cSegs) {
+    return {
+      selected: preferredName && preferredName !== l.name ? { ...l, name: preferredName, timestamp: Math.max(lTime, cTime) } : l,
+      shouldSyncToCloud: true
+    };
+  }
+  // 2. Nếu bản Cloud có nhiều đoạn hơn Local: Ưu tiên nội dung Cloud, bảo toàn tên mới nhất
   if (cSegs > lSegs) {
+    if (preferredName && preferredName !== c.name) {
+      return {
+        selected: { ...c, name: preferredName, timestamp: Math.max(lTime, cTime) },
+        shouldSyncToCloud: true
+      };
+    }
     return { selected: c, shouldSyncToCloud: false };
   }
   // 3. Nếu số đoạn bằng nhau:
-  // Nếu Local có timestamp mới hơn hoặc bằng Cloud (ví dụ vừa đổi tên hoặc vừa gõ): Ưu tiên 100% Local!
   if (lTime >= cTime) {
+    if (preferredName && preferredName !== l.name) {
+      return {
+        selected: { ...l, name: preferredName, timestamp: Math.max(lTime, cTime) },
+        shouldSyncToCloud: true
+      };
+    }
     return { selected: l, shouldSyncToCloud: lTime > cTime };
   } else {
-    // Nếu Cloud có timestamp mới hơn nhưng tên ở Local khác tên ở Cloud:
-    // Nếu Local đã được đặt tên rõ ràng, giữ lại tên mới của Local
-    if (l.name && l.name !== c.name) {
-      if (c.name.startsWith('Chương ') || c.name.startsWith('chap_') || lTime >= cTime - 86400000) {
-        return { selected: { ...c, name: l.name, timestamp: Math.max(lTime, cTime) }, shouldSyncToCloud: true };
-      }
+    if (preferredName && preferredName !== c.name) {
+      return {
+        selected: { ...c, name: preferredName, timestamp: Math.max(lTime, cTime) },
+        shouldSyncToCloud: true
+      };
     }
     return { selected: c, shouldSyncToCloud: false };
   }
@@ -1058,7 +1085,12 @@ useEffect(() => {
         : await getAllUserChaptersFromCloud().catch(() => [] as Chapter[]);
 
       for (const nId of targetNovelIds) {
-        const localForNovel = (allLocalChaps || []).filter(c =>
+        const dbLocalForNovel = (allLocalChaps || []).filter(c =>
+          !deletedChapterIdsRef.current.has(c.id) &&
+          !deletedNovelIdsRef.current.has(c.novelId || '') &&
+          (c.novelId === nId || (!c.novelId && nId === activeNovelId))
+        );
+        const stateLocalForNovel = (chapters || []).filter(c =>
           !deletedChapterIdsRef.current.has(c.id) &&
           !deletedNovelIdsRef.current.has(c.novelId || '') &&
           (c.novelId === nId || (!c.novelId && nId === activeNovelId))
@@ -1066,7 +1098,13 @@ useEffect(() => {
         const cloudForNovel = allCloudChaps.filter(c => c.novelId === nId);
 
         const localMap = new Map<string, Chapter>();
-        localForNovel.forEach(c => localMap.set(c.id, { ...c, novelId: c.novelId || nId }));
+        dbLocalForNovel.forEach(c => localMap.set(c.id, { ...c, novelId: c.novelId || nId }));
+        stateLocalForNovel.forEach(c => {
+          const existing = localMap.get(c.id);
+          if (!existing || (c.timestamp || 0) >= (existing.timestamp || 0)) {
+            localMap.set(c.id, { ...c, novelId: c.novelId || nId });
+          }
+        });
 
         const novelMergedMap = new Map<string, Chapter>();
 
@@ -1077,9 +1115,16 @@ useEffect(() => {
           const normalizedSelected: Chapter = { ...selected, novelId: nId };
           novelMergedMap.set(cloudCh.id, normalizedSelected);
 
-          if (selected === cloudCh && (!localCh || (cloudCh.timestamp || 0) > (localCh.timestamp || 0) || (cloudCh.result?.segments?.length || 0) > (localCh.result?.segments?.length || 0))) {
+          const changedVsLocal =
+            !localCh ||
+            normalizedSelected.name !== localCh.name ||
+            (normalizedSelected.timestamp || 0) > (localCh.timestamp || 0) ||
+            (normalizedSelected.result?.segments?.length || 0) > (localCh.result?.segments?.length || 0);
+
+          if (changedVsLocal) {
             chapsToSaveDb.push(normalizedSelected);
-          } else if (shouldSyncToCloud) {
+          }
+          if (shouldSyncToCloud) {
             chapsToUpload.push(normalizedSelected);
           }
         });
@@ -1162,10 +1207,14 @@ useEffect(() => {
         const syncedTs = cloudTime || Date.now();
         localWorkspaceUpdatedAtRef.current = syncedTs;
         setScopedStorageItem('local_workspace_updated_at', String(syncedTs));
+        const matchedCloudChap = cloudWorkspace.chapterId
+          ? allMergedChapters.find(c => c.id === cloudWorkspace.chapterId)
+          : undefined;
 
         setSession(prev => {
           const updatedSession: TranslationSession = {
             ...prev,
+            name: matchedCloudChap?.name || cloudWorkspace.chapterName || prev.name,
             currentNovelId: targetNovel,
             currentChapterId: cloudWorkspace.chapterId || undefined,
             inputText: cloudWorkspace.inputText || '',
@@ -1183,10 +1232,16 @@ useEffect(() => {
         const pushTs = localTime || Date.now();
         localWorkspaceUpdatedAtRef.current = pushTs;
         setScopedStorageItem('local_workspace_updated_at', String(pushTs));
+        const currentChapName =
+          (session.currentChapterId
+            ? (allMergedChapters.find(c => c.id === session.currentChapterId)?.name || chapters.find(c => c.id === session.currentChapterId)?.name)
+            : undefined) ||
+          (session.name && session.name !== 'Edit' ? session.name : '');
         if (!isCloudQuotaExhausted()) {
           await saveUserLiveWorkspaceToCloud({
             novelId: activeNovelId,
             chapterId: session.currentChapterId || '',
+            chapterName: currentChapName,
             inputText: session.inputText || '',
             deeplText: session.deeplText || '',
             preEditedText: session.preEditedText || '',
@@ -1382,8 +1437,8 @@ useEffect(() => {
       } else {
         const { selected } = resolveChapterConflict(localCh, cloudCh);
         chapMap.set(cloudCh.id, selected);
-        if (selected === cloudCh) {
-          chapsToSave.push(cloudCh);
+        if (selected === cloudCh || selected.name !== localCh.name || (selected.timestamp || 0) > (localCh.timestamp || 0)) {
+          chapsToSave.push(selected);
         }
       }
     });
@@ -2262,6 +2317,8 @@ useEffect(() => {
       const historyId = Date.now().toString();
       
       let activeChapId = currentChapId;
+      let resolvedChapName = session.name && session.name !== 'Edit' ? session.name : '';
+
       if (!activeChapId) {
         // Tự động tạo duy nhất 1 chương mới nếu chưa có chương liên kết
         activeChapId = `chap_${Date.now()}`;
@@ -2274,7 +2331,8 @@ useEffect(() => {
           }
         }
         const novChapters = chapters.filter(c => c.novelId === session.currentNovelId);
-        const autoName = extractedName || session.name || `Chương ${novChapters.length + 1}`;
+        const autoName = extractedName || resolvedChapName || `Chương ${novChapters.length + 1}`;
+        resolvedChapName = autoName;
 
         const newChapter: Chapter = {
           id: activeChapId,
@@ -2297,8 +2355,16 @@ useEffect(() => {
           currentChapterId: activeChapId
         });
       } else {
-        // Cập nhật DUY NHẤT chương hiện tại, tuyệt đối không tạo thêm file mới
+        // Cập nhật DUY NHẤT chương hiện tại, bảo toàn nguyên vẹn tên chương đã đặt trong kho
+        const existingChap = chapters.find(c => c.id === activeChapId);
+        const preservedName =
+          (existingChap?.name && existingChap.name.trim()) ||
+          resolvedChapName ||
+          'Chương';
+        resolvedChapName = preservedName;
+
         updateSession({ 
+          name: preservedName,
           result: sanitized, 
           status: AppStatus.SUCCESS,
           currentHistoryId: historyId,
@@ -2309,6 +2375,7 @@ useEffect(() => {
           if (c.id === activeChapId) {
             return {
               ...c,
+              name: c.name || preservedName,
               timestamp: Date.now(),
               inputText: session.inputText,
               deeplText: session.deeplText,
@@ -2323,7 +2390,7 @@ useEffect(() => {
         const chapToSave: Chapter = {
           id: activeChapId,
           novelId: session.currentNovelId || 'default',
-          name: session.name || 'Chương',
+          name: preservedName,
           timestamp: Date.now(),
           inputText: session.inputText,
           deeplText: session.deeplText,
@@ -2344,7 +2411,7 @@ useEffect(() => {
         completedSegments: [],
         novelId: session.currentNovelId,
         chapterId: activeChapId,
-        chapterName: session.name
+        chapterName: resolvedChapName
       };
       setHistory(prev => {
         const next = [newHistoryItem, ...prev.filter(h => h.id !== historyId)].slice(0, 50);
@@ -2460,6 +2527,7 @@ useEffect(() => {
       }
     });
     updateSession({ 
+      name,
       currentChapterId: chapterId,
       result: cleanResult,
       inputText: fullSourceText || session.inputText,
