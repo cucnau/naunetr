@@ -924,7 +924,13 @@ export const saveUserLiveWorkspaceToCloud = async (
       }
 
       const sanitized = sanitizeData(payload);
-      await setDoc(docRef, sanitized, { merge: true });
+      if (payload.result === null) {
+        sanitized.result = null;
+        sanitized._isLean = false;
+      } else if (!payload._isLean) {
+        sanitized._isLean = false;
+      }
+      await setDoc(docRef, sanitized);
     } catch (e: any) {
       handleQuotaExhausted(e);
       console.warn("Lỗi lưu Live Workspace lên Cloud:", e?.message || e);

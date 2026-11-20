@@ -1131,8 +1131,17 @@ useEffect(() => {
 
       let effectiveNovelIdForData = activeNovelId;
 
-      if (hasCloudWork && cloudWorkspace && (!hasLocalWork || cloudTime > localTime)) {
-        // Cloud mới hơn hoặc Local đang trống -> Kéo về màn hình
+      // Chỉ kéo tiến độ từ Cloud về nếu Cloud thực sự mới hơn thao tác cục bộ,
+      // hoặc máy cục bộ chưa từng có thao tác nào (localTime === 0) và đang trống.
+      // Nếu người dùng vừa chủ động xóa trắng giao diện edit (localTime >= cloudTime),
+      // không kéo bản cũ từ Cloud về mà đẩy trạng thái trống lên Cloud.
+      const shouldPullCloudWorkspace =
+        hasCloudWork &&
+        cloudWorkspace &&
+        (cloudTime > localTime || (localTime === 0 && !hasLocalWork));
+
+      if (shouldPullCloudWorkspace && cloudWorkspace) {
+        // Cloud mới hơn (hoặc máy mới chưa có thao tác cục bộ) -> Kéo về màn hình
         const targetNovel = (cloudWorkspace.novelId && mergedNovels.some(n => n.id === cloudWorkspace.novelId))
           ? cloudWorkspace.novelId
           : activeNovelId;
@@ -1170,18 +1179,18 @@ useEffect(() => {
           return updatedSession;
         });
       } else {
-        // Local mới hơn hoặc Cloud chưa có -> Đẩy tiến độ Local lên Cloud
+        // Local mới hơn hoặc vừa được xóa trắng -> Đẩy tiến độ Local lên Cloud
         const pushTs = localTime || Date.now();
         localWorkspaceUpdatedAtRef.current = pushTs;
         setScopedStorageItem('local_workspace_updated_at', String(pushTs));
         if (!isCloudQuotaExhausted()) {
           await saveUserLiveWorkspaceToCloud({
             novelId: activeNovelId,
-            chapterId: session.currentChapterId,
+            chapterId: session.currentChapterId || '',
             inputText: session.inputText || '',
             deeplText: session.deeplText || '',
             preEditedText: session.preEditedText || '',
-            result: session.result,
+            result: session.result || null,
             completedSegments: session.completedSegments || [],
             status: session.status,
             updatedAt: pushTs
@@ -2097,7 +2106,7 @@ useEffect(() => {
   };
 
   const handleClearSession = async () => {
-    if (!session.inputText.trim()) return;
+    if (!session.inputText.trim() && !session.deeplText.trim() && !session.preEditedText.trim() && !session.result) return;
 
     // --- TỰ ĐỘNG LƯU TRỮ CHƯƠNG ĐANG EDIT NẾU QUÊN CHƯA LƯU TRƯỚC KHI XÓA ---
     if (session.result && session.inputText.trim()) {
@@ -2155,8 +2164,18 @@ useEffect(() => {
       }
     }
 
-    // Tiến hành xóa session cục bộ
-    updateSession({ inputText: '', deeplText: '', preEditedText: '', result: null, status: AppStatus.IDLE, currentChapterId: undefined, currentHistoryId: undefined });
+    // Tiến hành xóa session cục bộ hoàn toàn
+    updateSession({
+      inputText: '',
+      deeplText: '',
+      preEditedText: '',
+      result: null,
+      completedSegments: [],
+      name: '',
+      status: AppStatus.IDLE,
+      currentChapterId: undefined,
+      currentHistoryId: undefined
+    });
   };
 
   const handleTranslate = async (forceFastAlign = false) => {
