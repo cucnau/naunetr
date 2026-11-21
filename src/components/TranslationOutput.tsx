@@ -940,6 +940,7 @@ export const TranslationOutput: React.FC<TranslationOutputProps> = ({
   const [showSaveArchiveModal, setShowSaveArchiveModal] = useState(false);
   const [archiveChapterName, setArchiveChapterName] = useState('');
   const [saveMode, setSaveMode] = useState<'new' | 'update'>('new');
+  const archiveNameInputRef = useRef<HTMLInputElement>(null);
   const [vpVersion, setVpVersion] = useState(0);
 
   const [activeVocab, setActiveVocab] = useState<{ 
@@ -1467,17 +1468,16 @@ const containsChineseText = (str: string): boolean => {
   };
 
   const handleConfirmSaveArchive = (overrideMode?: 'new' | 'update') => {
-    (document.activeElement as HTMLElement)?.blur();
-    window.dispatchEvent(new CustomEvent('app_flush_edits'));
-    let name = archiveChapterName.trim();
+    const rawTypedName = archiveNameInputRef.current?.value ?? archiveChapterName;
+    let name = rawTypedName.trim();
     if (!name) {
       name = `Chương ${(chaptersCount || 0) + 1}`;
     }
     const finalMode = overrideMode || saveMode;
-    setTimeout(() => {
-      onSaveChapter?.(name, finalMode);
-    }, 50);
     setShowSaveArchiveModal(false);
+    (document.activeElement as HTMLElement)?.blur();
+    window.dispatchEvent(new CustomEvent('app_flush_edits'));
+    onSaveChapter?.(name, finalMode);
   };
 
   const saveToArchive = () => {
@@ -2439,6 +2439,7 @@ const containsChineseText = (str: string): boolean => {
                   {saveMode === 'new' ? 'Tên chương mới' : 'Tên chương cập nhật'}
                 </label>
                 <input
+                  ref={archiveNameInputRef}
                   type="text"
                   value={archiveChapterName}
                   onChange={(e) => setArchiveChapterName(e.target.value)}
@@ -2446,7 +2447,8 @@ const containsChineseText = (str: string): boolean => {
                   className="w-full bg-white border border-[#D7CCC8] rounded-lg px-3 py-2 text-[#3E2723] text-sm outline-none focus:border-[#8D6E63] focus:ring-1 focus:ring-[#8D6E63] transition-all font-medium"
                   autoFocus
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
+                    if (e.key === 'Enter' && !e.nativeEvent.isComposing && e.keyCode !== 229) {
+                      e.preventDefault();
                       handleConfirmSaveArchive();
                     }
                   }}

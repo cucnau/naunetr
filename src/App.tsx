@@ -325,6 +325,8 @@ function AppContent() {
       return createNewSession();
     }
   });
+  const sessionRef = useRef<TranslationSession>(session);
+  sessionRef.current = session;
 
   const [history, setHistory] = useState<HistoryItem[]>(() => {
     try {
@@ -345,6 +347,8 @@ function AppContent() {
   }, [session.currentHistoryId]);
   const [showHistory, setShowHistory] = useState(false);
   const [chapters, setChapters] = useState<Chapter[]>([]);
+  const chaptersRef = useRef<Chapter[]>(chapters);
+  chaptersRef.current = chapters;
   const [showChapters, setShowChapters] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showMobileSidebar, setShowMobileSidebar] = useState(false);
@@ -412,6 +416,23 @@ function AppContent() {
   const deletedChapterIdsRef = useRef<Set<string>>(loadIdSetFromStorage('deleted_chapter_ids'));
   const deletedNovelIdsRef = useRef<Set<string>>(loadIdSetFromStorage('deleted_novel_ids'));
   const deletedHistoryIdsRef = useRef<Set<string>>(loadIdSetFromStorage('deleted_history_ids'));
+
+  const loadNamedMapFromStorage = (): Record<string, { name: string; updatedAt: number }> => {
+    try {
+      const raw = getScopedStorageItem('locally_named_chapters');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') return parsed;
+      }
+    } catch (_) {}
+    return {};
+  };
+  const locallyNamedChaptersRef = useRef<Record<string, { name: string; updatedAt: number }>>(loadNamedMapFromStorage());
+  const persistLocallyNamedChapters = () => {
+    try {
+      setScopedStorageItem('locally_named_chapters', JSON.stringify(locallyNamedChaptersRef.current));
+    } catch (_) {}
+  };
 
   const persistDeletedIds = () => {
     try {
@@ -979,7 +1000,11 @@ useEffect(() => {
 
   const updateSession = (updates: Partial<TranslationSession>) => {
     markLocalWorkspaceDirty();
-    setSession(prev => ({ ...prev, ...updates }));
+    setSession(prev => {
+      const next = { ...prev, ...updates };
+      sessionRef.current = next;
+      return next;
+    });
   };
 
   // Hàm thủ công ĐỒNG BỘ 2 CHIỀU VỚI FIRESTORE (Trộn thông minh Local <-> Cloud, không ghi đè 1 chiều)
@@ -1112,7 +1137,21 @@ useEffect(() => {
           if (deletedChapterIdsRef.current.has(cloudCh.id) || deletedNovelIdsRef.current.has(cloudCh.novelId || '')) return;
           const localCh = localMap.get(cloudCh.id);
           const { selected, shouldSyncToCloud } = resolveChapterConflict(localCh, cloudCh);
-          const normalizedSelected: Chapter = { ...selected, novelId: nId };
+          const explicitNamed = locallyNamedChaptersRef.current[cloudCh.id];
+          const forceKeepLocalName = Boolean(
+            explicitNamed &&
+            explicitNamed.name &&
+            explicitNamed.name !== selected.name &&
+            (!localCh || localCh.name === explicitNamed.name)
+          );
+          const normalizedSelected: Chapter = forceKeepLocalName
+            ? {
+                ...selected,
+                name: explicitNamed.name,
+                timestamp: Math.max(selected.timestamp || 0, explicitNamed.updatedAt || 0),
+                novelId: nId
+              }
+            : { ...selected, novelId: nId };
           novelMergedMap.set(cloudCh.id, normalizedSelected);
 
           const changedVsLocal =
@@ -1124,7 +1163,7 @@ useEffect(() => {
           if (changedVsLocal) {
             chapsToSaveDb.push(normalizedSelected);
           }
-          if (shouldSyncToCloud) {
+          if (shouldSyncToCloud || forceKeepLocalName) {
             chapsToUpload.push(normalizedSelected);
           }
         });
@@ -1366,7 +1405,9 @@ useEffect(() => {
         deletedNovelIdsRef.current.clear();
         deletedChapterIdsRef.current.clear();
         deletedHistoryIdsRef.current.clear();
+        locallyNamedChaptersRef.current = {};
         persistDeletedIds();
+        persistLocallyNamedChapters();
         clearUnsyncedChanges();
       }
       setLastRemoteSyncTime(Date.now());
@@ -1790,23 +1831,31 @@ useEffect(() => {
   };
 
   const autoSaveLinkedChapter = (newResult: any, newCompleted?: number[]) => {
-    if (!session.currentChapterId) return;
+    const activeChapId = sessionRef.current.currentChapterId;
+    if (!activeChapId) return;
     
-    const completedToSave = newCompleted !== undefined ? newCompleted : (session.completedSegments || []);
+    const completedToSave = newCompleted !== undefined ? newCompleted : (sessionRef.current.completedSegments || []);
     
-    setChapters(prev => prev.map(c => {
-      if (c.id === session.currentChapterId) {
-        const updated = {
-          ...c,
-          result: newResult || c.result,
-          completedSegments: completedToSave,
-          timestamp: Date.now()
-        };
-        db.saveChapter(updated).catch(err => console.error("Auto-save chapter failed", err));
-        return updated;
-      }
-      return c;
-    }));
+    setChapters(prev => {
+      const next = prev.map(c => {
+        if (c.id === activeChapId) {
+          const explicitNamed = locallyNamedChaptersRef.current[c.id];
+          const safeName = (explicitNamed && explicitNamed.name) ? explicitNamed.name : c.name;
+          const updated: Chapter = {
+            ...c,
+            name: safeName,
+            result: newResult || c.result,
+            completedSegments: completedToSave,
+            timestamp: Date.now()
+          };
+          db.saveChapter(updated).catch(err => console.error("Auto-save chapter failed", err));
+          return updated;
+        }
+        return c;
+      });
+      chaptersRef.current = next;
+      return next;
+    });
   };
 
   const createSnapshot = (): HistorySnapshot => ({
@@ -2476,28 +2525,32 @@ useEffect(() => {
   };
 
   const handleSaveChapter = async (name: string, saveMode: 'new' | 'update' = 'new') => {
-    if (!session.result) return;
-    lastLocalEditTimeRef.current = Date.now();
+    const trimmedName = (name || '').trim();
+    if (!trimmedName) return;
 
     // Buộc flush toàn bộ ô textarea đang edit dở trước khi đóng gói dữ liệu
     window.dispatchEvent(new CustomEvent('app_flush_edits'));
-    (document.activeElement as HTMLElement)?.blur();
+
+    const latestSession = sessionRef.current;
+    if (!latestSession.result) return;
+    const now = Date.now();
+    lastLocalEditTimeRef.current = now;
 
     let chapterId: string;
-    if (saveMode === 'update' && session.currentChapterId) {
-      chapterId = session.currentChapterId;
+    if (saveMode === 'update' && latestSession.currentChapterId) {
+      chapterId = latestSession.currentChapterId;
     } else {
-      chapterId = `chap_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      chapterId = `chap_${now}_${Math.random().toString(36).substring(2, 7)}`;
     }
 
-    const currentSegments = session.result.segments || [];
+    const currentSegments = latestSession.result.segments || [];
     const fullNaturalText = currentSegments.map(s => s.natural || '').join('\n');
     const fullSourceText = currentSegments.map(s => s.source || '').join('\n');
     const fullDeeplText = currentSegments.map(s => s.deepl || '').join('\n');
     const fullQuickText = currentSegments.map(s => s.quick || '').join('\n');
 
     const cleanResult: TranslationResponse = {
-      ...session.result,
+      ...latestSession.result,
       segments: currentSegments,
       naturalTranslation: fullNaturalText,
       quickTrans: fullQuickText,
@@ -2506,40 +2559,50 @@ useEffect(() => {
 
     const newChapter: Chapter = {
       id: chapterId,
-      novelId: session.currentNovelId,
-      name,
-      timestamp: Date.now(),
-      inputText: fullSourceText || session.inputText,
-      deeplText: fullDeeplText || session.deeplText,
-      preEditedText: fullNaturalText || session.preEditedText,
+      novelId: latestSession.currentNovelId,
+      name: trimmedName,
+      timestamp: now,
+      inputText: fullSourceText || latestSession.inputText,
+      deeplText: fullDeeplText || latestSession.deeplText,
+      preEditedText: fullNaturalText || latestSession.preEditedText,
       result: cleanResult,
-      completedSegments: session.completedSegments
+      completedSegments: latestSession.completedSegments
     };
 
-    markLocalWorkspaceDirty();
-    await db.saveChapter(newChapter);
+    // Ghi nhận ngay tên chương do người dùng chủ động đặt để bảo vệ khỏi mọi thao tác ghi đè nền
+    deletedChapterIdsRef.current.delete(chapterId);
+    locallyNamedChaptersRef.current[chapterId] = { name: trimmedName, updatedAt: now };
+    persistDeletedIds();
+    persistLocallyNamedChapters();
+    markLocalWorkspaceDirty(now);
+
+    // Cập nhật ngay state & ref trước khi ghi IndexedDB để tránh race condition khi đang gõ/auto-save
     setChapters(prev => {
       const exists = prev.some(c => c.id === chapterId);
-      if (exists) {
-        return prev.map(c => c.id === chapterId ? newChapter : c);
-      } else {
-        return [newChapter, ...prev];
-      }
+      const next = exists
+        ? prev.map(c => c.id === chapterId ? newChapter : c)
+        : [newChapter, ...prev];
+      chaptersRef.current = next;
+      return next;
     });
+
     updateSession({ 
-      name,
+      name: trimmedName,
       currentChapterId: chapterId,
       result: cleanResult,
-      inputText: fullSourceText || session.inputText,
-      preEditedText: fullNaturalText || session.preEditedText
+      inputText: fullSourceText || latestSession.inputText,
+      preEditedText: fullNaturalText || latestSession.preEditedText
     });
+
+    await db.saveChapter(newChapter);
+
     upsertLocalHistoryOnEdit({
-      sourceText: fullSourceText || session.inputText,
+      sourceText: fullSourceText || latestSession.inputText,
       result: cleanResult,
-      completedSegments: session.completedSegments,
+      completedSegments: latestSession.completedSegments,
       chapterId,
-      chapterName: name,
-      novelId: session.currentNovelId
+      chapterName: trimmedName,
+      novelId: latestSession.currentNovelId
     });
   };
 
@@ -2668,7 +2731,9 @@ useEffect(() => {
   const handleDeleteChapter = async (id: string) => {
     markLocalWorkspaceDirty();
     deletedChapterIdsRef.current.add(id);
+    delete locallyNamedChaptersRef.current[id];
     persistDeletedIds();
+    persistLocallyNamedChapters();
     // 1. Cập nhật state UI ngay lập tức
     setChapters(prev => prev.filter(c => c.id !== id));
 
@@ -2701,14 +2766,20 @@ useEffect(() => {
 
     const now = Date.now();
     markLocalWorkspaceDirty(now);
-    const chapter = chapters.find(c => c.id === id);
+    const chapter = chaptersRef.current.find(c => c.id === id) || chapters.find(c => c.id === id);
     if (!chapter) return;
 
     const updated: Chapter = { ...chapter, name: trimmed, timestamp: now };
+    locallyNamedChaptersRef.current[id] = { name: trimmed, updatedAt: now };
+    persistLocallyNamedChapters();
 
     // 1. Cập nhật UI ngay tức thì
-    setChapters(prev => prev.map(c => c.id === id ? updated : c));
-    if (session.currentChapterId === id) {
+    setChapters(prev => {
+      const next = prev.map(c => c.id === id ? updated : c);
+      chaptersRef.current = next;
+      return next;
+    });
+    if (sessionRef.current.currentChapterId === id) {
       updateSession({ name: trimmed });
     }
 
@@ -2722,9 +2793,11 @@ useEffect(() => {
     const toDelete = chapters.filter(c => c.novelId === targetNovelId || (!c.novelId && targetNovelId === 'default'));
     for (const ch of toDelete) {
       deletedChapterIdsRef.current.add(ch.id);
+      delete locallyNamedChaptersRef.current[ch.id];
       await db.deleteChapter(ch.id);
     }
     persistDeletedIds();
+    persistLocallyNamedChapters();
     setChapters(prev => prev.filter(c => c.novelId !== targetNovelId && (targetNovelId !== 'default' || Boolean(c.novelId))));
   };
 
